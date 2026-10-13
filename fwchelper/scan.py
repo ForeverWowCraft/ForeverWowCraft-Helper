@@ -21,6 +21,8 @@ from pathlib import Path
 from . import luatable, settings as config
 
 ADDON_NAME = "ForeverWowCraftScanner"
+PLANS_ADDON = "ForeverWowCraftPlans"                 # the second addon: what the helper writes, kept through an update of the scanner
+HELPER_FILES = ("Plans.lua", "Fresh.lua", "Queue.lua")   # what the helper writes into it
 SAVED, QUEUE = "FWCS_DB", "FWCS_QUEUE"              # the addon's saved variable and its queue
 OLD_SAVED, OLD_QUEUE = "FCS_DB", "FCS_QUEUE"        # ... as the addon called them before it was renamed
 FACTIONS = ("Alliance", "Horde")
@@ -239,6 +241,22 @@ def addons_dir() -> Path:
     return wow_dir() / flavor() / "Interface" / "AddOns"
 
 
+def plans_addon_dir(dest_root: Path | None = None) -> Path:
+    """The second addon's folder: where the helper writes the routes, the lists and the freshness."""
+    return (dest_root or addons_dir()) / PLANS_ADDON
+
+
+def toc_version(folder: Path, name: str) -> tuple[int, ...] | None:
+    """The `## Version:` of an addon folder, as numbers, or None when there is no .toc."""
+    try:
+        for line in (folder / f"{name}.toc").read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("## Version:"):
+                return tuple(int(x) for x in re.findall(r"[0-9]+", line.split(":", 1)[1]))
+    except OSError:
+        pass
+    return None
+
+
 def find_saved_variables() -> list[Path]:
     """All ForeverWowCraftScanner.lua files under the flavour's WTF folder, newest first, along
     with those the addon wrote under its old name."""
@@ -358,9 +376,9 @@ def queue_file() -> Path:
 
 
 def write_queue(lists: dict[str, list[tuple[int, str]]], replace: bool = False) -> tuple[list[Path], list[str]]:
-    """Merge `lists` into addon/ForeverWowCraftScanner/Queue.lua and into the installed copy if the
-    addon is installed. Other lists are kept unless `replace`. The game reads the file at the
-    next /reload. Returns (paths written, list names now queued)."""
+    """Merge `lists` into addon/ForeverWowCraftScanner/Queue.lua and into the second addon's copy
+    when the addons are installed. Other lists are kept unless `replace`. The game reads the
+    file at the next /reload. Returns (paths written, list names now queued)."""
     repo = queue_file()
     merged = {} if replace else read_queue(repo)
     merged.update(lists)
@@ -376,7 +394,7 @@ def write_queue(lists: dict[str, list[tuple[int, str]]], replace: bool = False) 
     lines.append("}")
     text = "\n".join(lines) + "\n"
     targets = [repo]
-    installed = addons_dir() / ADDON_NAME / "Queue.lua"
+    installed = plans_addon_dir() / "Queue.lua"
     if installed.parent.is_dir():
         targets.append(installed)
     for t in targets:
@@ -384,26 +402,46 @@ def write_queue(lists: dict[str, list[tuple[int, str]]], replace: bool = False) 
     return targets, list(merged)
 
 
-def install_addon(dest_root: Path | None = None) -> Path:
-    """Copy addon/ForeverWowCraftScanner into the AddOns folder, replacing any previous copy.
-    The addon under its old name is removed (two scanners would both run), and the scans it
-    saved are carried over, see carry_over_saved_scans."""
+def install_addon(dest_root: Path | None = None, force: bool = False) -> Path:
+    """Put the two addons into the AddOns folder. The scanner, addon/ForeverWowCraftScanner, replaces
+    any previous copy, unless the copy there is newer than this helper's (CurseForge updated it)
+    and `force` is not given: then it is left as it is. The second addon, ForeverWowCraftPlans,
+    is always brought up to date (install_plans_addon). The addon under its old name is removed
+    (two scanners would both run), and the scans it saved are carried over, see
+    carry_over_saved_scans. Returns the scanner's folder."""
     src = config.ROOT / "addon" / ADDON_NAME
-    dest = (dest_root or addons_dir()) / ADDON_NAME
-    if not dest.parent.is_dir():
-        raise SystemExit(f"AddOns folder not found: {dest.parent}  (set FWC_WOW_DIR / FWC_WOW_FLAVOR; "
+    root = dest_root or addons_dir()
+    dest = root / ADDON_NAME
+    if not root.is_dir():
+        raise SystemExit(f"AddOns folder not found: {root}  (set FWC_WOW_DIR / FWC_WOW_FLAVOR; "
                          f"`where` shows what was detected)")
-    for folder in (dest, dest.parent / config.OLD_ADDON_NAME):
-        if folder.exists():
-            shutil.rmtree(folder)
-    shutil.copytree(src, dest)
-    for name in ("Plans.lua", "Fresh.lua"):           # what the helper fetched (the routes, the pipe's freshness): the addon's source has none
-        kept = config.STATE / name
-        if kept.exists():
-            shutil.copyfile(kept, dest / name)
+    old = root / config.OLD_ADDON_NAME
+    if old.exists():
+        shutil.rmtree(old)
+    have, mine = toc_version(dest, ADDON_NAME), toc_version(src, ADDON_NAME)
+    if force or not have or not mine or have <= mine:
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+    install_plans_addon(root)
     if dest_root is None:
         carry_over_saved_scans()
     return dest
+
+
+def install_plans_addon(root: Path) -> Path:
+    """The second addon, ForeverWowCraftPlans, beside the scanner: its .toc from the source, and
+    each file the helper writes (HELPER_FILES) from the copy kept in state/ when there is one,
+    else the scanner's own (the lists it comes with; no routes, no freshness). It depends on the
+    scanner and so loads after it, and its tables are the ones the scanner then has; an update
+    of the scanner from CurseForge replaces the scanner's folder and leaves this one alone."""
+    folder = root / PLANS_ADDON
+    folder.mkdir(exist_ok=True)
+    shutil.copyfile(config.ADDON_SOURCE / PLANS_ADDON / f"{PLANS_ADDON}.toc", folder / f"{PLANS_ADDON}.toc")
+    for name in HELPER_FILES:
+        kept = config.STATE / name
+        shutil.copyfile(kept if kept.exists() else config.ADDON_SOURCE / ADDON_NAME / name, folder / name)
+    return folder
 
 
 def carry_over_saved_scans(wtf: Path | None = None) -> list[Path]:

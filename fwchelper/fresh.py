@@ -43,7 +43,8 @@ def kept_file() -> Path:
 
 
 def installed_file() -> Path:
-    return scan.addons_dir() / scan.ADDON_NAME / "Fresh.lua"
+    """The second addon's copy (ForeverWowCraftPlans), which the game reads."""
+    return scan.plans_addon_dir() / "Fresh.lua"
 
 
 def write(told: dict) -> list[Path]:

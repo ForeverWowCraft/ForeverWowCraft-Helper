@@ -1,0 +1,11 @@
+## Interface: 16001, 11509, 120100
+## Title: ForeverWowCraft Plans
+## Notes: What the helper on this PC fetched for ForeverWowCraft Scanner: the routes /fwc shows, the lists to scan, and when each auction house was last scanned. Written by the helper; nothing to set. Never on CurseForge: an update of the scanner there leaves this folder alone.
+## Author: ForeverWowCraft
+## Version: 1.4.0
+## Dependencies: ForeverWowCraftScanner
+## IconTexture: Interface\AddOns\ForeverWowCraftScanner\icon
+
+Plans.lua
+Fresh.lua
+Queue.lua

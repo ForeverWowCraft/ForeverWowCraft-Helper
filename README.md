@@ -16,7 +16,7 @@ It is plain Python 3.10+ with nothing to install, and a WoW addon. MIT licence.
 
 ```
 python fwch.py where            what was found on this PC
-python fwch.py install-addon    copy the addon into the game
+python fwch.py install-addon    copy the two addons into the game (--force: over a newer scanner)
 python fwch.py status           what the saved scans hold
 python fwch.py send --watch     send every scan, after each SAVE in game
 python fwch.py autostart        have send.cmd start, minimised, when you log on (--off undoes it)
@@ -119,6 +119,12 @@ the pipe takes one and refuses the rest as not needed; the helper sends none it 
 ("not needed: ... was scanned by someone 4 min ago"), and every five minutes writes into the
 addon (`Fresh.lua`) when each house was last scanned, so that the FULL / SCAN box stays away
 while a scan is not needed.
+
+Everything the helper writes into the game (the routes, the lists, the freshness) goes into a
+second, tiny addon, **ForeverWowCraft Plans**, which `install-addon` puts beside the scanner and
+which loads after it. An update of the scanner from CurseForge replaces the scanner's whole
+folder and touches none of it. `install-addon` leaves a scanner newer than its own (CurseForge's)
+in place, and `--force` puts its own in anyway.
 
 ## In game: scanning
 

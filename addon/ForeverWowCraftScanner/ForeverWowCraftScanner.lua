@@ -47,6 +47,7 @@ ns.BRAND = { gold = "f2b51d", steel = "8fb0e6", navy = "0b1a3a",
 -- The project's Discord, for feedback and help with the addon and the site (13 Oct 2026): the
 -- link the site has (SITE_DISCORD in the core's config), shown by the /fwc window's Feedback button
 ns.DISCORD = "https://discord.gg/XPt2JUCxAg"
+ns.HELPER_URL = "https://www.foreverwowcraft.com/helper"   -- the helper, for an install without one (Window.lua, ShowHelper)
 local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
 local function Print(msg) print(PREFIX .. msg) end
 
@@ -1071,6 +1072,9 @@ loader:RegisterEvent("AUCTION_HOUSE_CLOSED")
 loader:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
 loader:SetScript("OnEvent", function(_, event, isInitialLogin)
   if event == "PLAYER_ENTERING_WORLD" then
+    if isInitialLogin and not FWCS_PLANS_WRITTEN then      -- an install without a helper (CurseForge): the helper stamps FWCS_PLANS_WRITTEN when it writes
+      Print("the helper is not on this PC: /fwc says what it does and where to get it. What the addon records stays here until then.")
+    end
     if isInitialLogin and C_AuctionHouse and C_AuctionHouse.SendSearchQuery then RingAtLogin() end
     return
   end

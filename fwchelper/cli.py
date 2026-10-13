@@ -1,7 +1,7 @@
 """The helper's commands: `python fwch.py <command>`.
 
   where          the game folder, the client, the AddOns folder and the scan files that were found
-  install-addon  copy the addon into the game
+  install-addon  copy the two addons into the game
   status         what the addon's saved scans hold
   send           send the latest scan through the pipe; with --watch, after every SAVE in game
   autostart      have send.cmd start when you log on to Windows (--off undoes it)
@@ -47,13 +47,23 @@ def where() -> None:
               "(e.g. _classic_beta_), or run setup.ps1, which asks.")
 
 
-def install_addon(addons_dir: Path | None = None) -> Path:
-    had_old = addons_dir is None and (scan.addons_dir() / settings.OLD_ADDON_NAME).is_dir()
-    dest = scan.install_addon(addons_dir)
+def install_addon(addons_dir: Path | None = None, force: bool = False) -> Path:
+    root = addons_dir or scan.addons_dir()
+    had_old = addons_dir is None and (root / settings.OLD_ADDON_NAME).is_dir()
+    have, mine = scan.toc_version(root / scan.ADDON_NAME, scan.ADDON_NAME), scan.toc_version(settings.ADDON_SOURCE / scan.ADDON_NAME, scan.ADDON_NAME)
+    dest = scan.install_addon(addons_dir, force)
     if had_old:
-        print(f"Removed the addon under its old name ({settings.OLD_ADDON_NAME}); its saved scans were carried over.\n"
-              "The game has to be restarted, not only reloaded, to see an addon under a new name.")
-    print(f"Installed {settings.NAME} Scanner to {dest}\nRestart the game or /reload so it loads.")
+        print(f"Removed the addon under its old name ({settings.OLD_ADDON_NAME}); its saved scans were carried over.")
+        print("The game has to be restarted, not only reloaded, to see an addon under a new name.")
+    dotted = lambda v: ".".join(str(x) for x in v)   # noqa: E731
+    if have and mine and have > mine and not force:
+        print(f"Left {settings.NAME} Scanner as it is in {dest}: the one installed ({dotted(have)}) is newer than this helper's "
+              f"({dotted(mine)}). --force puts this helper's in anyway.")
+    else:
+        print(f"Installed {settings.NAME} Scanner to {dest}")
+    print(f"Installed {settings.NAME} Plans beside it, {scan.plans_addon_dir(root)}: what the helper fetches goes there, "
+          "and stays through an update of the scanner.")
+    print("Restart the game or /reload so they load.")
     return dest
 
 
@@ -371,8 +381,9 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="fwch", description=f"{settings.NAME} Helper {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("where", help="show the detected WoW folder, client flavour, AddOns folder and scan files")
-    p = sub.add_parser("install-addon", help="copy the addon into the WoW AddOns folder")
+    p = sub.add_parser("install-addon", help="copy the two addons into the WoW AddOns folder")
     p.add_argument("--addons-dir", help="another AddOns folder")
+    p.add_argument("--force", action="store_true", help="put this helper's scanner in even over a newer one (CurseForge's)")
     p = sub.add_parser("status", help="what the addon's saved scans hold")
     p.add_argument("--path", help="a scan file (default: the newest found)")
     p.add_argument("--realm")
@@ -396,7 +407,7 @@ def main(argv=None) -> None:
         if a.cmd == "where":
             where()
         elif a.cmd == "install-addon":
-            install_addon(Path(a.addons_dir) if a.addons_dir else None)
+            install_addon(Path(a.addons_dir) if a.addons_dir else None, a.force)
         elif a.cmd == "status":
             status(Path(a.path) if a.path else None, a.realm, a.faction)
         elif a.cmd == "send":

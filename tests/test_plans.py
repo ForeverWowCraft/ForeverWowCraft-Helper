@@ -196,13 +196,14 @@ def test_routes_are_fetched_written_and_kept():
     site, srv, root = _site({"stonespine--horde": doc}, listed)
     game = Path(tempfile.mkdtemp())
     (game / scan.ADDON_NAME).mkdir()
+    (game / scan.PLANS_ADDON).mkdir()
     saved = _saved()
     kept = settings.STATE, scan.addons_dir, scan.find_saved_variables, plans.site_url
     settings.STATE, scan.addons_dir, scan.find_saved_variables = Path(tempfile.mkdtemp()) / "state", (lambda: game), (lambda: [saved])
     try:
         docs, written = plans.refresh(site)
         assert [d["house"] for d in docs] == ["stonespine--horde"]                    # the character's house, not the other
-        assert written == [settings.STATE / "Plans.lua", game / scan.ADDON_NAME / "Plans.lua"]
+        assert written == [settings.STATE / "Plans.lua", game / scan.PLANS_ADDON / "Plans.lua"]
         assert luatable.parse(written[1].read_text(encoding="utf-8"))["FWCS_PLANS"]["stonespine--horde"]["items"][2589] == "Linen Cloth"
         # nothing new: nothing fetched or written, but the stamp moves, so the addon sees the helper runs
         old = NOW - 3600
@@ -213,7 +214,7 @@ def test_routes_are_fetched_written_and_kept():
         # installing the addon again does not lose the routes
         assert "stonespine--horde" not in (settings.ROOT / "addon" / scan.ADDON_NAME / "Plans.lua").read_text(encoding="utf-8")
         scan.install_addon(game)
-        assert "stonespine--horde" in (game / scan.ADDON_NAME / "Plans.lua").read_text(encoding="utf-8")
+        assert "stonespine--horde" in (game / scan.PLANS_ADDON / "Plans.lua").read_text(encoding="utf-8")
         # a newer build of the site is fetched
         listed[0]["generated"] = NOW + 60
         (root / "data" / "houses.json").write_text(json.dumps({"houses": listed}), encoding="utf-8")

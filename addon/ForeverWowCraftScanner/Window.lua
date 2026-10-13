@@ -195,6 +195,10 @@ local function Build()
   win.feedback = Button(win, 84, "Feedback")               -- the project's Discord (ShowFeedback)
   win.feedback:SetPoint("RIGHT", close, "LEFT", 2, 0)
   win.feedback:SetScript("OnClick", function() ns.ShowFeedback() end)
+  win.gethelper = Button(win, 110, "Get the helper")        -- shown while no helper has written to the addon (ShowHelper)
+  win.gethelper:SetPoint("RIGHT", win.feedback, "LEFT", 2, 0)
+  win.gethelper:SetScript("OnClick", function() ns.ShowHelper() end)
+  win.gethelper:Hide()
 
   -- the first row: a button per profession the routes cover, made as they are known (DrawProfessions)
   win.profs = {}
@@ -411,15 +415,15 @@ local function ShowCopyBox(whole)
   box.edit:HighlightText()
 end
 
--- The project's Discord, for feedback and help (ns.DISCORD): the game opens no browser, so
--- the link is shown selected, for Ctrl+C.
-local feedbackBox
-function ns.ShowFeedback()
+-- A link shown selected, for Ctrl+C (the game opens no browser): the project's Discord for
+-- feedback and help (ns.DISCORD), and the helper's page for an install without one (ns.HELPER_URL).
+local linkBox
+function ns.ShowLink(title, help, link)
   if not win then return end
-  local box = feedbackBox
+  local box = linkBox
   if not box then
     box = CreateFrame("Frame", nil, win, "BackdropTemplate")
-    feedbackBox = box
+    linkBox = box
     box:SetSize(440, 110)
     box:SetPoint("CENTER", win, "CENTER", 0, 60)
     box:SetFrameStrata("DIALOG")
@@ -429,31 +433,42 @@ function ns.ShowFeedback()
     box:SetBackdropColor(0.05, 0.05, 0.08, 0.98)
     box.title = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     box.title:SetPoint("TOPLEFT", 12, -10)
-    box.title:SetText("Feedback and help")
     box.help = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     box.help:SetPoint("TOPLEFT", 12, -32)
     box.help:SetWidth(440 - 24)
     box.help:SetJustifyH("LEFT")
     box.help:SetWordWrap(true)
-    box.help:SetText("Something wrong, or an idea? Say so on the project's Discord. "
-      .. "Ctrl+C copies the link (it is selected); paste it into your browser.")
     box.edit = CreateFrame("EditBox", nil, box, "InputBoxTemplate")
     box.edit:SetSize(440 - 36, 24)
     box.edit:SetPoint("BOTTOMLEFT", 18, 12)
     box.edit:SetAutoFocus(false)
     box.edit:SetScript("OnEscapePressed", function() box:Hide() end)
     box.edit:SetScript("OnTextChanged", function(self)        -- the link is to copy, not to edit
-      if self:GetText() ~= ns.DISCORD then self:SetText(ns.DISCORD); self:HighlightText() end
+      if self:GetText() ~= box.link then self:SetText(box.link); self:HighlightText() end
     end)
     box.edit:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     local close = CreateFrame("Button", nil, box, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -2, -2)
     win:HookScript("OnHide", function() box:Hide() end)
   end
-  box.edit:SetText(ns.DISCORD)
+  box.link = link
+  box.title:SetText(title)
+  box.help:SetText(help)
+  box.edit:SetText(link)
   box:Show()
   box.edit:SetFocus()
   box.edit:HighlightText()
+end
+
+function ns.ShowFeedback()
+  ns.ShowLink("Feedback and help", "Something wrong, or an idea? Say so on the project's Discord. "
+    .. "Ctrl+C copies the link (it is selected); paste it into your browser.", ns.DISCORD)
+end
+
+function ns.ShowHelper()
+  ns.ShowLink("The helper", "The helper runs beside the game, minimised: it sends the prices the addon records and fetches "
+    .. "the routes /fwc shows. Free, for Windows; it installs the addon too. Ctrl+C copies the address (it is selected); "
+    .. "paste it into your browser.", ns.HELPER_URL)
 end
 
 local function Row(i)
@@ -836,6 +851,7 @@ Refresh = function()
   if not win or not win:IsShown() then return end
   CountBags()
   NoteSkills()
+  if FWCS_PLANS_WRITTEN then win.gethelper:Hide() else win.gethelper:Show() end
   local house = House()
   local chosen = house and Chosen(house)
   ShowRange(chosen and chosen.plan ~= nil)
