@@ -1,0 +1,474 @@
+-- Where things are, and an arrow there. The client has no list of anvils, trainers or vendors.
+-- The addon comes with a seed of them (Seed.lua, FWCS_SEED: the vanilla world's, from the
+-- VMaNGOS database, with each map's size in yards) and notes them as the character meets them:
+-- a trainer when its window opens (its profession told from what it teaches), a vendor when a
+-- merchant opens (with which of the routes' items it sells), the auctioneer when the auction
+-- house opens, and a crafting station (Anvil, Forge) when the profession panel says that
+-- requirement is met where the character stands. Each is a map, a position and a kind, the
+-- noted ones kept for the whole account (FWCS_DB.__places), nothing personal in them. The Make
+-- button asks for the nearest one of what it needs and the arrow points there: TomTom's when
+-- that addon is there, else this one, a texture turned by the bearing less the character's
+-- facing, dragged where wanted, right-clicked away.
+--
+-- ns.Bearing asks the game nothing, for the tests.
+
+local _, ns = ...
+local House, Tracked = ns.inv.House, ns.inv.Tracked
+
+local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
+
+-- ================================================================ the map
+-- where the character stands: map, x, y (fractions of the map), or nil (an instance, no map)
+local function Here()
+  if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return end
+  local ok, map = pcall(C_Map.GetBestMapForUnit, "player")
+  if not ok or not map then return end
+  local ok2, pos = pcall(C_Map.GetPlayerMapPosition, map, "player")
+  if not ok2 or type(pos) ~= "table" then return end
+  local x, y = pos.x, pos.y
+  if pos.GetXY then x, y = pos:GetXY() end
+  if not (x and y) or (x == 0 and y == 0) then return end
+  return map, x, y
+end
+ns.Here = Here
+
+-- a map's size in yards { width, height }, for distances: the seed's, else the client's; nil
+-- when neither can say
+local sizes = {}
+local function Size(map)
+  if sizes[map] == nil then
+    sizes[map] = false
+    local seed = FWCS_SEED and FWCS_SEED.sizes and FWCS_SEED.sizes[map]
+    if seed and seed[1] and seed[2] then sizes[map] = { seed[1], seed[2] } end
+    if C_Map and C_Map.GetMapWorldSize then
+      local ok, w, h = pcall(C_Map.GetMapWorldSize, map)
+      if ok and w and h and w > 0 and h > 0 then sizes[map] = { w, h } end
+    end
+    if not sizes[map] and C_Map and C_Map.GetWorldPosFromMapPos and CreateVector2D then
+      local ok, _, a = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(0, 0))
+      local ok2, _, b = pcall(C_Map.GetWorldPosFromMapPos, map, CreateVector2D(1, 1))
+      if ok and ok2 and a and b and a.x and b.x then sizes[map] = { math.abs(b.y - a.y), math.abs(b.x - a.x) } end
+    end
+  end
+  return sizes[map] or nil
+end
+
+-- yards between two points of a map, or nil without the map's size
+local function Distance(map, x1, y1, x2, y2)
+  local size = Size(map)
+  if not size then return nil end
+  local dx, dy = (x2 - x1) * size[1], (y2 - y1) * size[2]
+  return math.sqrt(dx * dx + dy * dy)
+end
+
+-- The way to turn an arrow that points up so that it points from (x1, y1) to (x2, y2), for a
+-- character facing `facing` (radians, 0 north, turning left positive, as GetPlayerFacing):
+-- radians, turning left positive, as SetRotation takes. Map x grows east, y grows south;
+-- `size` scales the two when the map is not square.
+function ns.Bearing(x1, y1, x2, y2, facing, size)
+  local dx, dy = (x2 - x1) * (size and size[1] or 1), (y2 - y1) * (size and size[2] or 1)
+  local a = math.atan2(dx, -dy)                -- right of north, turning right positive
+  if math.abs(a) > 7 then a = math.rad(a) end  -- a client whose atan2 gives degrees
+  return -a - (facing or 0)
+end
+
+local function MapName(map)
+  if C_Map and C_Map.GetMapInfo then
+    local ok, info = pcall(C_Map.GetMapInfo, map)
+    if ok and type(info) == "table" and info.name then return info.name end
+  end
+  return "map " .. tostring(map)
+end
+
+-- ================================================================ the places
+-- FWCS_DB.__places: { { map, x, y, kind, what, name, t, sells = { item, ... } }, ... }
+-- kind "station": what = the requirement's name (Anvil, Forge); "trainer": what = the
+-- profession; "vendor": what = the merchant's name, sells = the routes' items it sells;
+-- "auction": the auctioneer. One place of a kind and what within 40 yards: seen again.
+local function Places()
+  FWCS_DB.__places = FWCS_DB.__places or {}
+  return FWCS_DB.__places
+end
+
+-- the seed's places, as tables like the noted ones, made once: a row of FWCS_SEED.places is
+-- { map, x, y, kind, what, name, extra }, extra how far a trainer's rank training reaches
+-- (upto: 75 to 300; 0 for a specialist who teaches recipes only) or the items a vendor sells
+local seeded, seededFrom                  -- made from the rows once; again when the rows are another table
+local function Seeded()
+  local rows = FWCS_SEED and FWCS_SEED.places or {}
+  if seeded and seededFrom == rows then return seeded end
+  seeded, seededFrom = {}, rows
+  for _, r in ipairs(rows) do
+    local p = { map = r[1], x = r[2], y = r[3], kind = r[4], what = r[5], name = r[6], seed = true }
+    if type(r[7]) == "number" then p.upto = r[7] elseif type(r[7]) == "table" then p.sells = r[7] end
+    table.insert(seeded, p)
+  end
+  return seeded
+end
+
+-- every place: the seed's and the noted ones
+local function All()
+  local out = {}
+  for _, p in ipairs(Seeded()) do table.insert(out, p) end
+  for _, p in ipairs(Places()) do table.insert(out, p) end
+  return out
+end
+
+local function In(list, item)
+  for _, v in ipairs(list or {}) do if v == item then return true end end
+  return false
+end
+
+local function Note(kind, what, extra)
+  local map, x, y = Here()
+  if not map then return end
+  for _, p in ipairs(Places()) do
+    if p.map == map and p.kind == kind and p.what == what then
+      local d = Distance(map, p.x, p.y, x, y)
+      if (d and d < 40) or (not d and math.abs(p.x - x) < 0.01 and math.abs(p.y - y) < 0.01) then
+        p.t = time()
+        for k, v in pairs(extra or {}) do
+          if k == "sells" then
+            p.sells = p.sells or {}
+            for _, item in ipairs(v) do if not In(p.sells, item) then table.insert(p.sells, item) end end
+          else
+            p[k] = v
+          end
+        end
+        return p
+      end
+    end
+  end
+  local p = { map = map, x = x, y = y, kind = kind, what = what, t = time() }
+  for k, v in pairs(extra or {}) do p[k] = v end
+  table.insert(Places(), p)
+  return p
+end
+ns.NotePlace = Note
+
+local function Npc() return UnitName and UnitName("npc") or nil end
+
+-- the names a profession goes by, spelt plainly: the routes' and the client's
+local function Spellings(plan)
+  local out = { [ns.inv.Spelt(plan.profession)] = true, [ns.inv.Spelt(ns.Title(plan.profession))] = true }
+  if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillDisplayName and plan.skill_line then
+    local ok, shown = pcall(C_TradeSkillUI.GetTradeSkillDisplayName, plan.skill_line)
+    if ok and shown and shown ~= "" then out[ns.inv.Spelt(shown)] = true end
+  end
+  return out
+end
+
+-- a trainer's window: its profession from the skill its services ask for, or from the routes'
+-- recipes among them; what of the routes it teaches is kept, by name. How far it teaches
+-- (upto) is its rank training, told by the service's name (the seed's, in every language:
+-- "Expert Engineer" reaches 225); with no rank among the services, the highest skill asked for
+-- (the old way, which counted a specialist's recipes: Oglethorpe teaches no rank, and his
+-- gnomish recipes at 240 made him the trainer for Expert, 12 Oct 2026)
+local function NoteTrainer()
+  local house = House()
+  if not (house and GetNumTrainerServices and GetTrainerServiceInfo) then return end
+  local recipes, spellings = {}, {}
+  for _, plan in pairs(house.plans or {}) do
+    spellings[plan.profession] = Spellings(plan)
+    for _, step in ipairs(plan.steps or {}) do recipes[ns.RecipeName(step)] = plan.profession end
+  end
+  local ranks = FWCS_SEED and FWCS_SEED.ranks or {}
+  local votes, teaches, upto, ranked = {}, {}, 0, 0
+  for i = 1, GetNumTrainerServices() do
+    local name, sub = GetTrainerServiceInfo(i)
+    local reach = name and (ranks[name] or (sub and (ranks[sub .. " " .. name] or ranks[name .. " " .. sub])))
+    if reach and reach > ranked then ranked = reach end
+    if name and recipes[name] then
+      votes[recipes[name]] = (votes[recipes[name]] or 0) + 1
+      table.insert(teaches, name)
+    end
+    if GetTrainerServiceSkillReq then
+      local skill, level = GetTrainerServiceSkillReq(i)
+      if skill and skill ~= "" then
+        local spelt = ns.inv.Spelt(skill)
+        for profession, names in pairs(spellings) do
+          if names[spelt] then votes[profession] = (votes[profession] or 0) + 1 end
+        end
+        if type(level) == "number" and level > upto then upto = level end     -- the highest skill its teaching asks for
+      end
+    end
+  end
+  local best, n = nil, 0
+  for profession, v in pairs(votes) do if v > n then best, n = profession, v end end
+  if best then Note("trainer", best, { name = Npc(), teaches = teaches, upto = ranked > 0 and ranked or (upto > 0 and upto or nil) }) end
+end
+
+-- a merchant: which of the routes' items it sells
+local function NoteVendor()
+  if not (GetMerchantNumItems and GetMerchantItemLink) then return end
+  local tracked, sells = Tracked(), {}
+  for i = 1, GetMerchantNumItems() do
+    local link = GetMerchantItemLink(i)
+    local item = link and tonumber(link:match("item:(%d+)"))
+    if item and tracked[item] and not In(sells, item) then table.insert(sells, item) end
+  end
+  if #sells > 0 then Note("vendor", Npc() or "?", { name = Npc(), sells = sells }) end
+end
+
+-- The nearest place of a kind: of `what` when given, selling `item` when given, teaching as
+-- far as `upto` when given (a trainer that says how far). Returns the place, the yards to it
+-- (nil when the map's size is unknown), and whether it is on this map (else the one seen last,
+-- anywhere; the seed's count as seen first).
+-- the character's faction, when the client says; a seed place in the other faction's own zone
+-- (FWCS_SEED.sides) is not for it. What was noted in person was reached, and counts
+local function Mine()
+  local f = UnitFactionGroup and UnitFactionGroup("player")
+  if f == "Alliance" or f == "Horde" then return f end
+end
+local function Reachable(p, mine)
+  if not p.seed or not mine then return true end
+  local side = FWCS_SEED and FWCS_SEED.sides and FWCS_SEED.sides[p.map]
+  return side == nil or side == mine
+end
+
+function ns.NearestPlace(kind, what, item, upto)
+  local map, x, y = Here()
+  local mine = Mine()
+  -- asked how far (a rank to train): a trainer that says it teaches that far comes first, on
+  -- this map or another; one that does not say (noted before the addon kept that, 11 Oct
+  -- 2026: it led to the apprentice trainer) is a last resort; one that says 0 (a specialist,
+  -- recipes only) never
+  local best, bestD, other, maybe, maybeD, maybeOther
+  for _, p in ipairs(All()) do
+    if p.kind == kind and (what == nil or p.what == what) and (item == nil or In(p.sells, item)) and Reachable(p, mine) then
+      local fits = upto == nil or (p.upto ~= nil and p.upto >= upto)
+      local unsure = upto ~= nil and p.upto == nil
+      if fits or unsure then
+        if map and p.map == map then
+          local d = Distance(map, p.x, p.y, x, y) or (math.abs(p.x - x) + math.abs(p.y - y)) * 100000
+          if fits then
+            if not best or d < bestD then best, bestD = p, d end
+          elseif not maybe or d < maybeD then
+            maybe, maybeD = p, d
+          end
+        elseif fits then
+          if not other or (p.t or 0) > (other.t or 0) then other = p end
+        elseif not maybeOther or (p.t or 0) > (maybeOther.t or 0) then
+          maybeOther = p
+        end
+      end
+    end
+  end
+  if best then return best, Distance(map, best.x, best.y, x, y), true end
+  if other then return other, nil, false end
+  if maybe then return maybe, Distance(map, maybe.x, maybe.y, x, y), true end
+  if maybeOther then return maybeOther, nil, false end
+end
+
+-- ================================================================ the arrow
+local arrow, target, dismissed        -- target = { map, x, y, title, note, profession } or { none = true, ... }; dismissed: by a right-click, until the target changes
+local ARROW, QUESTION, HAMMER = "Interface\\Minimap\\MinimapArrow", "Interface\\Icons\\INV_Misc_QuestionMark", "Interface\\Icons\\INV_Hammer_20"
+
+-- the profession served, the title (less the profession's name when it starts with it: "Tailoring
+-- trainer: X" under "Tailoring" reads "Trainer: X"), the way (no line when it is here), and the
+-- note (what the Make button says) in brackets
+local function Describe(d, here)
+  if not target then return "" end
+  local lines = {}
+  local title = target.title
+  if target.profession then
+    table.insert(lines, target.profession)
+    local rest = title:match("^" .. target.profession:gsub("%p", "%%%0") .. " (.+)$")
+    if rest then title = rest:sub(1, 1):upper() .. rest:sub(2) end
+  end
+  table.insert(lines, title)
+  if target.none then                                                     -- nothing to point at: no way to say
+  elseif not here then table.insert(lines, "in " .. MapName(target.map))
+  elseif d and d >= 10 then table.insert(lines, string.format("%d yd", math.floor(d + 0.5))) end
+  if target.note then table.insert(lines, "(" .. target.note .. ")") end
+  if target.aside then                                                    -- the note: folded to its title; a click opens it
+    if ns.Settings().asideOpen then table.insert(lines, "|cffb0b0b0v " .. target.aside.text .. ": " .. (target.aside.detail or "") .. "|r")
+    else table.insert(lines, "|cffb0b0b0> " .. target.aside.text .. "|r") end
+  end
+  return table.concat(lines, "\n")
+end
+
+-- the arrow's picture: the arrow; a question mark when there is nothing to point at; a
+-- hammer when the words are something to make here
+local function Symbol(which)
+  if arrow.symbol == which then return end
+  arrow.symbol = which
+  arrow.tex:SetTexture(which == "none" and QUESTION or which == "make" and HAMMER or ARROW)
+  if which == "arrow" then arrow.tex:SetTexCoord(0, 1, 0, 1) else arrow.tex:SetTexCoord(0.08, 0.92, 0.08, 0.92); arrow.tex:SetRotation(0) end
+end
+
+local function Update()
+  if not (arrow and target) then return end
+  if target.none then
+    Symbol(target.symbol or "none")
+    arrow.tex:Show()
+    arrow.text:SetText(Describe(nil, true))
+    return
+  end
+  Symbol("arrow")
+  local map, x, y = Here()
+  if not map then
+    arrow.tex:Hide()
+    arrow.text:SetText(Describe(nil, true))           -- no way to say here (no map): the words, and the note
+    return
+  end
+  if map ~= target.map then
+    arrow.tex:Hide()
+    arrow.text:SetText(Describe(nil, false))
+    return
+  end
+  arrow.tex:Show()
+  local facing = GetPlayerFacing and GetPlayerFacing() or 0
+  arrow.tex:SetRotation(ns.Bearing(x, y, target.x, target.y, facing, Size(map)))
+  arrow.text:SetText(Describe(Distance(map, x, y, target.x, target.y), true))
+end
+
+-- where the arrow sits: where it was dragged to, kept across reloads and logins (testers lost
+-- it at every reload, 12 Oct 2026), else the top of the screen, clear of the auction house and
+-- the profession window
+local function Place()
+  local pos = ns.Settings().arrowPos
+  arrow:ClearAllPoints()
+  if pos then arrow:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4]) else arrow:SetPoint("TOP", UIParent, "TOP", 0, -120) end
+end
+
+local function Build()
+  arrow = CreateFrame("Frame", "ForeverWowCraftArrow", UIParent)
+  arrow:SetSize(56, 56)
+  Place()
+  arrow:SetFrameStrata("HIGH")                       -- above the house and the profession window, when they do reach it
+  arrow:SetMovable(true)
+  arrow:EnableMouse(true)
+  if arrow.SetHitRectInsets then arrow:SetHitRectInsets(-40, -40, 0, -110) end   -- the words under it take clicks too (12 Oct 2026: a click on the note did nothing)
+  arrow:RegisterForDrag("LeftButton")
+  arrow:SetScript("OnDragStart", function(a) a:StartMoving(); a.moved = true end)
+  arrow:SetScript("OnDragStop", function(a)
+    a:StopMovingOrSizing()
+    local point, _, relPoint, x, y = a:GetPoint()
+    ns.Settings().arrowPos = { point, relPoint, x, y }
+  end)
+  arrow:SetScript("OnMouseUp", function(a, b)
+    if b == "RightButton" then dismissed = true; arrow:Hide()
+    elseif b == "LeftButton" and not rawget(a, "moved") and target and target.aside then   -- a click (no drag): the note opened or folded
+      local s = ns.Settings()
+      s.asideOpen = not s.asideOpen
+      Update()
+    end
+    a.moved = nil
+  end)
+  arrow:SetScript("OnEnter", function()
+    GameTooltip:SetOwner(arrow, "ANCHOR_RIGHT")
+    GameTooltip:AddLine("ForeverWowCraft: the way there")
+    GameTooltip:AddLine("Drag to move (it stays there). Click to open or fold the note under it. Right-click to put away (the Make button brings it back). /fwcs arrow off turns it off, /fwcs arrow reset puts it back at the top.", 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  arrow:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  arrow.tex = arrow:CreateTexture(nil, "ARTWORK")
+  arrow.tex:SetAllPoints()
+  arrow.tex:SetTexture("Interface\\Minimap\\MinimapArrow")
+  arrow.text = arrow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  arrow.text:SetPoint("TOP", arrow, "BOTTOM", 0, -2)
+  arrow.text:SetJustifyH("CENTER")
+  local since = 0
+  arrow:SetScript("OnUpdate", function(_, dt)
+    since = since + (dt or 0)
+    if since < 0.1 then return end
+    since = 0
+    Update()
+  end)
+  arrow:Hide()
+end
+
+local tomtom                          -- TomTom's waypoint, to take back
+local function ViaTomTom(place, title)
+  if not (TomTom and TomTom.AddWaypoint) then return false end
+  if tomtom and TomTom.RemoveWaypoint then pcall(TomTom.RemoveWaypoint, TomTom, tomtom) end
+  local ok, uid = pcall(TomTom.AddWaypoint, TomTom, place.map, place.x, place.y, { title = "ForeverWowCraft: " .. title, persistent = false, crazy = true })
+  tomtom = ok and uid or nil
+  return ok
+end
+
+-- the arrow to a place, with a title and a note under it (what the Make button says);
+-- `again` brings back one put away
+function ns.SetArrow(place, title, again, note, profession, symbol)
+  if ns.Settings().arrow == false then return end
+  if target and target.place == place and target.title == title and not again then
+    if target.note ~= note or target.profession ~= profession or target.symbol ~= symbol then target.note, target.profession, target.symbol = note, profession, symbol; Update() end
+    if not dismissed and arrow and not arrow:IsShown() then arrow:Show() end
+    return
+  end
+  if place then
+    target = { place = place, map = place.map, x = place.x, y = place.y, title = title, note = note, profession = profession }
+  else
+    target = { none = true, title = title, note = note, profession = profession, symbol = symbol }   -- nothing to point at: the words, under a question mark or a hammer
+  end
+  dismissed = false
+  if tomtom and TomTom and TomTom.RemoveWaypoint then pcall(TomTom.RemoveWaypoint, TomTom, tomtom); tomtom = nil end
+  if place and ViaTomTom(place, title) then return end
+  if not arrow then Build() end
+  arrow:Show()
+  Update()
+end
+
+-- the note under the arrow, { text, detail }, or nil for none
+function ns.SetArrowAside(aside)
+  if not target then return end
+  if (target.aside and target.aside.text or nil) ~= (aside and aside.text or nil) or (target.aside and target.aside.detail or nil) ~= (aside and aside.detail or nil) then
+    target.aside = aside
+    Update()
+  end
+end
+
+function ns.ClearArrow()
+  target = nil
+  if tomtom and TomTom and TomTom.RemoveWaypoint then pcall(TomTom.RemoveWaypoint, TomTom, tomtom); tomtom = nil end
+  if arrow then arrow:Hide() end
+end
+
+-- /fwcs arrow: where the arrow points; `on` and `off` set it. /fwcs places: what has been seen
+function ns.ArrowCommand(arg)
+  local s = ns.Settings()
+  if arg == "off" then
+    s.arrow = false
+    ns.ClearArrow()
+    print(PREFIX .. "the arrow is off (/fwcs arrow on brings it back)")
+  elseif arg == "on" then
+    s.arrow = nil
+    print(PREFIX .. "the arrow is on: the Make button points it at what it needs")
+  elseif arg == "reset" then
+    s.arrowPos = nil
+    if arrow then Place() end
+    print(PREFIX .. "the arrow is back at the top of the screen")
+  elseif s.arrow == false then
+    print(PREFIX .. "the arrow is off: /fwcs arrow on brings it back")
+  elseif not target then
+    print(PREFIX .. "the arrow points at nothing yet: the Make button sets it when the step needs a trainer, a vendor, an auctioneer or a crafting station")
+  else
+    local map, x, y = Here()
+    local d = not target.none and map and map == target.map and Distance(map, x, y, target.x, target.y)
+    local where = target.none and nil or (map and map ~= target.map) and ("in " .. MapName(target.map)) or d and string.format("%d yd", math.floor(d + 0.5)) or nil
+    print(PREFIX .. (target.none and "the arrow shows: " or "the arrow points at ") .. target.title .. (where and (", " .. where) or "")
+      .. (tomtom and " (as a TomTom waypoint)" or "")
+      .. (dismissed and " (put away by a right-click: the Make button brings it back)" or "")
+      .. ". /fwcs arrow off turns it off.")
+  end
+end
+function ns.PlacesCommand()
+  local counts, seed = {}, 0
+  for _, p in ipairs(Places()) do counts[p.kind] = (counts[p.kind] or 0) + 1 end
+  for _ in ipairs(Seeded()) do seed = seed + 1 end
+  print(PREFIX .. string.format("places seen: %d trainers, %d vendors, %d auctioneers, %d crafting stations, noted as you meet them; and %d that the addon came with.",
+    counts.trainer or 0, counts.vendor or 0, counts.auction or 0, counts.station or 0, seed))
+end
+
+local frame = CreateFrame("Frame")
+for _, event in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE", "AUCTION_HOUSE_SHOW" }) do
+  pcall(frame.RegisterEvent, frame, event)
+end
+frame:SetScript("OnEvent", function(_, event)
+  if event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then pcall(NoteTrainer)
+  elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then pcall(NoteVendor)
+  elseif event == "AUCTION_HOUSE_SHOW" then Note("auction", "", { name = Npc() }) end
+end)
+
+ns.places = { Places = Places, All = All, Distance = Distance, Size = Size, MapName = MapName }

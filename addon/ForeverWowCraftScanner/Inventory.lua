@@ -1,0 +1,264 @@
+-- What the character has: bags, bank, mail and the character's own auctions, and the
+-- character's skills. Counted here and kept, for the account, in the saved variable:
+--   FWCS_DB.__chars["<house's realm>|<name>"] = { name, realm, house, faction, t,
+--       bankSeen, mailSeen, ahSeen,
+--       items = { [itemID] = { in bags, in the bank, in the mail, in auctions } },
+--       skills = { [skill line] = rank },
+--       profession = the one last shown, picked = the one the player picked from the list,
+--       from = { [profession] = skill to plan from, when the player said one },
+--       upto = { [profession] = skill to plan up to }, also = { [profession] = second one, false for none },
+--       budget = { copper = gold to spend when typed (nil: the bags), on = true when the route is cut there } }
+-- Bags are read slot by slot whenever they change. The bank, the mailbox and the character's
+-- own auctions can only be read while each is open (the game has no other way to them), so
+-- those counts are from the last visit (bankSeen, mailSeen, ahSeen). Only items a profession
+-- uses or makes are kept (the lists of Queue.lua and the routes' own).
+-- Nothing of this is sent anywhere: the helper sends auction prices only.
+--
+-- Window.lua draws from it, through ns.inv.
+
+local _, ns = ...
+
+local PLACES = { "bags", "the bank", "the mail", "auctions" }     -- items[id][1..4]
+local bankOpen, mailOpen, ahOpen = false, false, false
+local Place
+
+-- ================================================================ what the character has
+local function Spelt(name) return ((name or ""):lower():gsub("[^a-z0-9]", "")) end
+
+local function CharKey() return ns.RealmKey() .. "|" .. (UnitName("player") or "?") end
+
+local function Char()
+  FWCS_DB.__chars = FWCS_DB.__chars or {}
+  local key = CharKey()
+  local c = FWCS_DB.__chars[key] or {}
+  FWCS_DB.__chars[key] = c
+  c.name, c.realm, c.house = UnitName("player") or "?", GetRealmName() or "?", ns.RealmKey()
+  c.faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
+  c.items, c.skills, c.from, c.upto, c.also = c.items or {}, c.skills or {}, c.from or {}, c.upto or {}, c.also or {}
+  c.budget = c.budget or {}                  -- the gold ceiling: copper (nil: the bags), on (the route cut there)
+  return c
+end
+
+-- the auction house of this character among those the helper wrote routes for
+local function House()
+  local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
+  local mine, group = Spelt(GetRealmName()), Spelt(ns.RealmKey())
+  for key, house in pairs(FWCS_PLANS or {}) do
+    if house.faction == faction then
+      for _, realm in ipairs(house.realms or {}) do
+        if realm == mine or realm == group then return house, key end
+      end
+    end
+  end
+end
+
+-- the items worth counting: everything on the scan lists, and everything a route names
+local tracked
+local function Tracked()
+  if tracked then return tracked end
+  tracked = {}
+  for item in pairs(ns.QueuedItems()) do tracked[item] = true end
+  local house = House()
+  for item in pairs(house and house.items or {}) do tracked[item] = true end
+  return tracked
+end
+
+local function SlotItem(bag, slot)
+  if C_Container and C_Container.GetContainerItemInfo then
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    if info then return info.itemID, info.stackCount end
+  elseif GetContainerItemInfo then
+    local _, count, _, _, _, _, _, _, _, item = GetContainerItemInfo(bag, slot)
+    return item, count
+  end
+end
+
+local function CountBags()
+  local c, counts = Char(), {}
+  local slotsOf = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+  if not slotsOf then return end
+  for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do      -- with the reagent bag, where the client has one
+    for slot = 1, slotsOf(bag) or 0 do
+      local item, count = SlotItem(bag, slot)
+      if item then counts[item] = (counts[item] or 0) + (count or 1) end
+    end
+  end
+  Place(1, counts)
+  Char().t = time()
+end
+
+-- The count of each tracked item in one place (1 bags .. 4 auctions) replaces the last one;
+-- `seen` is the character's field that says when that place was last counted.
+Place = function(place, counts, seen)
+  local c, wanted = Char(), Tracked()
+  for _, n in pairs(c.items) do n[place] = 0 end
+  for item, n in pairs(counts) do
+    if wanted[item] then
+      c.items[item] = c.items[item] or { 0, 0, 0, 0 }
+      c.items[item][place] = n
+    end
+  end
+  for item, n in pairs(c.items) do
+    if ((n[1] or 0) + (n[2] or 0) + (n[3] or 0) + (n[4] or 0)) == 0 then c.items[item] = nil end
+  end
+  if seen then c[seen] = time() end
+end
+
+-- How many of an item the bags hold (the bank not counted), by the client's call, new
+-- (C_Item.GetItemCount, Forever's) or old (the GetItemCount global, gone from newer clients:
+-- read through it alone, every count was 0, seen on the beta 11 Oct 2026). Nil without either.
+local function Count(item)
+  local f = (C_Item and C_Item.GetItemCount) or GetItemCount
+  if not f then return nil end
+  local ok, n = pcall(f, item)
+  return ok and tonumber(n) or 0
+end
+
+-- With the bank open the game counts what is in it: an item's count with the bank, less its
+-- count without. Asked of every tracked item, whichever way this client numbers its bank bags.
+local function CountBank()
+  if not bankOpen then return end
+  local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+  if not count then return end
+  local counts = {}
+  for item in pairs(Tracked()) do
+    local banked = (count(item, true, false, true) or 0) - (count(item) or 0)
+    if banked > 0 then counts[item] = banked end
+  end
+  Place(2, counts, "bankSeen")
+end
+
+-- The items attached to the mail in the inbox, while a mailbox is open: the game only has
+-- the inbox then. A client of before GetInboxItem gave the item's id gives name, texture,
+-- count: the id is taken from the link.
+local function CountMail()
+  if not mailOpen or not GetInboxNumItems or not GetInboxItem then return end
+  local counts = {}
+  for i = 1, GetInboxNumItems() or 0 do
+    for a = 1, ATTACHMENTS_MAX_RECEIVE or 16 do
+      local name, id, texture, count = GetInboxItem(i, a)
+      if name and type(id) ~= "number" then
+        local link = GetInboxItemLink and GetInboxItemLink(i, a)
+        id, count = link and tonumber(link:match("item:(%d+)")), texture
+      end
+      if id then counts[id] = (counts[id] or 0) + (count or 1) end
+    end
+  end
+  Place(3, counts, "mailSeen")
+end
+
+-- The character's own auctions still up (not the sold ones: those are money in the mail), once
+-- the auction house has sent the list (asked for when it opens; the game's own Auctions tab
+-- asks too). Either way this client has them.
+local function CountAuctions()
+  if not ahOpen then return end
+  local counts = {}
+  if C_AuctionHouse and C_AuctionHouse.GetNumOwnedAuctions and C_AuctionHouse.GetOwnedAuctionInfo then
+    for i = 1, C_AuctionHouse.GetNumOwnedAuctions() or 0 do
+      local a = C_AuctionHouse.GetOwnedAuctionInfo(i)
+      local id = a and a.itemKey and a.itemKey.itemID
+      if id and (a.status or 0) == 0 then counts[id] = (counts[id] or 0) + (a.quantity or 1) end
+    end
+  elseif GetNumAuctionItems and GetAuctionItemInfo then
+    for i = 1, GetNumAuctionItems("owner") or 0 do
+      local _, _, count, _, _, _, _, _, _, _, _, _, _, _, _, status, id = GetAuctionItemInfo("owner", i)
+      if id and (status or 0) == 0 then counts[id] = (counts[id] or 0) + (count or 1) end
+    end
+  else
+    return
+  end
+  Place(4, counts, "ahSeen")
+end
+
+local function AskForAuctions()
+  if C_AuctionHouse and C_AuctionHouse.QueryOwnedAuctions then
+    pcall(C_AuctionHouse.QueryOwnedAuctions, { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } })
+  elseif GetOwnerAuctionItems then
+    pcall(GetOwnerAuctionItems)
+  end
+end
+
+-- The first rank's spell of each profession, by skill line (SkillLineAbility, rank 1): its
+-- name is the profession's, in the client's language, for a client that only lists skills
+-- by name.
+local APPRENTICE = { [171] = 2259, [164] = 2018, [333] = 7411, [202] = 4036, [165] = 2108, [197] = 3908, [185] = 2550, [129] = 3273 }
+
+local function SpellName(spell)
+  local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spell) or GetSpellInfo and GetSpellInfo(spell)
+  if name and name ~= "" then return name end
+end
+
+-- The character's rank in a profession, or nil without it. Three ways, for whichever this
+-- client has: by skill line, by its professions, by its skill list (there by name: the
+-- client's own name for it, and the English one).
+local function SkillOf(plan)
+  local line = plan.skill_line
+  if C_TradeSkillUI and C_TradeSkillUI.GetProfessionInfoBySkillLineID then
+    local ok, info = pcall(C_TradeSkillUI.GetProfessionInfoBySkillLineID, line)
+    if ok and type(info) == "table" and (info.skillLevel or 0) > 0 then return info.skillLevel, info.maxSkillLevel end
+  end
+  if GetProfessions and GetProfessionInfo then
+    local found = { GetProfessions() }
+    for i = 1, 6 do
+      if found[i] then
+        local _, _, rank, max, _, _, id = GetProfessionInfo(found[i])
+        if id == line and rank then return rank, max end
+      end
+    end
+  end
+  if GetNumSkillLines and GetSkillLineInfo then
+    local names = { [Spelt(plan.profession)] = true }
+    local shown = C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillDisplayName and C_TradeSkillUI.GetTradeSkillDisplayName(line)
+    if shown and shown ~= "" then names[shown:lower()] = true end
+    shown = APPRENTICE[line] and SpellName(APPRENTICE[line])
+    if shown then names[shown:lower()] = true end
+    for i = 1, GetNumSkillLines() do
+      local name, header, _, rank, _, _, max = GetSkillLineInfo(i)
+      if not header and name and (names[Spelt(name)] or names[name:lower()]) then return rank, max end
+    end
+  end
+end
+
+-- each profession's skill, and its cap (75 for an apprentice: the next rank is the trainer's)
+local function NoteSkills()
+  local house, c = House(), Char()
+  c.caps = c.caps or {}
+  for _, plan in pairs(house and house.plans or {}) do
+    local rank, max = SkillOf(plan)
+    c.skills[plan.skill_line] = rank
+    c.caps[plan.skill_line] = (max and max > 0) and max or nil
+  end
+end
+
+-- what there is to take from: this character's bags and bank, and with `alts` those of the
+-- account's other characters of the same auction house
+local function Have()
+  local me, have = Char(), {}
+  for _, c in pairs(FWCS_DB.__chars or {}) do
+    if c == me or (ns.Settings().alts and c.house == me.house and c.faction == me.faction) then
+      for item, n in pairs(c.items or {}) do
+        have[item] = (have[item] or 0) + (n[1] or 0) + (n[2] or 0) + (n[3] or 0) + (n[4] or 0)
+      end
+    end
+  end
+  return have
+end
+
+-- ================================================================ what is open
+local opener = CreateFrame("Frame")
+for _, event in ipairs({ "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "MAIL_SHOW", "MAIL_CLOSED",
+                         "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "OWNED_AUCTIONS_UPDATED", "AUCTION_OWNED_LIST_UPDATE" }) do
+  pcall(opener.RegisterEvent, opener, event)       -- a client without one of them refuses it: the others still count
+end
+opener:SetScript("OnEvent", function(_, event)
+  if event == "BANKFRAME_OPENED" then bankOpen = true
+  elseif event == "BANKFRAME_CLOSED" then bankOpen = false
+  elseif event == "MAIL_SHOW" then mailOpen = true
+  elseif event == "MAIL_CLOSED" then mailOpen = false
+  elseif event == "AUCTION_HOUSE_SHOW" then ahOpen = true; AskForAuctions()
+  elseif event == "AUCTION_HOUSE_CLOSED" then ahOpen = false
+  else CountAuctions() end
+end)
+
+ns.inv = { Spelt = Spelt, Char = Char, House = House, Tracked = Tracked, Count = Count, CountBags = CountBags, CountBank = CountBank,
+           CountMail = CountMail, NoteSkills = NoteSkills, Have = Have, PLACES = PLACES }

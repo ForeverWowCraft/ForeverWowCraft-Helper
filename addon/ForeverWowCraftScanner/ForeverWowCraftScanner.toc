@@ -1,0 +1,23 @@
+## Interface: 16001, 11509, 120100
+## Title: ForeverWowCraft Scanner
+## Notes: /fwc: what your professions still need, less what you have. The FWC button on the profession window crafts the route a step at a time, an arrow leads to what it needs, and a list buys it at the auction house. Records auction prices: open the auction house.
+## Author: ForeverWowCraft
+## Version: 1.3.4
+## SavedVariables: FWCS_DB
+## IconTexture: Interface\AddOns\ForeverWowCraftScanner\icon
+
+Queue.lua
+Plans.lua
+Fresh.lua
+ForeverWowCraftScanner.lua
+Tailor.lua
+Inventory.lua
+Widgets.lua
+Window.lua
+Background.lua
+Panel.lua
+Seed.lua
+Places.lua
+Shop.lua
+Verdict.lua
+Craft.lua

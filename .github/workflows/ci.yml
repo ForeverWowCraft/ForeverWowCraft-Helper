@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: "A Lua, to run the addon's code in tests (the helper itself needs nothing installed)"
+        run: pip install lupa pillow
+      - name: Tests
+        run: |
+          for t in tests/test_*.py; do echo "== $t"; python "$t" || exit 1; done
+      - name: Addon structural check
+        run: python tests/lua_check.py addon/ForeverWowCraftScanner/*.lua

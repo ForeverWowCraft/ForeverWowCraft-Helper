@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# what the helper writes while it runs: its identity and token, what it sent, the routes it fetched
+state/
