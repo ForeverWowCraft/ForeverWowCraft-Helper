@@ -41,6 +41,7 @@ jobs:
           TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
           PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
           GAME_VERSION: ${{ vars.CURSEFORGE_GAME_VERSION }}
+          RELEASE_TYPE: ${{ vars.CURSEFORGE_RELEASE_TYPE || 'release' }}
         run: |
           if [ -z "$TOKEN" ] || [ -z "$PROJECT" ] || [ -z "$GAME_VERSION" ]; then
             echo "CurseForge: skipped. CURSEFORGE_TOKEN (a secret), CURSEFORGE_PROJECT_ID and CURSEFORGE_GAME_VERSION (variables) are not all set."
@@ -48,9 +49,10 @@ jobs:
           fi
           ID=$(curl -sf -H "x-api-token: $TOKEN" https://wow.curseforge.com/api/game/versions | python -c "import json, os, sys; v = [x['id'] for x in json.load(sys.stdin) if x['name'] == os.environ['GAME_VERSION']]; print(v[0] if v else '')")
           test -n "$ID" || { echo "CurseForge lists no game version named $GAME_VERSION"; exit 1; }
-          META='{"changelog":"https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/'"$GITHUB_REF_NAME"'","changelogType":"markdown","gameVersions":['"$ID"'],"releaseType":"release"}'
+          case "$RELEASE_TYPE" in alpha|beta|release) ;; *) echo "CURSEFORGE_RELEASE_TYPE must be alpha, beta or release, not $RELEASE_TYPE"; exit 1;; esac
+          META='{"changelog":"https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/'"$GITHUB_REF_NAME"'","changelogType":"markdown","gameVersions":['"$ID"'],"releaseType":"'"$RELEASE_TYPE"'"}'
           curl -sf -H "x-api-token: $TOKEN" -F "metadata=$META" -F "file=@dist/ForeverWowCraftScanner-$VERSION.zip" "https://wow.curseforge.com/api/projects/$PROJECT/upload-files"
-          echo "CurseForge: uploaded ForeverWowCraftScanner-$VERSION.zip to project $PROJECT for game version $GAME_VERSION ($ID)"
+          echo "CurseForge: uploaded ForeverWowCraftScanner-$VERSION.zip to project $PROJECT for game version $GAME_VERSION ($ID) as $RELEASE_TYPE"
 
   installer:
     needs: release
@@ -67,4 +69,7 @@ jobs:
       - name: On the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$env:GITHUB_REF_NAME" (Get-ChildItem dist/*.msi).FullName
+        run: |
+          $msi = (Get-ChildItem dist/*.msi).FullName
+          Copy-Item $msi dist/ForeverWowCraft-Helper.msi
+          gh release upload "$env:GITHUB_REF_NAME" $msi dist/ForeverWowCraft-Helper.msi
