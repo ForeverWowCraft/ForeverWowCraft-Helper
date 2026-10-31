@@ -29,8 +29,12 @@ if errorlevel 1 echo The lists could not be fetched; those that came with the ad
 if errorlevel 1 echo The routes could not be fetched; the helper tries again while it runs.
 "%PY%" fwch.py whoami
 "%PY%" fwch.py autostart
-start "ForeverWowCraft Helper" /min send.cmd
+if exist "%~dp0python\pythonw.exe" (
+  start "" "%~dp0python\pythonw.exe" "%~dp0fwch.py" app
+) else (
+  start "ForeverWowCraft Helper" /min send.cmd
+)
 echo.
 echo Done. Start the game. /fwc shows what your professions still need, less what you have.
-echo To scan: open the auction house, click FULL, then SAVE.
-echo The helper sends every scan: it is running now in a minimised window, and starts with Windows from now on.
+echo To save prices: open the auction house and click Save Prices.
+echo The helper sends every scan: it is running now, an icon by the clock, and starts with Windows from now on.

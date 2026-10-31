@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The helper's installer: a per-user MSI (no administrator prompt) that puts the helper, with
+  python.org's Python inside, under the user's local programs folder, makes a Start Menu entry,
+  has the app start when the user logs on (a Run entry: Windows' Settings > Apps > Startup lists
+  it with a switch), and starts it when the installer is done. A newer version installed over
+  an older replaces it (the running app is closed first); the state folder is left alone, so
+  the helper keeps its name at the pipe. Built by build.py with WiX 3.14.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*" Name="ForeverWowCraft Helper" Language="1033" Version="$(var.Version)" Manufacturer="ForeverWowCraft"
+           UpgradeCode="7F1E5C2A-9B3D-4E6F-8A1C-2D4B6E8F0A1C">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" InstallPrivileges="limited"
+             Description="ForeverWowCraft Helper $(var.Version): sends the prices the addon records, fetches the routes it shows." />
+    <MajorUpgrade DowngradeErrorMessage="A newer ForeverWowCraft Helper is installed already." Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="helper.ico" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="helper.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://foreverwowcraft.com/helper" />
+    <Property Id="ARPNOREPAIR" Value="1" />     <!-- ARPNOMODIFY comes with WixUI_Minimal -->
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="LocalPrograms" Name="Programs">
+          <Directory Id="INSTALLDIR" Name="ForeverWowCraft Helper" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+    </Directory>
+
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="StartMenuAndRun" Guid="3C8D1F6A-5E2B-4A9C-B7D0-1E3F5A7C9B2D">
+        <Shortcut Id="StartMenuHelper" Name="ForeverWowCraft Helper" Description="Sends the prices the addon records and fetches the routes it shows"
+                  Target="[INSTALLDIR]python\ForeverWowCraft Helper.exe" Arguments="&quot;[INSTALLDIR]fwch.py&quot; app"
+                  WorkingDirectory="INSTALLDIR" Icon="helper.ico" />
+        <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="ForeverWowCraft Helper" Type="string"
+                       Value="&quot;[INSTALLDIR]python\ForeverWowCraft Helper.exe&quot; &quot;[INSTALLDIR]fwch.py&quot; app" />
+        <RegistryValue Root="HKCU" Key="Software\ForeverWowCraft\Helper" Name="installed" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Helper" Title="ForeverWowCraft Helper" Level="1" Absent="disallow">
+      <ComponentGroupRef Id="Files" />
+      <ComponentRef Id="StartMenuAndRun" />
+    </Feature>
+
+    <!-- the running app is asked to close before an upgrade or a removal (its hidden window takes WM_CLOSE) -->
+    <util:CloseApplication Id="CloseHelper" Target="ForeverWowCraft Helper.exe" CloseMessage="yes" RebootPrompt="no" Timeout="15" TerminateProcess="0" />
+
+    <!-- a welcome, the licence, a progress bar, and at the end "Start the helper now", ticked -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.License)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Start the helper now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[ProgramMenuFolder]ForeverWowCraft Helper.lnk" />
+    <CustomAction Id="StartHelper" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+    <UI>
+      <UIRef Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="StartHelper">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+  </Product>
+</Wix>

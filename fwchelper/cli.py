@@ -4,14 +4,15 @@
   install-addon  copy the two addons into the game
   status         what the addon's saved scans hold
   send           send the latest scan through the pipe; with --watch, after every SAVE in game
-  autostart      have send.cmd start when you log on to Windows (--off undoes it)
+  app            the same, as a Windows application: an icon by the clock, no window (fwchelper/app.py)
+  autostart      have the app start when you log on to Windows (--off undoes it)
   lists          fetch the lists from the pipe and write them into the addon
   plans          fetch the routes of your characters' auction houses from the site and write them
                  into the addon, for its /fwc window; `send --watch` does it by itself
   whoami         the name this helper sends under, and whether it is trusted
 
 The first `send` or `lists` registers the helper with the pipe: it is given a token of its own,
-kept in state/identity.json. Nothing has to be set or asked for.
+kept in the state folder (settings.STATE: identity.json). Nothing has to be set or asked for.
 """
 from __future__ import annotations
 import argparse
@@ -19,10 +20,11 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
-from . import __version__, pipe as pipemod, plans as plansmod, scan, settings
+from . import __version__, pipe as pipemod, plans as plansmod, scan, settings, tray
 from . import fresh as freshmod
 
 
@@ -39,12 +41,17 @@ def where() -> None:
     print(f"Addon:          {'installed' if installed.is_dir() else 'not installed'}  ({installed})")
     found = scan.find_saved_variables()
     print("Scan files:     " + (", ".join(f"{p} ({scan.age_text(int(p.stat().st_mtime))})" for p in found[:3]) if found
-                                else "none yet (click FULL then SAVE in game)"))
+                                else "none yet (open the auction house in game and click Save Prices)"))
+    print(f"State folder:   {settings.STATE}")
     if os.name == "nt":
-        print(f"At logon:       {'send.cmd starts, minimised' if (startup_dir() / f'{settings.NAME} Helper.cmd').exists() else 'nothing (python fwch.py autostart)'}")
+        from . import win
+        on = tray.startup_on(win.run_value(tray.RUN_VALUE), win.approved(tray.RUN_VALUE))
+        old = (startup_dir() / f"{settings.NAME} Helper.cmd").exists()
+        print("At logon:       " + ("the app starts" if on else "nothing (python fwch.py autostart, or the icon's menu)")
+              + (" (and the old send.cmd entry is still there; the app removes it)" if old else ""))
     if not (base / flav).is_dir():
         print("\nSet FWC_WOW_DIR to the World of Warcraft folder and FWC_WOW_FLAVOR to the client folder "
-              "(e.g. _classic_beta_), or run setup.ps1, which asks.")
+              "(e.g. _classic_beta_), or start the app and choose the game folder from the icon's menu.")
 
 
 def install_addon(addons_dir: Path | None = None, force: bool = False) -> Path:
@@ -226,23 +233,35 @@ def other_watcher() -> int | None:
     return None
 
 
-def send(path: Path | None, realm: str | None, faction: str | None, watch: bool, interval: float, again: bool) -> None:
-    p = pipemod.Pipe()
-    if not watch:
-        send_once(p, path, realm, faction, again)
+def release_watch() -> None:
+    _watch_lock().unlink(missing_ok=True)
+
+
+def _pause(seconds: float, stop: threading.Event | None, wake: threading.Event | None = None) -> None:
+    """Sleep, unless told to stop, or woken: `wake` is set by whoever wants a round now."""
+    if stop is None and wake is None:
+        time.sleep(seconds)
         return
-    stamp_lines()
-    other = other_watcher()
-    if other:
-        print(f"Another helper window is already sending (process {other}); this one is not needed.")
-        return
-    print(f"Sending to {p.url} after every SAVE in game. Ctrl+C to stop.")
+    event = wake or stop
+    if event.wait(seconds) and wake is not None:
+        wake.clear()
+
+
+def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,
+          stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None) -> None:
+    """Send after every SAVE in game, fetch the routes and the freshness now and then, until
+    `stop` is set (or, without one, Ctrl+C). `wake` cuts a pause short, and `asks` is what the
+    app's menu wants done at once: {"send": True} sends the scan file as it is, {"plans": True}
+    fetches the routes whether or not the site says they are new. The watch's lock is the
+    caller's to take (other_watcher) and release (release_watch)."""
+    asks = asks if asks is not None else {}
     last, looked, freshened, told = None, 0.0, 0.0, None
     try:
-        while True:
-            if time.time() - looked >= settings.PLANS_EVERY:      # the routes the addon shows: newer ones, now and then
+        while stop is None or not stop.is_set():
+            wanted = asks.pop("plans", False)
+            if wanted or time.time() - looked >= settings.PLANS_EVERY:      # the routes the addon shows: newer ones, now and then
                 looked = time.time()
-                plans(quiet=True)
+                plans(quiet=True, again=wanted)
             if time.time() - freshened >= settings.FRESH_EVERY:   # when each house was last scanned, for the addon's box
                 freshened = time.time()
                 told = freshen(p, quiet=True) or told
@@ -251,21 +270,39 @@ def send(path: Path | None, realm: str | None, faction: str | None, watch: bool,
                 stamp = (found[0], found[0].stat().st_mtime, found[0].stat().st_size) if found else None
             except OSError:
                 stamp = None
-            if stamp and stamp != last:
-                time.sleep(1.5)                      # let the game finish writing
+            asked = asks.pop("send", False)
+            if stamp and (stamp != last or asked):
+                _pause(1.5, stop)                    # let the game finish writing
                 last = stamp
                 try:
-                    send_once(p, path, realm, faction, fresh=told)
+                    send_once(p, path, realm, faction, again=asked, fresh=told)
                 except (SystemExit, pipemod.PipeError) as e:
                     if not isinstance(e, Refused):           # those were reported one by one
                         print(f"not sent: {e}")
                     last = None                      # try again at the next look
-                    time.sleep(30)
-            time.sleep(interval)
+                    _pause(30, stop, wake)
+            elif asked:
+                print("nothing to send: no scan file yet (open the auction house in game and click Save Prices)")
+            _pause(interval, stop, wake)
     except KeyboardInterrupt:
         print("\nstopped.")
+
+
+def send(path: Path | None, realm: str | None, faction: str | None, watch_it: bool, interval: float, again: bool) -> None:
+    p = pipemod.Pipe()
+    if not watch_it:
+        send_once(p, path, realm, faction, again)
+        return
+    stamp_lines()
+    other = other_watcher()
+    if other:
+        print(f"Another helper window is already sending (process {other}); this one is not needed.")
+        return
+    print(f"Sending to {p.url} after every SAVE in game. Ctrl+C to stop.")
+    try:
+        watch(p, path, realm, faction, interval)
     finally:
-        _watch_lock().unlink(missing_ok=True)
+        release_watch()
 
 
 # ---- starting with Windows ----------------------------------------------------------------------
@@ -274,22 +311,33 @@ def startup_dir() -> Path:
     return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 
-def autostart(on: bool = True, folder: Path | None = None) -> Path:
-    """Put a script in the Startup folder that opens send.cmd, minimised, when the user logs on;
-    or, with `on` false, remove it. Returns the script's path, whether or not it exists now."""
-    if folder is None and os.name != "nt":
-        raise SystemExit("autostart is for Windows: elsewhere, have your session start `python fwch.py send --watch`")
+def retire_startup_entry(folder: Path | None = None) -> bool:
+    """Remove the Startup-folder script that helpers before 1.5.0 wrote to start send.cmd at
+    logon (the app's Run entry takes its place). Returns whether there was one."""
     entry = (folder or startup_dir()) / f"{settings.NAME} Helper.cmd"
+    if not entry.exists():
+        return False
+    entry.unlink()
+    return True
+
+
+def autostart(on: bool = True, registry=None) -> str:
+    """Have the app start when the user logs on to Windows: a value under the user's Run key,
+    which Windows' Settings > Apps > Startup lists with a switch of its own; or, with `on`
+    false, take it out. Returns the command written, or "" when taken out. `registry` is
+    fwchelper/win.py, or in tests anything with its run_value, set_run_value and approve."""
+    if registry is None:
+        if os.name != "nt":
+            raise SystemExit("autostart is for Windows: elsewhere, have your session start `python fwch.py send --watch`")
+        from . import win as registry
+    retire_startup_entry()
     if not on:
-        entry.unlink(missing_ok=True)
-        return entry
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    entry.write_text("\r\n".join([
-        "@echo off",
-        f"rem Starts the {settings.NAME} Helper when you log on: it sends every scan after each SAVE in game.",
-        f"rem Made by `python fwch.py autostart` in {settings.ROOT}; `python fwch.py autostart --off` removes it.",
-        f'start "{settings.NAME} Helper" /min "{settings.ROOT / "send.cmd"}"', ""]), encoding="utf-8", newline="")
-    return entry
+        registry.set_run_value(tray.RUN_VALUE, None)
+        return ""
+    command = tray.startup_command(tray.app_exe(), settings.ROOT / "fwch.py")
+    registry.set_run_value(tray.RUN_VALUE, command)
+    registry.approve(tray.RUN_VALUE)                 # on, even where Windows' switch had been turned off
+    return command
 
 
 def whoami() -> None:
@@ -300,8 +348,8 @@ def whoami() -> None:
         print("What a public sender sends is used where it agrees with what others saw of the same auction house.")
 
 
-def lists() -> None:
-    doc = pipemod.Pipe().lists()
+def lists(p: pipemod.Pipe | None = None) -> None:
+    doc = (p or pipemod.Pipe()).lists()
     if doc is None:
         print("the service has no lists yet")
         return
@@ -309,7 +357,7 @@ def lists() -> None:
     if problem:
         raise SystemExit(f"what the service sent is not usable: {problem}")
     queue = {name: [(int(i), str(n)) for i, n in rows] for name, rows in doc["queue"].items()}
-    written, names = scan.write_queue(queue, replace=True)
+    written, names = scan.write_queue(queue, replace=True, where=settings.STATE / "Queue.lua")     # kept with the helper's state, not in its source
     print(f"{len(names)} lists, {sum(len(v) for v in queue.values()):,} items, made {scan.age_text(doc['generated'])}: "
           + ", ".join(names[:4]) + (" ..." if len(names) > 4 else ""))
     for w in written:
@@ -395,7 +443,8 @@ def main(argv=None) -> None:
     p.add_argument("--path", help="a scan file (default: the newest found)")
     p.add_argument("--realm")
     p.add_argument("--faction", help="Alliance or Horde (default: every auction house the file holds)")
-    p = sub.add_parser("autostart", help="have send.cmd start, minimised, when you log on to Windows")
+    sub.add_parser("app", help="run as a Windows application: an icon by the clock, no window; sends, fetches, installs the addon")
+    p = sub.add_parser("autostart", help="have the app start when you log on to Windows")
     p.add_argument("--off", action="store_true", help="undo that")
     sub.add_parser("lists", help="fetch the lists from the pipe and write them into the addon")
     p = sub.add_parser("plans", help="fetch the routes of your characters' auction houses and write them into the addon")
@@ -403,6 +452,7 @@ def main(argv=None) -> None:
     sub.add_parser("whoami", help="the name this helper sends under, and whether it is trusted")
     sub.add_parser("fresh", help="when each auction house was last scanned by anyone; written into the addon, which shows no scan box while that is fresh")
     a = ap.parse_args(argv)
+    settings.carry_state()                           # an install from before 1.5.0 kept its state beside the helper
     try:
         if a.cmd == "where":
             where()
@@ -412,9 +462,13 @@ def main(argv=None) -> None:
             status(Path(a.path) if a.path else None, a.realm, a.faction)
         elif a.cmd == "send":
             send(Path(a.path) if a.path else None, a.realm, a.faction, a.watch, a.interval, a.again)
+        elif a.cmd == "app":
+            from . import app
+            app.run()
         elif a.cmd == "autostart":
-            entry = autostart(not a.off)
-            print(f"{'Removed' if a.off else 'Wrote'} {entry}\nsend.cmd {'no longer starts' if a.off else 'starts, minimised,'} when you log on to Windows.")
+            command = autostart(not a.off)
+            print("The app no longer starts when you log on to Windows." if a.off
+                  else f"The app starts when you log on to Windows (Settings > Apps > Startup has a switch for it):\n  {command}")
         elif a.cmd == "lists":
             lists()
         elif a.cmd == "plans":

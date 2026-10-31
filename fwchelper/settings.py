@@ -8,7 +8,6 @@ NAME = "ForeverWowCraft"
 
 ROOT = Path(__file__).resolve().parent.parent      # the helper's folder
 ADDON_SOURCE = ROOT / "addon"                        # the addon as it is installed from
-STATE = ROOT / "state"                               # what was sent last (yours; not in the repository)
 
 # Settings are environment variables FWC_<name>. The project was called ForeverCraft until
 # 29 Sep 2026; what an install from before that has under the old names still counts: settings
@@ -20,6 +19,42 @@ OLD_ADDON_NAME = "ForeverCraftScanner"
 def env(name: str, default: str | None = None) -> str | None:
     """The setting FWC_<name>, or the FC_<name> of an older install, or `default`."""
     return os.environ.get(ENV_PREFIX + name) or os.environ.get(OLD_ENV_PREFIX + name) or default
+
+
+# What the helper keeps of its own: its name and token at the pipe, what it sent, the routes
+# and lists it fetched, its log. On Windows that is the user's local application data, so that
+# an install under Program Files or a reinstall touches none of it; FWC_STATE names another
+# folder. An install from a zip of before 22 Oct 2026 kept it in state/ beside the helper:
+# carry_state() moves that over the first time the helper runs.
+def _state_dir() -> Path:
+    given = env("STATE")
+    if given:
+        return Path(given)
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / NAME / "Helper"
+    return ROOT / "state"
+
+
+STATE = _state_dir()
+OLD_STATE = ROOT / "state"
+STATE_FILES = ("identity.json", "sent.json", "Plans.lua", "Fresh.lua", "Queue.lua")
+
+
+def carry_state() -> list[Path]:
+    """Bring what an older install kept in state/ beside the helper into STATE, each file
+    where STATE has none of that name. Returns what was carried. The old files stay, so that
+    the old send.cmd, should it still be run, keeps working."""
+    carried = []
+    if STATE.resolve() == OLD_STATE.resolve() or not OLD_STATE.is_dir():
+        return carried
+    for name in STATE_FILES:
+        old, new = OLD_STATE / name, STATE / name
+        if old.is_file() and not new.exists():
+            STATE.mkdir(parents=True, exist_ok=True)
+            new.write_bytes(old.read_bytes())
+            carried.append(new)
+    return carried
 
 
 def saved(name: str) -> str | None:

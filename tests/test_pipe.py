@@ -161,6 +161,30 @@ def test_the_scans_listed_come_in_pages_and_all_are_fetched():
     assert Paged().scans(after=1202) == []
 
 
+
+def test_the_core_state_goes_as_a_zip_and_comes_back_as_bytes():
+    seen = []
+
+    class Remembering(pipe.Pipe):
+        def __init__(self):
+            self.url, self.token, self.registers = "https://state.test", "core", False
+            self.kept = None
+        def request(self, method, path, body=None, packed=True, content_type="application/json"):
+            seen.append((method, path, packed, content_type))
+            if method == "PUT":
+                self.kept = body
+                return 200, b'{"bytes": %d}' % len(body)
+            if self.kept is None:
+                return 404, b'{"error": "no state yet"}'
+            return 200, self.kept
+
+    p = Remembering()
+    assert p.state() is None
+    assert p.set_state(b"PK\x03\x04 a zip") == {"bytes": 10}
+    assert p.state() == b"PK\x03\x04 a zip"                                     # bytes as they were, never unpacked
+    assert seen[1] == ("PUT", "/v1/state", False, "application/zip")             # not gzipped on the way: a zip already
+    assert seen[0][2:] == (True, "application/json")                             # what every other call sends
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):

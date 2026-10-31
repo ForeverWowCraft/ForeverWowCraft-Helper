@@ -51,3 +51,20 @@ jobs:
           META='{"changelog":"https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/'"$GITHUB_REF_NAME"'","changelogType":"markdown","gameVersions":['"$ID"'],"releaseType":"release"}'
           curl -sf -H "x-api-token: $TOKEN" -F "metadata=$META" -F "file=@dist/ForeverWowCraftScanner-$VERSION.zip" "https://wow.curseforge.com/api/projects/$PROJECT/upload-files"
           echo "CurseForge: uploaded ForeverWowCraftScanner-$VERSION.zip to project $PROJECT for game version $GAME_VERSION ($ID)"
+
+  installer:
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: "The installer: Python and WiX fetched and checked, the .msi built"
+        run: python installer/build.py --out dist
+      - name: On the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-ChildItem dist/*.msi).FullName

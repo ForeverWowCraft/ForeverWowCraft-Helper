@@ -1,4 +1,4 @@
-"""send.cmd starts with Windows, and only one of it runs at a time."""
+"""The app starts with Windows through the user's Run key, and only one helper sends at a time."""
 import io
 import os
 import re
@@ -9,19 +9,58 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fwchelper import cli, settings  # noqa: E402
+from fwchelper import cli, settings, tray  # noqa: E402
 
 
-def test_autostart_writes_an_entry_that_opens_send_cmd_and_removes_it_again():
-    folder = Path(tempfile.mkdtemp()) / "Startup"                      # not made yet, as a fresh profile's may not be
-    entry = cli.autostart(True, folder)
-    assert entry.parent == folder and entry.name == "ForeverWowCraft Helper.cmd" and entry.exists()
-    text = entry.read_bytes().decode("utf-8")
-    assert text.startswith("@echo off\r\n") and "\r\r" not in text and f'/min "{settings.ROOT / "send.cmd"}"' in text
-    assert cli.autostart(True, folder) == entry                        # again: the same, not a second one
-    assert [p.name for p in folder.iterdir()] == [entry.name]
-    assert cli.autostart(False, folder) == entry and not entry.exists()
-    cli.autostart(False, folder)                                       # off when already off is fine
+class Registry:
+    """What fwchelper/win.py reads and writes of the registry, as a dict."""
+
+    def __init__(self):
+        self.run, self.records = {}, {}
+
+    def run_value(self, name):
+        return self.run.get(name)
+
+    def set_run_value(self, name, command):
+        if command is None:
+            self.run.pop(name, None)
+        else:
+            self.run[name] = command
+
+    def approved(self, name):
+        return self.records.get(name)
+
+    def approve(self, name):
+        self.records[name] = bytes([2]) + bytes(11)
+
+
+def test_autostart_puts_the_app_under_the_run_key_and_takes_it_out_again():
+    reg = Registry()
+    reg.records[tray.RUN_VALUE] = bytes([3]) + bytes(11)               # Windows' own switch had been turned off
+    folder = Path(tempfile.mkdtemp()) / "Startup"
+    folder.mkdir()
+    old = folder / "ForeverWowCraft Helper.cmd"                        # what helpers before 1.5.0 wrote there
+    old.write_text("start send.cmd", encoding="utf-8")
+    kept = cli.startup_dir
+    cli.startup_dir = lambda: folder
+    try:
+        command = cli.autostart(True, reg)
+        assert command == f'"{tray.app_exe()}" "{settings.ROOT / "fwch.py"}" app' and reg.run[tray.RUN_VALUE] == command
+        assert reg.records[tray.RUN_VALUE][0] == 2 and not old.exists()  # the switch is on again, the old entry is gone
+        assert tray.startup_on(reg.run_value(tray.RUN_VALUE), reg.approved(tray.RUN_VALUE))
+        assert cli.autostart(True, reg) == command                     # again: the same, not a second one
+        assert cli.autostart(False, reg) == "" and tray.RUN_VALUE not in reg.run
+        assert not tray.startup_on(reg.run_value(tray.RUN_VALUE), reg.approved(tray.RUN_VALUE))
+        cli.autostart(False, reg)                                      # off when already off is fine
+    finally:
+        cli.startup_dir = kept
+
+
+def test_windows_own_switch_counts():
+    assert not tray.startup_on(None, None)                             # no entry: not starting
+    assert tray.startup_on("cmd", None)                                # an entry Windows has no record of: on
+    assert tray.startup_on("cmd", bytes([2]) + bytes(11)) and tray.startup_on("cmd", bytes([6]) + bytes(11))
+    assert not tray.startup_on("cmd", bytes([3]) + bytes(11))          # turned off in Settings > Apps > Startup
 
 
 def test_a_second_watcher_sees_the_first_and_a_dead_one_is_not_counted():
@@ -46,6 +85,8 @@ def test_a_second_watcher_sees_the_first_and_a_dead_one_is_not_counted():
             alive.kill()
             alive.wait()
         assert cli.other_watcher() is None                             # it ended: the watch is ours again
+        cli.release_watch()
+        assert not (settings.STATE / "watching.pid").exists()
     finally:
         settings.STATE = kept
 

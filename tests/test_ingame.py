@@ -512,7 +512,7 @@ def test_a_character_of_a_house_without_routes_is_told_what_to_do():
     # the helper has not run for days: one grey line, nothing else
     lua.execute("FWCS_PLANS_WRITTEN = time() - 3 * 86400; Fire('BAG_UPDATE_DELAYED'); RunTimers()")
     plain = re.sub(r"\|c[0-9a-f]{8}|\|r", "", lua.eval("AllText()"))
-    assert "The helper last ran 3 days ago: start send.cmd" in plain
+    assert "The helper last ran 3 days ago: start it (the icon by the clock)" in plain
     # never written at all: the helper is not installed
     lua.execute("FWCS_PLANS_WRITTEN = nil; Fire('BAG_UPDATE_DELAYED'); RunTimers()")
     plain = re.sub(r"\|c[0-9a-f]{8}|\|r", "", lua.eval("AllText()"))

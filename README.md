@@ -18,8 +18,9 @@ It is plain Python 3.10+ with nothing to install, and a WoW addon. MIT licence.
 python fwch.py where            what was found on this PC
 python fwch.py install-addon    copy the two addons into the game (--force: over a newer scanner)
 python fwch.py status           what the saved scans hold
-python fwch.py send --watch     send every scan, after each SAVE in game
-python fwch.py autostart        have send.cmd start, minimised, when you log on (--off undoes it)
+python fwch.py app              the Windows application: an icon by the clock that does all of the below by itself
+python fwch.py send --watch     the same sending, in a window (send.cmd)
+python fwch.py autostart        have the app start when you log on to Windows (--off undoes it)
 python fwch.py lists            fetch the lists to scan and write them into the addon
 python fwch.py plans            fetch your auction houses' routes and write them into the addon
 python fwch.py fresh            when each auction house was last scanned by anyone; the addon shows no scan box while that is fresh
@@ -28,31 +29,52 @@ python fwch.py fresh            when each auction house was last scanned by anyo
 
 ## Setting up
 
-1. Unzip somewhere permanent, e.g. `C:\ForeverWowCraft-Helper`. Nothing needs installing: the
-   zip has Python inside (`python\`, python.org's own build). A zip made without it
-   (`--no-python`) uses the PC's Python, 3.10 or newer, and `setup.cmd` says so when there is none.
-2. Close the game. In the helper's folder, run `setup.cmd`. It finds the game, installs the
-   addon, fetches the lists to scan and the routes, and starts `send.cmd` in a minimised window.
-3. Start the game. `/fwc` opens the window. Open the auction house now and then: the prices
-   are recorded by themselves, the button on its frame lights up, and clicking it saves them;
-   `send.cmd` then sends them. (Interface, AddOns, ForeverWowCraft has the switches, among
-   them the scanner's own bar for running scans by hand.)
+1. Download `ForeverWowCraft-Helper-<version>.msi` and run it. Nothing else needs installing:
+   Python is inside (`python\`, python.org's own build). It installs for your own user, under
+   `%LOCALAPPDATA%\Programs\ForeverWowCraft Helper`, so Windows asks for no administrator; it
+   may warn that the installer is not signed (SmartScreen: "More info", then "Run anyway").
+2. The helper starts when the installer is done, and when you log on to Windows from then on:
+   an icon by the clock, in the notification area. It finds the game, installs the addon,
+   fetches the lists to scan and the routes, and waits. If it cannot find the game, right-click
+   the icon and **Choose the game folder**: the "World of Warcraft" folder, the one that holds
+   the client folder (`_classic_beta_`).
+3. Start the game (restart it if it was running: it only finds a new addon when it starts).
+   `/fwc` opens the window. Open the auction house now and then: the prices are recorded by
+   themselves, the **Save Prices** button on its frame lights up when there is something to
+   save, and that click is all it asks; the helper sends them within seconds and says so in a
+   balloon. (Interface, AddOns, ForeverWowCraft has the switches, among them the scanner's
+   own bar for running scans by hand.)
 
-Every line the window prints starts with the date and time, and each auction house in the
-scan file is sent on its own: one the service does not take (`not sent, <house>: ...`) does
-not hold the others back, and is tried again. A scan is sent once: the helper remembers what
-it sent (`state/sent.json`) by what the scan says, so an update of the helper does not send it
-again.
+The icon's menu: how things stand; **Send prices now**; **Fetch routes now**; **Choose the
+game folder**; **Open the log**; **Start with Windows**, ticked when it does (Windows' own
+Settings > Apps > Startup has the same switch); **Help**; **Quit**. Balloons say when prices
+were sent, when routes arrived (`/reload` in game, and `/fwc` has them), and when something
+is wrong. Everything the helper does is in its log, with the date and time at the start of
+every line: `%LOCALAPPDATA%\ForeverWowCraft\Helper\helper.log`. The same folder holds the
+helper's name and token at the pipe (`identity.json`), what it sent (`sent.json`), and the
+routes, lists and freshness it fetched; an uninstall leaves it, so a reinstall is the same
+sender. `FWC_STATE` names another folder. One instance runs at a time: starting the helper
+again while it runs only says so.
 
-`send.cmd` starts by itself when you log on to Windows from then on, minimised: a
-"ForeverWowCraft Helper" window on the taskbar. Close it to stop sending until the next logon;
-`python fwch.py autostart --off` stops it from starting at all. Running `send.cmd` while one is
-already open does nothing, so it is safe to double-click it to be sure.
+Each auction house in the scan file is sent on its own: one the service does not take
+(`not sent, <house>: ...`) does not hold the others back, and is tried again. A scan is sent
+once: the helper remembers what it sent by what the scan says, so an update of the helper
+does not send it again.
 
 Nothing has to be asked for. The first time it talks to the pipe the helper is given a name
-and a token of its own, kept in `state/identity.json`. `python fwch.py whoami` shows the name.
+and a token of its own. `python\python.exe fwch.py whoami`, from the install folder, shows
+the name.
 
-If you had the addon under its old name, ForeverCraft Scanner, `setup.cmd` replaces it and
+**Without the installer:** the zip (`ForeverWowCraft-Helper-<date>.zip`, Python inside),
+unzipped somewhere permanent, e.g. `C:\ForeverWowCraft-Helper`. `setup.cmd` in it does what
+the installer's first run does and starts the same app (`python fwch.py app`), which starts
+with Windows from then on (`python fwch.py autostart --off` undoes that). `send.cmd` is the
+sending alone, in a window whose every line starts with the date and time. A zip made without
+Python (`--no-python`) uses the PC's own, 3.10 or newer, and `setup.cmd` says so when there is
+none. A helper from before 1.5.0 kept its state in `state\` beside itself: the first run of
+1.5.0 carries that over, so it stays the same sender.
+
+If you had the addon under its old name, ForeverCraft Scanner, the helper replaces it and
 carries its saved scans over.
 
 ## In game: what you still need
@@ -109,7 +131,7 @@ they come in a moment, English until then, and the Auctionator box says when som
 The window's own words stay English.
 
 The routes come from the site: the helper fetches those of your characters' auction houses
-(every minute while `send.cmd` runs, or `python fwch.py plans`) and writes them into the
+(every minute while the helper runs, or `python fwch.py plans`) and writes them into the
 addon, which reads them at the next `/reload`, SAVE or login. The first time, the helper does
 not know your characters yet: log in once, `/reload`, and the routes are there after the next.
 An auction house nobody has scanned has no routes; scanning it (below) makes them.
@@ -157,6 +179,7 @@ Environment variables. On Windows, `setx NAME value` saves one for good.
 | `FWC_PIPE_URL` | Another pipe to send to |
 | `FWC_SITE_URL` | Another site to fetch the routes from |
 | `FWC_PIPE_TOKEN` | A token you were given by hand, used in place of the helper's own |
+| `FWC_STATE` | Another folder for what the helper keeps (its name and token, what it sent, the routes it fetched, the log) |
 
 ## The pipe
 
@@ -180,15 +203,23 @@ with what others saw of the same auction house.
 ## Tests
 
 ```
-python tests/test_scan.py
-python tests/test_pipe.py
-python tests/test_factions.py
-python tests/test_old_names.py
-python tests/test_independent.py
-python tests/test_plans.py
-python tests/test_ingame.py
-python tests/lua_check.py addon/ForeverWowCraftScanner/ForeverWowCraftScanner.lua
+for t in tests/test_*.py; do python "$t" || exit 1; done
+python tests/lua_check.py addon/ForeverWowCraftScanner/*.lua
 ```
+
+Each test file runs on its own, with nothing installed (`test_ingame.py` runs the addon's Lua
+when `lupa` is there, and passes without it). `test_app.py` and `test_tray.py` are the app with
+Windows stood in for; `test_installer.py` is what the installer puts in, without building it.
+
+## The installer
+
+`python installer/build.py` makes `ForeverWowCraft-Helper-<version>.msi` (on Windows: it
+fetches python.org's embeddable Python and WiX 3.14, checks both against their hashes, gives a
+copy of `pythonw.exe` the helper's name and icon, and builds). `installer/helper.wxs` says what
+the installer does: a per-user install, a Start Menu entry, the Run entry that starts the app
+at logon, "Start the helper now" at the end, and the running app closed before an upgrade or a
+removal. A release (a `v<version>` tag) builds it on a Windows runner and puts it on the
+GitHub release beside the zips.
 
 `test_ingame.py` runs the addon's Lua against a stand-in for the game, and needs a Lua for
 that: `pip install lupa`. Without it, it says so and passes.

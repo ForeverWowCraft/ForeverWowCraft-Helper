@@ -321,7 +321,7 @@ local function HelperNote()
   if not FWCS_PLANS_WRITTEN then
     return "|cff808080The helper is not installed on this PC: foreverwowcraft.com/helper. It sends the prices the addon records, and fetches the routes.|r"
   elseif time() - FWCS_PLANS_WRITTEN > HELPER_STALE then
-    return string.format("|cff808080The helper last ran %s: start send.cmd, and what the addon recorded is sent.|r", Age(FWCS_PLANS_WRITTEN))
+    return string.format("|cff808080The helper last ran %s: start it (the icon by the clock), and what the addon recorded is sent.|r", Age(FWCS_PLANS_WRITTEN))
   end
 end
 
@@ -466,7 +466,7 @@ function ns.ShowFeedback()
 end
 
 function ns.ShowHelper()
-  ns.ShowLink("The helper", "The helper runs beside the game, minimised: it sends the prices the addon records and fetches "
+  ns.ShowLink("The helper", "The helper runs beside the game, an icon by the clock: it sends the prices the addon records and fetches "
     .. "the routes /fwc shows. Free, for Windows; it installs the addon too. Ctrl+C copies the address (it is selected); "
     .. "paste it into your browser.", ns.HELPER_URL)
 end
@@ -862,9 +862,10 @@ Refresh = function()
     win.summary:SetText("No routes for this character's auction house yet.")
     SetNotice(HelperNote() or "")
     if FWCS_PLANS_WRITTEN then                -- the helper runs: the site has none for this house, or has not been asked
-      Line("The helper fetches them from the site every few minutes while send.cmd runs; a character it has")
-      Line("not seen yet is seen after its first /reload or logout. If the site has no prices for this")
-      Line("realm and faction, nobody has recorded its auction house yet: open it, and the addon does.")
+      Line("The helper fetches them from the site every minute while it runs; a character it has not")
+      Line("seen yet is seen after its first /reload or logout. If the site has no prices for this realm")
+      Line("and faction, nobody has saved its auction house yet: open it, click Save Prices, and the site")
+      Line("has routes for it within minutes; the helper fetches them, and /reload shows them.")
     else
       Line("The helper on this PC fetches the routes from foreverwowcraft.com and sends the prices the")
       Line("addon records. Until it is installed, what is recorded stays on this PC.")

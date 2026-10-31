@@ -170,6 +170,14 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _why(data: bytes) -> str:
+    """What the service said was wrong, from its answer."""
+    try:
+        return json.loads(data.decode("utf-8")).get("error", "")
+    except (ValueError, AttributeError):
+        return data[:120].decode("utf-8", errors="replace")
+
+
 def mark(doc: dict) -> str:
     """What a scan says, whichever helper sends it: the digest of its auction house and its
     items alone. "Already sent" goes by it, so that an update of the helper, which changes the
@@ -221,12 +229,13 @@ class Pipe:
         self._identity_file().write_text(json.dumps(known, indent=1), encoding="utf-8")
         return self.name
 
-    def request(self, method: str, path: str, body: bytes | None = None, packed: bool = True) -> tuple[int, bytes]:
+    def request(self, method: str, path: str, body: bytes | None = None, packed: bool = True,
+                content_type: str = "application/json") -> tuple[int, bytes]:
         headers = {"User-Agent": f"{settings.NAME}-helper/{__version__}"}
         if self.token and path != "/v1/register":
             headers["Authorization"] = "Bearer " + self.token
         if body is not None:
-            headers["Content-Type"] = "application/json"
+            headers["Content-Type"] = content_type
             if packed:
                 headers["Content-Encoding"] = "gzip"
         req = urllib.request.Request(self.url + path, data=body, method=method, headers=headers)
@@ -240,14 +249,15 @@ class Pipe:
         except OSError as e:
             raise PipeError(f"{self.url} could not be reached ({e})") from e
 
-    def ask(self, method: str, path: str, body: bytes | None = None, missing_ok: bool = False, packed: bool = True):
+    def ask(self, method: str, path: str, body: bytes | None = None, missing_ok: bool = False, packed: bool = True,
+            content_type: str = "application/json"):
         if self.registers and not self.token and path not in ("/v1/health", "/v1/register"):
             self.register()
-        status, data = self.request(method, path, body, packed)
+        status, data = self.request(method, path, body, packed, content_type)
         if status == 401 and self.registers and self.token and path != "/v1/health":
             self.token = None                       # the service does not know our token (any more): ask for another
             self.register()
-            status, data = self.request(method, path, body, packed)
+            status, data = self.request(method, path, body, packed, content_type)
         if status == 404 and missing_ok:
             return None
         if status == 429:
@@ -264,11 +274,7 @@ class Pipe:
             if told.get("fresh"):
                 raise NotNeeded(told.get("error") or "not needed: the auction house has a fresh scan", told.get("newest"), told.get("wanted_from"))
         if status >= 400:
-            try:
-                why = json.loads(data.decode("utf-8")).get("error", "")
-            except (ValueError, AttributeError):
-                why = data[:120].decode("utf-8", errors="replace")
-            raise PipeError(f"{method} {path}: {status} {why}".strip())
+            raise PipeError(f"{method} {path}: {status} {_why(data)}".strip())
         return unpack(data) if data else {}
 
     def health(self) -> dict:
@@ -315,3 +321,21 @@ class Pipe:
 
     def scan(self, scan_id: int) -> dict:
         return self.ask("GET", f"/v1/scans/{int(scan_id)}")
+
+    # ---- the core's state, so that the core can run anywhere -------------------------------
+    def state(self) -> bytes | None:
+        """The core's inbox (data/pipe) as the zip the last run put; None when none was put yet."""
+        status, data = self.request("GET", "/v1/state")
+        if status == 404:
+            return None
+        if status >= 400:
+            raise PipeError(f"GET /v1/state: {status} {_why(data)}".strip())
+        return data
+
+    def set_state(self, blob: bytes) -> dict:
+        return self.ask("PUT", "/v1/state", blob, packed=False, content_type="application/zip")
+
+    def move_blobs(self, after: str = "", limit: int = 50) -> dict:
+        """Copies a page of what the service's database still holds into its bucket; the answer says
+        `moved`, `had` (already there), `last` (the key to go on from) and `left`."""
+        return self.ask("POST", f"/v1/blobs/move?limit={int(limit)}&after={urllib.request.quote(after, safe='')}")
