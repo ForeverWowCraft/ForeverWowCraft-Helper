@@ -79,7 +79,7 @@ def saved(name: str) -> str | None:
 # common install folders (scan.wow_dir); FWC_WOW_DIR / FWC_WOW_FLAVOR override everything.
 # `where` shows what was detected.
 WOW_DIR = r"D:\WorldOfWarcraft\World of Warcraft"
-WOW_FLAVOR = "_classic_beta_"   # the Forever client folder (the launch client may use another name)
+WOW_FLAVOR = "_forever_"        # the Forever client folder (the beta's _classic_beta_ until 31 Oct 2026)
 
 # The pipe: where scans are sent and lists come from. FWC_PIPE_URL names another one. The helper
 # registers itself there the first time it sends and keeps the token it is given in STATE;

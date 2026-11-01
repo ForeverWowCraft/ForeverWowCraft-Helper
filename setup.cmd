@@ -17,7 +17,7 @@ if errorlevel 1 (
 echo.
 echo If the folders above are wrong, set them and run setup.cmd again:
 echo     setx FWC_WOW_DIR "D:\Games\World of Warcraft"
-echo     setx FWC_WOW_FLAVOR "_classic_beta_"
+echo     setx FWC_WOW_FLAVOR "_forever_"
 echo.
 echo Close the game before going on: it only finds a new addon when it starts.
 pause

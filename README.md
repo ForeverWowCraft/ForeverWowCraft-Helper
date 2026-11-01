@@ -37,7 +37,7 @@ python fwch.py fresh            when each auction house was last scanned by anyo
    an icon by the clock, in the notification area. It finds the game, installs the addon,
    fetches the lists to scan and the routes, and waits. If it cannot find the game, right-click
    the icon and **Choose the game folder**: the "World of Warcraft" folder, the one that holds
-   the client folder (`_classic_beta_`).
+   the client folder (`_forever_`).
 3. Start the game (restart it if it was running: it only finds a new addon when it starts).
    `/fwc` opens the window. Open the auction house now and then: the prices are recorded by
    themselves, the **Save Prices** button on its frame lights up when there is something to
@@ -175,7 +175,7 @@ Environment variables. On Windows, `setx NAME value` saves one for good.
 | Setting | For |
 |---|---|
 | `FWC_WOW_DIR` | The "World of Warcraft" folder, when it is not found |
-| `FWC_WOW_FLAVOR` | The client folder inside it, e.g. `_classic_beta_` |
+| `FWC_WOW_FLAVOR` | The client folder inside it, `_forever_` |
 | `FWC_PIPE_URL` | Another pipe to send to |
 | `FWC_SITE_URL` | Another site to fetch the routes from |
 | `FWC_PIPE_TOKEN` | A token you were given by hand, used in place of the helper's own |

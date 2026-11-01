@@ -70,8 +70,8 @@ class FakeWin:
 def _game():
     """A World of Warcraft folder with the client folder, its AddOns and WTF."""
     base = Path(tempfile.mkdtemp()) / "World of Warcraft"
-    (base / "_classic_beta_" / "Interface" / "AddOns").mkdir(parents=True)
-    (base / "_classic_beta_" / "WTF" / "Account" / "ACCOUNT" / "SavedVariables").mkdir(parents=True)
+    (base / "_forever_" / "Interface" / "AddOns").mkdir(parents=True)
+    (base / "_forever_" / "WTF" / "Account" / "ACCOUNT" / "SavedVariables").mkdir(parents=True)
     return base
 
 
@@ -99,7 +99,7 @@ def test_the_first_run_finds_the_game_installs_the_addon_and_registers():
         app = _app(FakeWin())
         with contextlib.redirect_stdout(app.log):                                      # as run() has it: print() goes to the log
             p = app.first_run()
-        addons = game / "_classic_beta_" / "Interface" / "AddOns"
+        addons = game / "_forever_" / "Interface" / "AddOns"
         assert (addons / "ForeverWowCraftScanner" / "ForeverWowCraftScanner.toc").exists()
         assert (addons / "ForeverWowCraftPlans" / "Fresh.lua").exists()             # the freshness was fetched and written
         assert app.status.game == game and app.status.name == "h-1" and p.name == "h-1"
@@ -141,7 +141,7 @@ def test_without_the_game_the_app_waits_for_the_folder_from_the_menu():
             app.chosen(tray.FOLDER)                                                   # the user picks the folder
             worker.join(30)
         assert done and app.status.game == game and win.settings == {"FWC_WOW_DIR": str(game)}
-        assert (game / "_classic_beta_" / "Interface" / "AddOns" / "ForeverWowCraftScanner").is_dir()
+        assert (game / "_forever_" / "Interface" / "AddOns" / "ForeverWowCraftScanner").is_dir()
     finally:
         cli.startup_dir = kept
         back()

@@ -76,7 +76,7 @@ class App:
             self.asks["plans"] = True
             self.wake.set()
         elif ident == tray.FOLDER:
-            folder = self.win.browse_folder("The World of Warcraft folder: the one that holds the client folder (_classic_beta_ or the like)")
+            folder = self.win.browse_folder("The World of Warcraft folder: the one that holds the client folder (_forever_)")
             if folder:
                 self.win.set_user_setting("FWC_WOW_DIR", str(folder))
                 print(f"game folder set to {folder}")

@@ -51,7 +51,7 @@ def where() -> None:
               + (" (and the old send.cmd entry is still there; the app removes it)" if old else ""))
     if not (base / flav).is_dir():
         print("\nSet FWC_WOW_DIR to the World of Warcraft folder and FWC_WOW_FLAVOR to the client folder "
-              "(e.g. _classic_beta_), or start the app and choose the game folder from the icon's menu.")
+              "(_forever_), or start the app and choose the game folder from the icon's menu.")
 
 
 def install_addon(addons_dir: Path | None = None, force: bool = False) -> Path:
