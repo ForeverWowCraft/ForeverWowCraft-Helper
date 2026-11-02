@@ -46,14 +46,14 @@ def tooltip(s: Status) -> str:
 
 
 def menu(s: Status, startup: bool) -> list:
-    """The menu's rows: (id, label, enabled, checked), or None for a line between groups."""
-    return [(STATUS, _said(s), False, False), None,
-            (SEND, "Send prices now", s.game is not None, False),
+    """The menu's rows: (id, label, enabled, checked), or None for a line between groups. The
+    actions alone, short, as other apps' menus are: how things stand is the icon's tooltip."""
+    return [(SEND, "Send prices now", s.game is not None, False),
             (ROUTES, "Fetch routes now", s.game is not None, False),
             (FOLDER, "Choose the game folder...", True, False),
-            (LOG, "Open the log", True, False), None,
+            (LOG, "Open the log", True, False),
             (STARTUP, "Start with Windows", True, startup),
-            (HELP, "Help (foreverwowcraft.com)", True, False), None,
+            (HELP, "Help", True, False), None,
             (QUIT, "Quit", True, False)]
 
 
@@ -81,20 +81,18 @@ def app_exe() -> Path:
 
 # ---- what is worth a balloon --------------------------------------------------------------------
 TROUBLE = "Trouble"
-TROUBLE_STARTS = ("not sent", "routes not fetched", "the pipe could not", "could not register", "addon not installed",
-                  "Game not found", "the helper stopped")
+TROUBLE_STARTS = ("not sent", "routes not fetched", "lists not fetched", "the pipe could not", "could not register",
+                  "addon not installed", "Game not found", "the helper stopped")
+# lines that say something went right: the status shows them in place of the last trouble
+GOOD_STARTS = ("sent ", f"Installed {settings.NAME} Scanner", "routes for the addon's /fwc window: ", "This helper sends as ")
 
 
 def balloon(line: str) -> tuple[str, str] | None:
-    """(title, text) when a line the helper printed is worth telling the user, else None."""
-    if line.startswith("sent "):
-        return "Prices sent", line
-    if line.startswith("routes for the addon's /fwc window: "):
-        return "Routes arrived", line.split(": ", 1)[1] + ". In game: /reload, then /fwc."
-    if line.startswith(f"Installed {settings.NAME} Scanner"):
-        return "Addon installed", "Restart the game if it is running, so that it loads the addon."
-    if line.startswith("This helper sends as "):
-        return "Ready", line + " Open the auction house in game and click Save Prices."
+    """(title, text) when a line the helper printed is worth a balloon: only what needs the
+    player (since 1.5.2; prices sent, routes arrived and ready were balloons before, and the
+    tooltip says those). Trouble, and the game to restart so that it loads the addon."""
+    if line.startswith("The game is running: restart it"):
+        return "Restart the game", "The addon was installed while the game ran: restart it, so that it loads the addon."
     if line.startswith(TROUBLE_STARTS):
         return TROUBLE, line
     return None

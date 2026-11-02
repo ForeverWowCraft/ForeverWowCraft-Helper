@@ -248,16 +248,20 @@ def _pause(seconds: float, stop: threading.Event | None, wake: threading.Event |
 
 
 def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,
-          stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None) -> None:
-    """Send after every SAVE in game, fetch the routes and the freshness now and then, until
+          stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None,
+          tick=None) -> None:
+    """Send after every save in game, fetch the routes and the freshness now and then, until
     `stop` is set (or, without one, Ctrl+C). `wake` cuts a pause short, and `asks` is what the
     app's menu wants done at once: {"send": True} sends the scan file as it is, {"plans": True}
-    fetches the routes whether or not the site says they are new. The watch's lock is the
-    caller's to take (other_watcher) and release (release_watch)."""
+    fetches the routes whether or not the site says they are new. `tick()`, when given, is
+    called every round: the app's own chores (the addon put back when it is missing). The
+    watch's lock is the caller's to take (other_watcher) and release (release_watch)."""
     asks = asks if asks is not None else {}
     last, looked, freshened, told = None, 0.0, 0.0, None
     try:
         while stop is None or not stop.is_set():
+            if tick is not None:
+                tick()
             wanted = asks.pop("plans", False)
             if wanted or time.time() - looked >= settings.PLANS_EVERY:      # the routes the addon shows: newer ones, now and then
                 looked = time.time()

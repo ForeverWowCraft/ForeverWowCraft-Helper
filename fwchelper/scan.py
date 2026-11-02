@@ -416,8 +416,15 @@ def install_addon(dest_root: Path | None = None, force: bool = False) -> Path:
     root = dest_root or addons_dir()
     dest = root / ADDON_NAME
     if not root.is_dir():
-        raise SystemExit(f"AddOns folder not found: {root}  (set FWC_WOW_DIR / FWC_WOW_FLAVOR; "
-                         f"`where` shows what was detected)")
+        # a game installed and never started has no Interface\AddOns yet: the game loads addons
+        # from the folder all the same, so it is made (a folder given by hand is not: a slip in
+        # it would be an addon somewhere nobody looks)
+        if dest_root is None and (wow_dir() / flavor()).is_dir():
+            root.mkdir(parents=True)
+            print(f"Made the AddOns folder, {root}: the game has not been started here yet.")
+        else:
+            raise SystemExit(f"AddOns folder not found: {root}  (set FWC_WOW_DIR / FWC_WOW_FLAVOR; "
+                             f"`where` shows what was detected)")
     old = root / config.OLD_ADDON_NAME
     if old.exists():
         shutil.rmtree(old)

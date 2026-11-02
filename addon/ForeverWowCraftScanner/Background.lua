@@ -2,8 +2,8 @@
 -- page (Interface, AddOns, ForeverWowCraft).
 --
 -- The button says where the scanner is. On its cooldown: dim, with the time left. Ready:
--- "Scan prices" (and the scan starts by itself when the house opens, unless that is turned
--- off). Scanning: "Scanning...". Done: a lit "Save prices", pulsing a few times, with a short
+-- "Scan Prices" (and the scan starts by itself when the house opens, unless that is turned
+-- off). Scanning: "Scanning...". Done: a lit "Save Prices", pulsing a few times, with a short
 -- sound once. A click on it saves (/reload), after which the helper sends what was recorded.
 -- That click is the only thing asked of a player.
 
@@ -58,7 +58,7 @@ local function Draw()
   button:SetAlpha(1)
   if sc.Dirty() then
     button:Enable()
-    button:SetText("|cff40ff40Save prices|r")
+    button:SetText("|cff40ff40Save Prices|r")
     if not told then
       told = true
       if sc.AlertEnabled() then PlaySound(SOUNDKIT.READY_CHECK, "Master") end
@@ -78,7 +78,7 @@ local function Draw()
     button:SetText(string.format("|cff808080Prices in %s|r", sc.Clock(sc.CooldownLeft())))
   else
     button:Enable()
-    button:SetText("Scan prices")
+    button:SetText("Scan Prices")
   end
 end
 

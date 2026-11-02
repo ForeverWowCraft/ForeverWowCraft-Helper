@@ -110,6 +110,27 @@ def message(title: str, text: str) -> None:
     user32.MessageBoxW(None, text, title, MB_ICONINFORMATION)
 
 
+# A process that does not say it knows about DPI is drawn scaled up on a screen set to more than
+# 100 % (most are), its popup menu with it: the icon's menu came out half as big again as other
+# apps' (1 Nov 2026). Said once, before any window is made. Per-monitor v2 is Windows 10 1703+;
+# the older call is for anything before, and both are quietly skipped where neither exists.
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+
+
+def dpi_aware() -> bool:
+    try:
+        fn = user32.SetProcessDpiAwarenessContext
+        fn.argtypes, fn.restype = [ctypes.c_void_p], wt.BOOL
+        if fn(ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)):
+            return True
+    except AttributeError:
+        pass
+    try:
+        return bool(user32.SetProcessDPIAware())
+    except AttributeError:
+        return False
+
+
 # ---- the icon -----------------------------------------------------------------------------------
 class Tray:
     """The icon in the notification area, with its menu and balloons. Made and run on one thread
@@ -124,6 +145,7 @@ class Tray:
         self.items, self.chosen, self.closing = items, chosen, closing
         self.todo: queue.Queue = queue.Queue()
         self.tip, self.hwnd = title, None
+        dpi_aware()                                                       # before any window: the menu at the screen's own size
         small = user32.GetSystemMetrics(SM_CXSMICON)
         self.hicon = user32.LoadImageW(None, str(icon), IMAGE_ICON, small, small, LR_LOADFROMFILE)
         self.hbig = user32.LoadImageW(None, str(icon), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)

@@ -29,10 +29,10 @@ def test_the_menu_has_what_the_player_may_want_and_says_whether_it_starts_with_w
     s = tray.Status()
     rows = tray.menu(s, startup=True)
     ids = [r[0] for r in rows if r]
-    assert ids == [tray.STATUS, tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.HELP, tray.QUIT]
-    assert rows.count(None) == 3                                       # three groups
+    assert ids == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.HELP, tray.QUIT]
+    assert rows.count(None) == 1 and rows[-2] is None                  # a line before Quit, as other apps have it
+    assert max(len(r[1]) for r in rows if r) <= 26                     # short rows: how things stand is the tooltip's
     by = {r[0]: r for r in rows if r}
-    assert by[tray.STATUS][2] is False and "Game not found" in by[tray.STATUS][1]   # the first row says, and cannot be picked
     assert by[tray.SEND][2] is False and by[tray.ROUTES][2] is False  # nothing to send without the game
     assert by[tray.STARTUP] == (tray.STARTUP, "Start with Windows", True, True)
     s.game = Path("C:/Games")
@@ -48,13 +48,18 @@ def test_the_startup_command_runs_the_app_without_a_window():
 
 
 def test_which_lines_are_balloons():
-    assert tray.balloon("sent Stonespine (Horde): 2324 items, scanned 1 min ago, 34 kB, as h-abc")[0] == "Prices sent"
-    title, text = tray.balloon("routes for the addon's /fwc window: Classic Beta PvP 2 (Horde) (32 routes, scanned 5 min ago)")
-    assert title == "Routes arrived" and text.startswith("Classic Beta PvP 2 (Horde) (32 routes") and "/reload" in text
-    assert tray.balloon(f"Installed {settings.NAME} Scanner to C:/x")[0] == "Addon installed"
-    assert tray.balloon("This helper sends as h-abc (public).") == ("Ready", "This helper sends as h-abc (public). Open the auction house in game and click Save Prices.")
-    for line in ("not sent: the pipe is down", "routes not fetched: 503", "Game not found: C:/x", "the helper stopped: boom", "addon not installed: no AddOns folder"):
+    # only what needs the player (1 Nov 2026: as few as can be); the rest is the tooltip's
+    for line in ("sent Stonespine (Horde): 2324 items, scanned 1 min ago, 34 kB, as h-abc",
+                 "routes for the addon's /fwc window: Stonespine (Horde) (32 routes, scanned 5 min ago)",
+                 f"Installed {settings.NAME} Scanner to C:/x", "This helper sends as h-abc (public)."):
+        assert tray.balloon(line) is None, line
+    assert tray.balloon("The game is running: restart it, so that it loads the addon.")[0] == "Restart the game"
+    for line in ("not sent: the pipe is down", "routes not fetched: 503", "lists not fetched: 503", "Game not found: C:/x",
+                 "the helper stopped: boom", "addon not installed: no AddOns folder"):
         assert tray.balloon(line) == (tray.TROUBLE, line), line
+    for line in ("sent Stonespine (Horde): 1 item", f"Installed {settings.NAME} Scanner to C:/x", "routes for the addon's /fwc window: x",
+                 "This helper sends as h-abc (public)."):
+        assert line.startswith(tray.GOOD_STARTS), line
     for line in ("already sent: Stonespine (Horde), scanned 2 min ago", "In game: /reload", "", "game: C:/x"):
         assert tray.balloon(line) is None, line
 

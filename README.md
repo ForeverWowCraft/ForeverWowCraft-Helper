@@ -5,7 +5,9 @@ Together they show you, in game, what your professions still need, less what you
 (`/fwc`), and they record what the auction house lists and send it on, which is where the prices
 come from.
 
-It is plain Python 3.10+ with nothing to install, and a WoW addon. MIT licence.
+It is plain Python 3.10+ with nothing to install, and a WoW addon. MIT licence. Questions and
+help: the Discord, <https://discord.gg/XPt2JUCxAg>. What is sent and what is not: [The pipe](#the-pipe)
+below, and <https://www.foreverwowcraft.com/privacy>.
 
 ## What it does
 
@@ -23,7 +25,7 @@ python fwch.py send --watch     the same sending, in a window (send.cmd)
 python fwch.py autostart        have the app start when you log on to Windows (--off undoes it)
 python fwch.py lists            fetch the lists to scan and write them into the addon
 python fwch.py plans            fetch your auction houses' routes and write them into the addon
-python fwch.py fresh            when each auction house was last scanned by anyone; the addon shows no scan box while that is fresh
+python fwch.py fresh            when each auction house was last scanned by anyone; the addon waits while that is fresh
                                 ("the site's routes need helper X or newer": unzip the new helper over this one)
 ```
 
@@ -41,15 +43,16 @@ python fwch.py fresh            when each auction house was last scanned by anyo
 3. Start the game (restart it if it was running: it only finds a new addon when it starts).
    `/fwc` opens the window. Open the auction house now and then: the prices are recorded by
    themselves, the **Save Prices** button on its frame lights up when there is something to
-   save, and that click is all it asks; the helper sends them within seconds and says so in a
-   balloon. (Interface, AddOns, ForeverWowCraft has the switches, among them the scanner's
-   own bar for running scans by hand.)
+   save, and that click is all it asks; the helper sends them within seconds. (Interface,
+   AddOns, ForeverWowCraft has the switches, among them the scanner's own bar for running
+   scans by hand.)
 
-The icon's menu: how things stand; **Send prices now**; **Fetch routes now**; **Choose the
+Point at the icon for how things stand: what was last sent, how many auction houses have
+routes, or what is wrong. Its menu: **Send prices now**; **Fetch routes now**; **Choose the
 game folder**; **Open the log**; **Start with Windows**, ticked when it does (Windows' own
-Settings > Apps > Startup has the same switch); **Help**; **Quit**. Balloons say when prices
-were sent, when routes arrived (`/reload` in game, and `/fwc` has them), and when something
-is wrong. Everything the helper does is in its log, with the date and time at the start of
+Settings > Apps > Startup has the same switch); **Help**; **Quit**. A balloon comes only when
+something needs you: the game not found, the addon not installed, prices that could not be
+sent, the game to restart. Everything the helper does is in its log, with the date and time at the start of
 every line: `%LOCALAPPDATA%\ForeverWowCraft\Helper\helper.log`. The same folder holds the
 helper's name and token at the pipe (`identity.json`), what it sent (`sent.json`), and the
 routes, lists and freshness it fetched; an uninstall leaves it, so a reinstall is the same
@@ -132,15 +135,15 @@ The window's own words stay English.
 
 The routes come from the site: the helper fetches those of your characters' auction houses
 (every minute while the helper runs, or `python fwch.py plans`) and writes them into the
-addon, which reads them at the next `/reload`, SAVE or login. The first time, the helper does
-not know your characters yet: log in once, `/reload`, and the routes are there after the next.
-An auction house nobody has scanned has no routes; scanning it (below) makes them.
+addon, which reads them at the next `/reload` or login (saving prices reloads too). The first
+time, the helper does not know your characters yet: log in once, `/reload`, and the routes are
+there after the next. An auction house nobody has saved has no routes; saving it (below) makes them.
 
 One scan of an auction house in ten minutes is all the site needs, however many play there, so
 the pipe takes one and refuses the rest as not needed; the helper sends none it would refuse
 ("not needed: ... was scanned by someone 4 min ago"), and every five minutes writes into the
-addon (`Fresh.lua`) when each house was last scanned, so that the FULL / SCAN box stays away
-while a scan is not needed.
+addon (`Fresh.lua`) when each house was last scanned, so that the addon records nothing while
+a scan is not needed.
 
 Everything the helper writes into the game (the routes, the lists, the freshness) goes into a
 second, tiny addon, **ForeverWowCraft Plans**, which `install-addon` puts beside the scanner and
@@ -148,25 +151,28 @@ which loads after it. An update of the scanner from CurseForge replaces the scan
 folder and touches none of it. `install-addon` leaves a scanner newer than its own (CurseForge's)
 in place, and `--force` puts its own in anyway.
 
-## In game: scanning
+## In game: recording prices
 
-Open the auction house. A blue **FULL** box appears: click it, and when it turns green, click
-**SAVE**. That reloads the interface, which is what makes the game write the scan to disk.
-`/fwcs` lists the addon's commands.
+Open the auction house. A small button at its top right says where things stand: **Scanning...**
+while the addon reads the house (it does so by itself when the house opens and it can, once
+every 15 minutes, and not while someone else saved the house in the last ten minutes), **Prices
+in m:ss** while it waits, and a lit **Save Prices** when there is something to save, with a short
+sound once. Click it: the interface reloads, which is what makes the game write the prices to
+disk, and the helper sends them within seconds. Nothing leaves the PC
+without that click. Point at the button for what it is doing; Interface, AddOns, ForeverWowCraft
+has the switches (the scan by itself, the sound, and the scanner's own bar with FULL, SCAN and
+SAVE for running scans by hand; `/fwcs` lists the commands).
 
-A realm has two auction houses that are scanned: your faction's and the other faction's. Scans
-are kept and sent by auction house. The one both factions share, in Booty Bay, Gadgetzan and
-Everlook, is not scanned (it is thin, and the routes buy to level): the addon tells it by where
-you stand, says so in chat when you open it, and FULL and SCAN say so instead of scanning.
-`/fwcs house` shows what it takes the open one for; `/fwcs house neutral` (or `alliance`,
-`horde`) overrules it, `/fwcs house auto` undoes that.
+A realm has two auction houses that are recorded: your faction's and the other faction's.
+Prices are kept and sent by auction house. The one both factions share, in Booty Bay, Gadgetzan
+and Everlook, is not recorded (it is thin, and the routes buy to level): the addon tells it by
+where you stand and says so in chat when you open it. `/fwcs house` shows what it takes the open
+one for; `/fwcs house neutral` (or `alliance`, `horde`) overrules it, `/fwcs house auto` undoes
+that.
 
-Connected realms share one auction house, and the addon scans it as one, whichever of the
-realms your character is on: it is named by the group's first realm as the client spells it
-without spaces (the beta's "Classic Beta PvE" and "Classic Beta PvE 2" are one house, kept as
-`ClassicBetaPvE`). The site shows the realm's name as the game does.
-
-The addon does nothing by itself: every scan and every save is a click.
+Connected realms share one auction house, and the addon records it as one, whichever of the
+realms your character is on: it is kept under the group's first realm as the client spells it
+without spaces. The site shows the realm's name as the game does.
 
 ## Settings
 
@@ -223,3 +229,10 @@ GitHub release beside the zips.
 
 `test_ingame.py` runs the addon's Lua against a stand-in for the game, and needs a Lua for
 that: `pip install lupa`. Without it, it says so and passes.
+
+## About
+
+A fan project, by players, for the game's players: not affiliated with or endorsed by Blizzard
+Entertainment. World of Warcraft is a trademark of Blizzard Entertainment, Inc. The code is MIT
+(`LICENSE`), apart from `Seed.lua`, data from the VMaNGOS database under the GPL-2.0, as its
+header says. The site, the privacy page and the Discord: <https://www.foreverwowcraft.com>.

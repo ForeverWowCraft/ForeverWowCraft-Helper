@@ -109,7 +109,7 @@ def test_the_first_run_finds_the_game_installs_the_addon_and_registers():
         assert "routes not fetched:" in text                                           # the test pipe serves no site
         assert "This helper sends as h-1 (public)." in text
         titles = [t for t, _ in app.tray.balloons]
-        assert titles == ["Addon installed", "Trouble", "Ready"], titles              # the trouble is the routes
+        assert titles == ["Trouble"], titles                                          # the routes; nothing else needs the player
         assert app.tray.tips[-1].startswith("ForeverWowCraft Helper") and "as h-1" in app.tray.tips[-1]
     finally:
         cli.startup_dir = kept
@@ -148,22 +148,65 @@ def test_without_the_game_the_app_waits_for_the_folder_from_the_menu():
         srv.shutdown()
 
 
+def test_a_game_never_started_gets_its_addons_folder_and_the_addon_comes_back_when_it_goes():
+    # the installer runs before the game's first start: there is no Interface\AddOns yet, and
+    # before 1.5.2 the install failed, quietly, once, and nothing tried again
+    srv, url = _service()
+    back = _fresh_pc()
+    game = Path(tempfile.mkdtemp()) / "World of Warcraft"
+    (game / "_forever_").mkdir(parents=True)
+    os.environ["FWC_PIPE_URL"], os.environ["FWC_WOW_DIR"], os.environ["FWC_SITE_URL"] = url, str(game), url
+    kept = cli.startup_dir
+    cli.startup_dir = lambda: Path(tempfile.mkdtemp())
+    try:
+        app = _app(FakeWin())
+        with contextlib.redirect_stdout(app.log):
+            app.first_run()
+        addons = game / "_forever_" / "Interface" / "AddOns"
+        assert (addons / "ForeverWowCraftScanner" / "ForeverWowCraftScanner.toc").exists()
+        assert "Made the AddOns folder" in _log() and "addon not installed" not in _log()
+        assert app.status.problem is None or "routes" in app.status.problem                   # the test pipe serves no site
+        # the addon goes missing (the game reinstalled, the folder emptied): the next look puts it back
+        import shutil
+        shutil.rmtree(addons / "ForeverWowCraftScanner")
+        app.looked_addon = 0.0
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert (addons / "ForeverWowCraftScanner" / "ForeverWowCraftScanner.toc").exists()
+        assert "putting it back" in _log() and _log().count("Installed ForeverWowCraft Scanner") == 2
+        assert [t for t, _ in app.tray.balloons] == ["Trouble"]                        # the routes, once; the install is no balloon
+        # and not every round: within ADDON_AGAIN nothing is looked at
+        shutil.rmtree(addons / "ForeverWowCraftScanner")
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert not (addons / "ForeverWowCraftScanner").exists()
+    finally:
+        cli.startup_dir = kept
+        back()
+        srv.shutdown()
+
+
 def test_lines_move_the_status_and_trouble_is_a_balloon_once():
     back = _fresh_pc()
     try:
         app = _app(FakeWin())
         app.status.game = Path("C:/x")
         app.line("sent Stonespine (Horde): 2324 items, scanned 1 min ago, 34 kB, as h-1")
-        assert app.status.last_sent and app.status.problem is None and app.tray.balloons[-1][0] == "Prices sent"
+        assert app.status.last_sent and app.status.problem is None and app.tray.balloons == []      # the tooltip says it
+        assert "last sent" in app.tray.tips[-1]
         app.line("not sent: the pipe is down")
         app.line("not sent: the pipe is down")
         assert app.status.problem == "not sent: the pipe is down"
-        assert [t for t, _ in app.tray.balloons] == ["Prices sent", "Trouble"]       # the same trouble twice: one balloon
+        assert [t for t, _ in app.tray.balloons] == ["Trouble"]                       # the same trouble twice: one balloon
         app.line("not sent: something else")
-        assert [t for t, _ in app.tray.balloons] == ["Prices sent", "Trouble", "Trouble"]
+        assert [t for t, _ in app.tray.balloons] == ["Trouble", "Trouble"]
         app.line("sent Stonespine (Horde): again")
         assert app.status.problem is None                                              # something went right
         assert "last sent" in app.tray.tips[-1]
+        app.line("lists not fetched: 503")
+        assert app.status.problem == "lists not fetched: 503" and app.tray.balloons[-1][0] == "Trouble"
+        app.line("routes for the addon's /fwc window: Stonespine (Horde) (3 routes)")
+        assert app.status.problem is None                                              # any good news clears it
     finally:
         back()
 
@@ -191,7 +234,8 @@ def test_the_menu_does_what_it_says():
         app.chosen(tray.QUIT)
         assert app.stop.is_set() and app.tray.quit_asked
         rows = app.items()
-        assert rows[0][1].startswith("Game not found") and {r[0] for r in rows if r} >= {tray.SEND, tray.QUIT}
+        assert rows[0][0] == tray.SEND and rows[0][2] is False and {r[0] for r in rows if r} >= {tray.SEND, tray.QUIT}
+        assert "Game not found" in app.tray.tips[-1] if app.tray.tips else True
     finally:
         cli.startup_dir = kept
         back()

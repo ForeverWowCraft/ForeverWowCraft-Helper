@@ -6,8 +6,8 @@ everything setup.cmd and send.cmd did, with no window to read and nothing to ans
 At start it finds the game (and asks for the folder, through the icon's menu, when it cannot),
 installs the addon, fetches the lists and the routes, and then sends every scan the addon
 saves, as `send --watch` does. What it prints goes to the log in the state folder
-(settings.STATE), and the lines that matter to the player come up as balloons: ready, prices
-sent, routes arrived, trouble. The icon's menu has the rest. One instance runs at a time.
+(settings.STATE). The icon's tooltip says how things stand; a balloon comes only for what
+needs the player (tray.balloon), each once a day at most. One instance runs at a time.
 
 fwchelper/tray.py is what the icon says (tested on any OS); fwchelper/win.py is Windows."""
 from __future__ import annotations
@@ -21,7 +21,9 @@ from . import __version__, cli, pipe as pipemod, plans as plansmod, scan, settin
 
 MUTEX = r"Local\ForeverWowCraftHelper"
 ICON = Path(__file__).with_name("helper.ico")
-TROUBLE_AGAIN = 3600          # seconds before the same trouble is a balloon again
+TROUBLE_AGAIN = 86400         # seconds before the same trouble is a balloon again (the tooltip shows it meanwhile)
+GAME_AGAIN = 60               # seconds between two looks for the game while it is not found
+ADDON_AGAIN = 600             # seconds between two looks at whether the addon is still in the game
 
 
 class App:
@@ -39,8 +41,10 @@ class App:
     # ---- what the icon shows ----------------------------------------------------------------
     def line(self, line: str) -> None:
         """Every line printed, as the log sees it: the status follows, and some are balloons."""
+        if line.startswith(tray.GOOD_STARTS):
+            self.status.problem = None                   # something went right: the status says so, not the last trouble
         if line.startswith("sent "):
-            self.status.last_sent, self.status.problem = int(time.time()), None
+            self.status.last_sent = int(time.time())
         elif line.startswith("This helper sends as "):
             self.status.name = line.split("as ", 1)[1].split(" ", 1)[0]
         said = tray.balloon(line)
@@ -104,7 +108,7 @@ class App:
         try:
             p = self.first_run()
             if not self.stop.is_set():
-                cli.watch(p, None, None, None, stop=self.stop, wake=self.wake, asks=self.asks)
+                cli.watch(p, None, None, None, stop=self.stop, wake=self.wake, asks=self.asks, tick=self.tick)
         except Exception as e:  # noqa: BLE001 - the icon stays, and says
             print(f"the helper stopped: {e}")
             print(traceback.format_exc())
@@ -118,22 +122,21 @@ class App:
             print(f"carried {carried.name} over from the old state folder")
         if cli.retire_startup_entry():
             print("removed the old Startup entry (send.cmd); the app starts with Windows instead")
+        said = 0.0
         while not self.stop.is_set():
             base, flavour = scan.wow_dir(), scan.flavor()
             if (base / flavour).is_dir():
                 self.status.game = base
                 break
             self.status.game = None
-            print(f"Game not found: {base / flavour}. Right-click the icon and choose the game folder.")
+            if time.time() - said >= TROUBLE_AGAIN:          # said once an hour; looked for every minute, in case it is installed meanwhile
+                said = time.time()
+                print(f"Game not found: {base / flavour}. Right-click the icon and choose the game folder.")
             self.folder_chosen.clear()
-            self.folder_chosen.wait(3600)
+            if self.folder_chosen.wait(GAME_AGAIN):
+                said = 0.0                                   # the folder was chosen: say at once whether it is the one
         print(f"game: {self.status.game}")
-        try:
-            cli.install_addon()
-            if self.win.game_running():
-                print("The game is running: restart it, so that it loads the addon.")
-        except SystemExit as e:
-            print(f"addon not installed: {e}")
+        self.install()
         p = pipemod.Pipe()                               # the one pipe for the run: it registers once, at its first word
         for what, step in (("lists", lambda: cli.lists(p)), ("routes", lambda: cli.plans(quiet=True)), ("freshness", lambda: cli.freshen(p, quiet=True))):
             if self.stop.is_set():
@@ -149,6 +152,33 @@ class App:
             print(f"the pipe could not be reached: {e}")
         self.refresh()
         return p
+
+    def install(self) -> bool:
+        """The addon into the game; False, and the trouble said, when it could not be."""
+        try:
+            cli.install_addon()
+            if self.win.game_running():
+                print("The game is running: restart it, so that it loads the addon.")
+            self.looked_addon = time.time()
+            return True
+        except SystemExit as e:
+            print(f"addon not installed: {e}")
+            self.looked_addon = time.time()
+            return False
+
+    looked_addon = 0.0
+
+    def tick(self) -> None:
+        """Every round of the watch: now and then, is the addon still in the game? A game
+        reinstalled, a folder emptied by hand, or an install that failed the first time (the
+        game not there yet) is put right without a restart of the helper."""
+        if time.time() - self.looked_addon < ADDON_AGAIN:
+            return
+        self.looked_addon = time.time()
+        toc = scan.addons_dir() / scan.ADDON_NAME / f"{scan.ADDON_NAME}.toc"
+        if not toc.exists():
+            print("the addon is not in the game any more: putting it back")
+            self.install()
 
 
 def run() -> None:

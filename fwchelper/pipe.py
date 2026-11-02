@@ -21,7 +21,11 @@ of its own. After that every request carries "Authorization: Bearer <token>".
     POST /v1/scans          a fwc-scan/1 document        -> {"id", "new": true|false, "trust"}
                             429 with Retry-After when the sender sends faster than it may;
                             409 {"fresh": true, "newest", "wanted_from"} when the auction house
-                            has a scan fresh enough already: not needed, and nothing is kept
+                            has a scan fresh enough already: not needed, and nothing is kept;
+                            403 when the pipe takes scans from the core alone (ACCEPT_SCANS).
+                            The core's token may add ?sender=NAME: the scan is kept as that
+                            trusted sender's, at no pace and past the gate (what it read from
+                            Blizzard's API)
     GET  /v1/fresh          -> {"fresh": seconds, "houses": {"<realm>|<faction>": {"newest"}}}
                             (no token; a minute old at most)
     GET  /v1/lists          -> the fwc-lists/1 document, 404 when none was set
@@ -289,8 +293,10 @@ class Pipe:
     def set_sender(self, name: str, trust: str, note: str = "") -> dict:
         return self.ask("PUT", f"/v1/senders/{name}", json.dumps({"trust": trust, "note": note}).encode(), packed=False)
 
-    def send_scan(self, doc: dict) -> dict:
-        return self.ask("POST", "/v1/scans", pack(doc))
+    def send_scan(self, doc: dict, sender: str | None = None) -> dict:
+        """Send a scan. `sender` is for the core's token alone: the name the pipe keeps the scan
+        under (what the core read from Blizzard's API is from "blizzard-api", not "core")."""
+        return self.ask("POST", "/v1/scans" + (f"?sender={urllib.request.quote(sender)}" if sender else ""), pack(doc))
 
     def lists(self) -> dict | None:
         return self.ask("GET", "/v1/lists", missing_ok=True)

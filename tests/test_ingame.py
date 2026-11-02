@@ -536,7 +536,7 @@ def test_the_scanner_in_the_background():
     lua.execute('AuctionHouseFrame = CreateFrame("Frame"); FWCS_DB.__ui.lastFull = time() - 60; Fire("AUCTION_HOUSE_SHOW")')
     assert lua.eval("ForeverWowCraftAHButton.text").startswith("|cff808080Prices in ")
     lua.execute("FWCS_DB.__ui.lastFull = nil; ns.scanner.Refresh()")
-    assert lua.eval("ForeverWowCraftAHButton.text") == "Scan prices"
+    assert lua.eval("ForeverWowCraftAHButton.text") == "Scan Prices"
 
 
 if __name__ == "__main__":
