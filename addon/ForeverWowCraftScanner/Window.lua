@@ -202,13 +202,13 @@ local function Build()
 
   -- the first row: a button per profession the routes cover, made as they are known (DrawProfessions)
   win.profs = {}
-  -- the second: the profession counted beside it, the kind of route, other characters, Auctionator
+  -- the second: the profession counted beside it, what the route is for, other characters,
+  -- Auctionator (until 2 Nov 2026 a button between the first two chose whether the route may
+  -- buy recipes; every route may now)
   win.also = Button(win, 150, "", "ForeverWowCraftAlso")
   win.also:SetPoint("TOPLEFT", 12, -66)
-  win.variant = Button(win, 196, "", "ForeverWowCraftVariant")
-  win.variant:SetPoint("LEFT", win.also, "RIGHT", 6, 0)
   win.focus = Button(win, 104, "", "ForeverWowCraftFocus")
-  win.focus:SetPoint("LEFT", win.variant, "RIGHT", 6, 0)
+  win.focus:SetPoint("LEFT", win.also, "RIGHT", 6, 0)
   win.alts = Button(win, 154, "")
   win.alts:SetPoint("LEFT", win.focus, "RIGHT", 6, 0)
   win.auctionator = Button(win, 100, "Auctionator")
@@ -467,7 +467,7 @@ end
 
 function ns.ShowHelper()
   ns.ShowLink("The helper", "The helper runs beside the game, an icon by the clock: it sends the prices the addon records and fetches "
-    .. "the routes /fwc shows. Free, for Windows; it installs the addon too. Ctrl+C copies the address (it is selected); "
+    .. "the routes /fwc shows. For Windows; it installs the addon too. Ctrl+C copies the address (it is selected); "
     .. "paste it into your browser.", ns.HELPER_URL)
 end
 
@@ -702,11 +702,7 @@ local function Fill(house, chosen)
   local variant = Variant(house, plan.variant) or { label = plan.variant, focus = "profit" }
   local also = chosen.also and chosen.applied and (" with " .. Title(chosen.also)) or ""
   win.also:SetText("Also: " .. (chosen.also and Title(chosen.also) or "none"))
-  -- the recipes as a box, ticked when the route may buy recipes too: what is on shows at a glance
-  if variant.recipes == "plans" then win.variant:SetText("|cff40ff40[x]|r purchasable recipes")
-  elseif variant.recipes == "trainer" then win.variant:SetText("[  ] purchasable recipes")
-  else win.variant:SetText("Recipes: " .. variant.label) end
-  -- and the focus as a box, ticked for skill-up (profit is the plain route)
+  -- the focus as a box, ticked for skill-up (profit is the plain route)
   if variant.focus == "skill" then win.focus:SetText("|cff40ff40[x]|r skill-up")
   elseif variant.focus == "profit" then win.focus:SetText("[  ] skill-up")
   else win.focus:SetText("For: " .. FocusLabel(house, variant.focus)) end
@@ -858,7 +854,7 @@ Refresh = function()
   DrawProfessions(chosen)
   if not chosen then
     lines, last = {}, nil
-    win.also:SetText("-"); win.variant:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
+    win.also:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
     win.summary:SetText("No routes for this character's auction house yet.")
     SetNotice(HelperNote() or "")
     if FWCS_PLANS_WRITTEN then                -- the helper runs: the site has none for this house, or has not been asked
@@ -872,7 +868,7 @@ Refresh = function()
     end
   elseif not chosen.plan then                 -- no profession trained, none picked: nothing to show yet
     lines, last = {}, nil
-    win.also:SetText("-"); win.variant:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
+    win.also:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
     win.title:SetText(string.format("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r  %s (%s), prices scanned %s",
       house.realm or "?", house.faction or "?", Age(house.scanned_at)))
     win.summary:SetText("This character has no profession yet.")
@@ -1060,7 +1056,8 @@ local function Wire()
     end)
     win.cap:SetScript("OnLeave", GameTooltip_Hide)
   end
-  -- the recipes cycled with the focus kept, and the focus cycled with the recipes kept
+  -- the focus cycled, with the recipes the document lists for it (every route buys recipes
+  -- since 2 Nov 2026; a document from before has the trainer routes too, and theirs are kept)
   local function Distinct(house, part, default)
     local seen, keys = {}, {}
     for _, v in ipairs(house.variants or {}) do
@@ -1075,19 +1072,10 @@ local function Wire()
     local at = house and Variant(house, s.variant)
     if not at then return end
     local keys = Distinct(house, part, default)
-    local to = Cycle(keys, at[part == 3 and "recipes" or "focus"], 1)
-    s.variant = (part == 3 and VariantFor(house, to, at.focus) or VariantFor(house, at.recipes, to)) or s.variant
+    local to = Cycle(keys, at.focus, 1)
+    s.variant = VariantFor(house, at.recipes, to) or s.variant
     Refresh()
   end
-  win.variant:SetScript("OnClick", function() Turn(3, function(v) return v[1] end) end)
-  win.variant:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine("Purchasable recipes")
-    GameTooltip:AddLine("Ticked, the route may also use recipes bought from the auction house, where they pay off. "
-      .. "Unticked, only what a trainer teaches.", 1, 1, 1, true)
-    GameTooltip:Show()
-  end)
-  win.variant:SetScript("OnLeave", GameTooltip_Hide)
   win.focus:SetScript("OnClick", function() Turn(4, function() return "profit" end) end)
   win.focus:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")

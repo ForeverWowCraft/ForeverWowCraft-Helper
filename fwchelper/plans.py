@@ -42,9 +42,10 @@ The site has, beside each auction house's pages, one document for the addon:
       character has changes: an enchanter's tailoring route disenchants, say. Only a route that
       differs from the plain one is there. A variant (since 7 Oct 2026 with four parts; two
       before) is the recipes a route may use ("trainer", "plans") times what it is for
-      ("focus": "profit", where what is made is sold, or "skill", where nothing is); its label
-      is the recipes', and "focus" lists the labels of the other. A document without "focus"
-      has the profit routes alone. A step is a run of skill points gained with one recipe: "from" is the skill it starts at,
+      ("focus": "profit", where what is made is sold, or "skill", where nothing is), and
+      "focus" lists the labels of the latter. Since 2 Nov 2026 every route may buy recipes:
+      the recipes part is "plans" throughout and the label is the focus's. A document without
+      "focus" has the profit routes alone. A step is a run of skill points gained with one recipe: "from" is the skill it starts at,
       "to" the skill it ends at. "makes" is absent when the recipe makes no item (an enchant).
       Of what a step uses, "buy" names what the route buys for it and "craft" what it makes on
       the spot ("made" says how: units a craft, what a craft uses, and since 11 Oct 2026 the

@@ -408,17 +408,16 @@ def test_a_character_without_a_profession_sees_no_route_until_one_is_picked():
 def test_the_focus_button_turns_between_the_profit_and_the_skill_up_route():
     doc = document()
     doc["plans"]["tailoring-trainer-skill"] = dict(doc["plans"]["tailoring-trainer"], variant="trainer-skill", sold=0, net=-3000, spent=3000)
-    doc["variants"] = [["trainer", "Trainer recipes only", "trainer", "profit"], ["trainer-skill", "Trainer recipes only", "trainer", "skill"]]
+    doc["variants"] = [["trainer", "Profit", "plans", "profit"], ["trainer-skill", "Skill-up", "plans", "skill"]]
     doc["focus"] = [["profit", "Profit"], ["skill", "Skill-up"]]
     lua = _game(doc)
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
     assert lua.eval("ForeverWowCraftFocus.shown") and lua.eval("ForeverWowCraftFocus.text") == "[  ] skill-up"
-    assert lua.eval("ForeverWowCraftVariant.text") == "[  ] purchasable recipes" and lua.eval("ns.Settings().variant") == "trainer"
+    assert lua.eval("ns.Settings().variant") == "trainer"
+    # no button chooses the recipes any more: every route may buy them (2 Nov 2026)
+    assert lua.eval("ForeverWowCraftVariant") is None
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
     assert lua.eval("ForeverWowCraftFocus.text") == "|cff40ff40[x]|r skill-up" and lua.eval("ns.Settings().variant") == "trainer-skill"
-    # the recipes button keeps the focus (one kind of recipes here, so it stays where it is)
-    lua.execute("ForeverWowCraftVariant.scripts.OnClick(ForeverWowCraftVariant)")
-    assert lua.eval("ns.Settings().variant") == "trainer-skill" and lua.eval("ForeverWowCraftVariant.text") == "[  ] purchasable recipes"
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
     assert lua.eval("ns.Settings().variant") == "trainer"
     # a document from before there was a focus has the profit routes alone, and no button for it
