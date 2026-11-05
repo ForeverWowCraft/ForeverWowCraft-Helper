@@ -247,6 +247,19 @@ def _pause(seconds: float, stop: threading.Event | None, wake: threading.Event |
         wake.clear()
 
 
+def retry_wait(failures: int) -> float:
+    """How long a watch waits before sending again after `failures` refusals or failures in a
+    row: RETRY_FIRST (30 s), then twice that each time, up to RETRY_MAX (15 min). On 5 Nov
+    2026 the pipe's day of database reads ran out at 16:30 UTC, and until midnight every
+    helper with a scan asked again every 36 seconds: the pipe's own day of requests is
+    not endless either."""
+    return float(min(settings.RETRY_FIRST * 2 ** max(0, failures - 1), settings.RETRY_MAX))
+
+
+def wait_text(seconds: float) -> str:
+    return f"{seconds / 60:g} min" if seconds >= 60 else f"{seconds:g} s"
+
+
 def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,
           stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None,
           tick=None) -> None:
@@ -259,6 +272,7 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
     asks = asks if asks is not None else {}
     last, looked, freshened, told = None, 0.0, 0.0, None
     try:
+        failures = 0                                 # refusals or failures in a row, for retry_wait
         while stop is None or not stop.is_set():
             if tick is not None:
                 tick()
@@ -275,16 +289,22 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
             except OSError:
                 stamp = None
             asked = asks.pop("send", False)
+            if asked:
+                failures = 0                         # asked for by hand: now, whatever came before
             if stamp and (stamp != last or asked):
                 _pause(1.5, stop)                    # let the game finish writing
                 last = stamp
                 try:
                     send_once(p, path, realm, faction, again=asked, fresh=told)
+                    failures = 0
                 except (SystemExit, pipemod.PipeError) as e:
+                    failures += 1
+                    wait = retry_wait(failures)
                     if not isinstance(e, Refused):           # those were reported one by one
                         print(f"not sent: {e}")
-                    last = None                      # try again at the next look
-                    _pause(30, stop, wake)
+                    print(f"trying again in {wait_text(wait)}")
+                    last = None                      # try again at the look after the wait
+                    _pause(wait, stop, wake)
             elif asked:
                 print("nothing to send: no scan file yet (open the auction house in game and click Save Prices)")
             _pause(interval, stop, wake)

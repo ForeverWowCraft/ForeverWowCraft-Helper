@@ -270,6 +270,51 @@ def test_the_watch_stops_when_told_and_does_what_the_menu_asked():
         srv.shutdown()
 
 
+def test_a_watch_waits_longer_each_time_the_pipe_fails_and_starts_over_when_asked():
+    # 5 Nov 2026: the pipe's day of database reads ran out and every helper with a scan asked
+    # again every 36 seconds until midnight. A watch waits 30 s after the first failure, then
+    # twice as long each time, up to 15 min; a send asked for by hand, or one that goes through, starts over
+    assert [cli.retry_wait(n) for n in (1, 2, 3, 4, 5, 6, 7, 20)] == [30, 60, 120, 240, 480, 900, 900, 900]
+    assert cli.wait_text(30) == "30 s" and cli.wait_text(120) == "2 min" and cli.wait_text(900) == "15 min"
+    from fwchelper import pipe as pipemod
+    back = _fresh_pc()
+    kept = cli.send_once, cli._pause
+    waits, calls = [], []
+    stop, wake, asks = threading.Event(), threading.Event(), {}
+
+    def failing(p, path, realm, faction, again=False, fresh=None):
+        calls.append(again)
+        if len(calls) == 5:
+            stop.set()                               # the fifth goes through, and the watch is told to stop
+            return True
+        raise pipemod.PipeError("POST /v1/scans: 500 the service failed")
+
+    def pause(seconds, stop_=None, wake_=None):
+        if seconds > 2:
+            waits.append(seconds)
+        if len(calls) == 3 and "send" not in asks:
+            asks["send"] = True                      # asked for by hand after three failures
+    cli.send_once, cli._pause = failing, pause
+    try:
+        scan_file = settings.STATE / "ForeverWowCraftScanner.lua"
+        settings.STATE.mkdir(parents=True, exist_ok=True)
+        scan_file.write_text("FWCS_DB = {}", encoding="utf-8")
+        out = tray.Log(settings.STATE / "watch.log")
+        kept_out = sys.stdout
+        sys.stdout = out
+        try:
+            cli.watch(pipemod.Pipe(), scan_file, None, None, interval=0.01, stop=stop, wake=wake, asks=asks)
+        finally:
+            sys.stdout = kept_out
+        # three failures: 30 s, 1 min, 2 min; asked by hand, 30 s again; the fifth went through
+        assert waits == [30, 60, 120, 30] and calls[3] is True and len(calls) == 5
+        text = (settings.STATE / "watch.log").read_text(encoding="utf-8")
+        assert "not sent: POST /v1/scans: 500 the service failed" in text and "trying again in 2 min" in text
+    finally:
+        cli.send_once, cli._pause = kept
+        back()
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):

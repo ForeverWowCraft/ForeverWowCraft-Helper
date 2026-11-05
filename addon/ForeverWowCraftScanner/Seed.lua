@@ -7,7 +7,7 @@
 -- ranks: the rank training services by name, in every language, and the skill each reaches.
 FWCS_SEED = {
   source = "VMaNGOS database snapshot: db-sqlite-4641790.zip from https://github.com/vmangos/core/releases/download/db_latest/db-sqlite-4641790.zip; release Development Database Snapshot (2026-09-28), GPL-2.0",
-  generated = 1793597126,
+  generated = 1793766922,
   sizes = {
     [1411] = { 5287, 3525 },
     [1412] = { 6154, 4102 },

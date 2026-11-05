@@ -2,4 +2,4 @@
 the game: finding it, installing the addon, reading the scans it saves, sending them on, and
 writing the lists and the routes it is given into the addon."""
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"

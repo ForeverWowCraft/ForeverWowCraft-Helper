@@ -206,6 +206,10 @@ The pipe holds every sender to a pace: a scan of an auction house every five min
 more often than the game lets anyone scan. What a new sender sends is used where it agrees
 with what others saw of the same auction house.
 
+When the pipe refuses a scan or is down, the helper keeps the scan and tries again: after half
+a minute the first time, then twice as long each time, up to every quarter hour, until it goes
+through (since 1.5.4). Send now from the tray menu asks at once.
+
 ## Tests
 
 ```
