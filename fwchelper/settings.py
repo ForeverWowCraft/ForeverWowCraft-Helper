@@ -94,3 +94,13 @@ PLANS_EVERY = 60      # seconds between looks at the site for newer routes, whil
 FRESH_EVERY = 300     # seconds between looks at the pipe for when each auction house was last scanned (fwchelper/fresh.py); the addon reads it at /reload
 RETRY_FIRST = 30      # seconds a watch waits before sending again after the pipe refused or failed; doubled each time it fails again ...
 RETRY_MAX = 900       # ... up to this (15 min): a pipe that is down is not asked twice a minute by every helper (5 Nov 2026)
+
+# Updates (fwchelper/update.py): where the helper's releases are, asked once a day whether a newer
+# one is out (the newest release's address redirects to its tag: no API, no key), and the installer
+# of the newest, by its fixed name, for the tray's "Update to ..." row. FWC_UPDATE_URL names another
+# place to ask (a test).
+HELPER_REPO = "https://github.com/ForeverWowCraft/ForeverWowCraft-Helper"
+UPDATE_CHECK_URL = HELPER_REPO + "/releases/latest"
+UPDATE_FILE = f"{NAME}-Helper.msi"
+UPDATE_URL = HELPER_REPO + "/releases/latest/download/" + UPDATE_FILE
+UPDATE_EVERY = 86400  # seconds between two looks for a newer helper

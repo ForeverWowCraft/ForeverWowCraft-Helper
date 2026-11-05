@@ -14,7 +14,7 @@ from .scan import age_text
 LOG_KEEP = 1_000_000                        # bytes, before the log rolls over (the one before is kept as .1)
 RUN_VALUE = f"{settings.NAME} Helper"       # the Run key's value, and the Start Menu shortcut's name
 HELP_URL = settings.SITE_URL + "/helper"
-STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT = range(1, 9)      # the menu's items
+STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT, UPDATE = range(1, 10)      # the menu's items
 
 
 @dataclass
@@ -25,6 +25,7 @@ class Status:
     houses: list = field(default_factory=list)   # the auction houses whose routes are in the addon
     game: Path | None = None                # the game folder, when found
     problem: str | None = None              # the last trouble, until something goes right
+    update: str | None = None               # a newer helper's version, when one is out (fwchelper/update.py)
     started: int = field(default_factory=lambda: int(time.time()))
 
 
@@ -41,14 +42,15 @@ def _said(s: Status) -> str:
 
 def tooltip(s: Status) -> str:
     """The icon's tooltip: at most 127 characters, as Windows shows it."""
-    text = f"{settings.NAME} Helper {__version__}" + (f", as {s.name}" if s.name else "") + "\n" + _said(s)
+    text = f"{settings.NAME} Helper {__version__}" + (f" ({s.update} is out)" if s.update else "") + (f", as {s.name}" if s.name else "") + "\n" + _said(s)
     return text if len(text) <= 127 else text[:124] + "..."
 
 
 def menu(s: Status, startup: bool) -> list:
     """The menu's rows: (id, label, enabled, checked), or None for a line between groups. The
     actions alone, short, as other apps' menus are: how things stand is the icon's tooltip."""
-    return [(SEND, "Send prices now", s.game is not None, False),
+    return ([(UPDATE, f"Update to {s.update}...", True, False), None] if s.update else []) + \
+           [(SEND, "Send prices now", s.game is not None, False),
             (ROUTES, "Fetch routes now", s.game is not None, False),
             (FOLDER, "Choose the game folder...", True, False),
             (LOG, "Open the log", True, False),
@@ -81,8 +83,9 @@ def app_exe() -> Path:
 
 # ---- what is worth a balloon --------------------------------------------------------------------
 TROUBLE = "Trouble"
+UPDATE_OUT = "Update available"
 TROUBLE_STARTS = ("not sent", "routes not fetched", "lists not fetched", "the pipe could not", "could not register",
-                  "addon not installed", "Game not found", "the helper stopped")
+                  "addon not installed", "Game not found", "the helper stopped", "update not downloaded")
 # lines that say something went right: the status shows them in place of the last trouble
 GOOD_STARTS = ("sent ", f"Installed {settings.NAME} Scanner", "routes for the addon's /fwc window: ", "This helper sends as ")
 
@@ -95,6 +98,8 @@ def balloon(line: str) -> tuple[str, str] | None:
         return "Restart the game", "The addon was installed while the game ran: restart it, so that it loads the addon."
     if line.startswith(TROUBLE_STARTS):
         return TROUBLE, line
+    if line.startswith("update available: "):
+        return UPDATE_OUT, line[len("update available: "):]
     return None
 
 

@@ -17,7 +17,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import __version__, cli, pipe as pipemod, plans as plansmod, scan, settings, tray
+from . import __version__, cli, pipe as pipemod, plans as plansmod, scan, settings, tray, update
 
 MUTEX = r"Local\ForeverWowCraftHelper"
 ICON = Path(__file__).with_name("helper.ico")
@@ -53,6 +53,10 @@ class App:
             if title == tray.TROUBLE:
                 self.status.problem = text
                 if self.told.get(text, 0) > time.time() - TROUBLE_AGAIN:
+                    said = None
+                self.told[text] = time.time()
+            elif title == tray.UPDATE_OUT:                   # once a version: the tooltip and the menu say it meanwhile
+                if text in self.told:
                     said = None
                 self.told[text] = time.time()
             if said and self.tray:
@@ -94,6 +98,9 @@ class App:
             print("starts with Windows from now on" if on else "no longer starts with Windows")
         elif ident == tray.HELP:
             self.win.open_path(tray.HELP_URL)
+        elif ident == tray.UPDATE:
+            self.asks["update"] = True
+            self.wake.set()
         elif ident == tray.QUIT:
             self.closing()
             self.tray.quit()
@@ -167,11 +174,18 @@ class App:
             return False
 
     looked_addon = 0.0
+    looked_update = 0.0
 
     def tick(self) -> None:
         """Every round of the watch: now and then, is the addon still in the game? A game
         reinstalled, a folder emptied by hand, or an install that failed the first time (the
-        game not there yet) is put right without a restart of the helper."""
+        game not there yet) is put right without a restart of the helper. Once a day, is a
+        newer helper out? And the update, when the menu asked for it."""
+        if self.asks.pop("update", False):
+            self.update_now()
+        if time.time() - self.looked_update >= settings.UPDATE_EVERY:
+            self.looked_update = time.time()
+            self.look_for_update()
         if time.time() - self.looked_addon < ADDON_AGAIN:
             return
         self.looked_addon = time.time()
@@ -179,6 +193,34 @@ class App:
         if not toc.exists():
             print("the addon is not in the game any more: putting it back")
             self.install()
+
+    def look_for_update(self) -> None:
+        """Whether a newer helper is out (fwchelper/update.py): the tooltip and the menu say so,
+        and a balloon once. Nothing said when it cannot be told."""
+        found = update.check()
+        if found and found != self.status.update:
+            self.status.update = found
+            print(f"update available: {settings.NAME} Helper {found} is out (this one is {__version__}). Right-click the icon and choose Update.")
+            self.refresh()
+
+    def update_now(self) -> None:
+        """The newer helper, downloaded and opened: its installer closes this one, puts the new
+        one in its place and starts it again (installer/helper.wxs)."""
+        version = self.status.update
+        if not version:
+            print("no update to install")
+            return
+        print(f"downloading {settings.NAME} Helper {version} ...")
+        try:
+            path = update.download(version)
+        except update.UpdateError as e:
+            print(f"update not downloaded: {e}")
+            return
+        print(f"installing {settings.NAME} Helper {version}: the helper closes now, and the installer starts it again when it is done")
+        self.win.open_path(path)
+        self.closing()
+        if self.tray:
+            self.tray.call(self.tray.quit)
 
 
 def run() -> None:

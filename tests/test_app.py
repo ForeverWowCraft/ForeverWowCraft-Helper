@@ -315,6 +315,50 @@ def test_a_watch_waits_longer_each_time_the_pipe_fails_and_starts_over_when_aske
         back()
 
 
+def test_the_app_says_once_when_a_newer_helper_is_out_and_installs_it_when_asked():
+    from fwchelper import update
+    back = _fresh_pc()
+    kept = update.latest, update.download
+    got = []
+
+    def download(version, url=None, into=None, timeout=None):
+        path = Path(tempfile.mkdtemp()) / f"ForeverWowCraft-Helper-{version}.msi"
+        path.write_bytes(update.MSI_MAGIC)
+        got.append(version)
+        return path
+    update.latest, update.download = (lambda url=None, timeout=None: "9.9.9"), download
+    try:
+        app = _app(FakeWin())
+        app.status.game = Path("C:/x")
+        app.looked_addon = time.time()                                                  # not the addon's turn
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert app.status.update == "9.9.9" and [t for t, _ in app.tray.balloons] == ["Update available"]
+        assert "(9.9.9 is out)" in app.tray.tips[-1] and app.items()[0][1] == "Update to 9.9.9..."
+        assert "update available: ForeverWowCraft Helper 9.9.9 is out" in _log()
+        with contextlib.redirect_stdout(app.log):
+            app.tick()                                                                  # not a day later: nothing more said
+        assert len(app.tray.balloons) == 1 and got == []
+        app.chosen(tray.UPDATE)
+        assert app.asks == {"update": True} and app.wake.is_set()
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert got == ["9.9.9"] and app.win.opened[-1].endswith("ForeverWowCraft-Helper-9.9.9.msi")
+        assert app.stop.is_set() and app.tray.quit_asked and "installing ForeverWowCraft Helper 9.9.9" in _log()
+        # the download failing is trouble, said as the rest is, and the helper goes on
+        update.download = lambda *a, **k: (_ for _ in ()).throw(update.UpdateError("no connection"))
+        app2 = _app(FakeWin())
+        app2.status.update = "9.9.9"
+        app2.asks["update"] = True
+        app2.looked_addon = app2.looked_update = time.time()
+        with contextlib.redirect_stdout(app2.log):
+            app2.tick()
+        assert app2.status.problem == "update not downloaded: no connection" and not app2.stop.is_set()
+    finally:
+        update.latest, update.download = kept
+        back()
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):

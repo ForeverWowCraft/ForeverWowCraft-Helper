@@ -174,6 +174,15 @@ Connected realms share one auction house, and the addon records it as one, which
 realms your character is on: it is kept under the group's first realm as the client spells it
 without spaces. The site shows the realm's name as the game does.
 
+## Updating
+
+The helper looks once a day whether a newer release is out (where the newest release's address
+on GitHub redirects to; nothing of yours is sent). When one is, the icon's tooltip says so, a
+balloon says it once, and the menu has **Update to 1.5.5...** at the top: it downloads the
+installer into the helper's state folder and opens it. The installer closes the running helper,
+puts the new one over it and starts it again at the end, settings and all. (Since 1.5.5. A
+helper from before has to be updated by hand once: the installer from the site's helper page.)
+
 ## Settings
 
 Environment variables. On Windows, `setx NAME value` saves one for good.

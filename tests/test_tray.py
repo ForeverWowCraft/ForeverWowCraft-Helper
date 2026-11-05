@@ -40,6 +40,16 @@ def test_the_menu_has_what_the_player_may_want_and_says_whether_it_starts_with_w
     assert by[tray.SEND][2] is True and by[tray.STARTUP][3] is False
 
 
+def test_a_newer_helper_is_at_the_top_of_the_menu_and_in_the_tooltip():
+    s = tray.Status(game=Path("C:/Games"), update="9.9.9")
+    rows = tray.menu(s, startup=False)
+    assert rows[0] == (tray.UPDATE, "Update to 9.9.9...", True, False) and rows[1] is None
+    assert [r[0] for r in rows if r][1:] == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.HELP, tray.QUIT]
+    assert f"Helper {__version__} (9.9.9 is out)" in tray.tooltip(s) and len(tray.tooltip(s)) <= 127
+    assert tray.balloon("update available: ForeverWowCraft Helper 9.9.9 is out") == (tray.UPDATE_OUT, "ForeverWowCraft Helper 9.9.9 is out")
+    assert tray.balloon("update not downloaded: no connection") == (tray.TROUBLE, "update not downloaded: no connection")
+
+
 def test_the_startup_command_runs_the_app_without_a_window():
     assert tray.startup_command(Path(r"C:\x\python\ForeverWowCraft Helper.exe"), Path(r"C:\x\fwch.py")) == \
         r'"C:\x\python\ForeverWowCraft Helper.exe" "C:\x\fwch.py" app'
