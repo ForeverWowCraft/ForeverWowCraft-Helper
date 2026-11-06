@@ -40,7 +40,7 @@ python fwch.py fresh            when each auction house was last scanned by anyo
    fetches the lists to scan and the routes, and waits. If it cannot find the game, right-click
    the icon and **Choose the game folder**: the "World of Warcraft" folder, the one that holds
    the client folder (`_forever_`).
-3. Start the game (restart it if it was running: it only finds a new addon when it starts).
+3. Start the game (if it was running, log out to the character screen and back in: the game finds a new addon there; an updated one needs only `/reload`).
    `/fwc` opens the window. Open the auction house now and then: the prices are recorded by
    themselves, the **Save Prices** button on its frame lights up when there is something to
    save, and that click is all it asks; the helper sends them within seconds. (Interface,
@@ -52,7 +52,7 @@ routes, or what is wrong. Its menu: **Send prices now**; **Fetch routes now**; *
 game folder**; **Open the log**; **Start with Windows**, ticked when it does (Windows' own
 Settings > Apps > Startup has the same switch); **Help**; **Quit**. A balloon comes only when
 something needs you: the game not found, the addon not installed, prices that could not be
-sent, the game to restart. Everything the helper does is in its log, with the date and time at the start of
+sent, a `/reload` or a log-out the addon needs. Everything the helper does is in its log, with the date and time at the start of
 every line: `%LOCALAPPDATA%\ForeverWowCraft\Helper\helper.log`. The same folder holds the
 helper's name and token at the pipe (`identity.json`), what it sent (`sent.json`), and the
 routes, lists and freshness it fetched; an uninstall leaves it, so a reinstall is the same

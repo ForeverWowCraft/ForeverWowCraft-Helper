@@ -99,8 +99,8 @@ def balloon(line: str) -> tuple[str, str] | None:
     """(title, text) when a line the helper printed is worth a balloon: only what needs the
     player (since 1.5.2; prices sent, routes arrived and ready were balloons before, and the
     tooltip says those). Trouble, and the game to restart so that it loads the addon."""
-    if line.startswith("The game is running: restart it"):
-        return "Restart the game", "The addon was installed while the game ran: restart it, so that it loads the addon."
+    if line.startswith("The game is running: "):           # the addon went in while the game ran: a reload, or for a new one a log-out
+        return ("Type /reload in the game" if "/reload" in line else "Log out and back in"), "The addon was installed while the game ran: " + line[len("The game is running: "):]
     if line.startswith(TROUBLE_STARTS):
         return TROUBLE, line
     if line.startswith("update available: "):

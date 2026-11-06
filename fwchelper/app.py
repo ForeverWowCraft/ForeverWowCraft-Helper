@@ -174,10 +174,12 @@ class App:
 
     def install(self) -> bool:
         """The addon into the game; False, and the trouble said, when it could not be."""
+        was = (scan.addons_dir() / scan.ADDON_NAME / f"{scan.ADDON_NAME}.toc").exists()      # there already: a reload is enough
         try:
             cli.install_addon()
             if self.win.game_running():
-                print("The game is running: restart it, so that it loads the addon.")
+                print("The game is running: type /reload in the chat, so that it loads the new addon." if was
+                      else "The game is running: log out to the character screen and back in (or restart it), so that it finds the new addon.")
             self.looked_addon = time.time()
             return True
         except SystemExit as e:

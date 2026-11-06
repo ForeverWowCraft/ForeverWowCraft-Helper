@@ -68,7 +68,8 @@ def test_which_lines_are_balloons():
                  "routes for the addon's /fwc window: Stonespine (Horde) (32 routes, scanned 5 min ago)",
                  f"Installed {settings.NAME} Scanner to C:/x", "This helper sends as h-abc (public)."):
         assert tray.balloon(line) is None, line
-    assert tray.balloon("The game is running: restart it, so that it loads the addon.")[0] == "Restart the game"
+    assert tray.balloon("The game is running: type /reload in the chat, so that it loads the new addon.") ==         ("Type /reload in the game", "The addon was installed while the game ran: type /reload in the chat, so that it loads the new addon.")
+    assert tray.balloon("The game is running: log out to the character screen and back in (or restart it), so that it finds the new addon.")[0] == "Log out and back in"
     for line in ("not sent: the pipe is down", "routes not fetched: 503", "lists not fetched: 503", "Game not found: C:/x",
                  "the helper stopped: boom", "addon not installed: no AddOns folder"):
         assert tray.balloon(line) == (tray.TROUBLE, line), line
