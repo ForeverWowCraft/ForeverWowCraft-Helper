@@ -152,6 +152,7 @@ end
 local function Note(kind, what, extra)
   local map, x, y = Here()
   if not map then return end
+  ns.notedAt = time()                      -- something to save (Remind.lua)
   for _, p in ipairs(Places()) do
     if p.map == map and p.kind == kind and p.what == what then
       local d = Distance(map, p.x, p.y, x, y)
@@ -266,6 +267,7 @@ local function NoteVendor()
   local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
   local map, x, y = Here()
   if id and map and next(wares) then
+    ns.notedAt = time()
     FWCS_DB.__vendors = FWCS_DB.__vendors or {}
     local v = FWCS_DB.__vendors[id] or { items = {} }
     local mine = UnitFactionGroup and UnitFactionGroup("player")

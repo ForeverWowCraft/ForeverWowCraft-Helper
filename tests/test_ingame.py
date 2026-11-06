@@ -136,7 +136,7 @@ def _game(doc=None):
     toc = (ADDON / "ForeverWowCraftScanner.toc").read_text(encoding="utf-8")
     files = [line.strip() for line in toc.splitlines() if line.strip().endswith(".lua")]
     assert files == ["Queue.lua", "Plans.lua", "Fresh.lua", "ForeverWowCraftScanner.lua", "Tailor.lua", "Inventory.lua", "Widgets.lua", "Window.lua",
-                     "Background.lua", "Panel.lua", "Seed.lua", "Places.lua", "Shop.lua", "Verdict.lua", "Craft.lua"]
+                     "Background.lua", "Remind.lua", "Panel.lua", "Seed.lua", "Places.lua", "Shop.lua", "Verdict.lua", "Craft.lua"]
     for name in files:
         if name == "Queue.lua":
             continue                                    # the stand-in has a short one
@@ -529,7 +529,7 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 6
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 7
     assert lua.eval("registered_panel == ns.options")
     # the auction house opens: the button appears, dim while the snapshot is on its cooldown, lit once there is something to save
     lua.execute('AuctionHouseFrame = CreateFrame("Frame"); FWCS_DB.__ui.lastFull = time() - 60; Fire("AUCTION_HOUSE_SHOW")')
@@ -1464,3 +1464,62 @@ if __name__ == "__main__":
         if k.startswith("test_") and callable(v):
             v()
             print("ok", k)
+
+
+# ---- the reload reminder (Remind.lua) ---------------------------------------------------------
+def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
+    lua = _game()
+    r = lambda: lua.eval("ns.remind")  # noqa: E731
+    assert r().Enabled() is True and lua.eval("ForeverWowCraftReload") is None            # nothing built until needed
+    # not due yet: a quarter of an hour after the load
+    lua.execute("ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload") is None
+    # due, the helper runs (the routes may be newer): the box, with why; a sound once
+    lua.execute("time = function() return os.time() + ns.remind.Every + 1 end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is True
+    assert lua.eval("ForeverWowCraftReload.why.text") == "the routes may have changed on the site."
+    assert lua.eval("ForeverWowCraftReloadNow.text") == "|cffff4040Reload now|r"
+    # a fight starts: the box goes, and is back as soon as it is over
+    lua.execute("InCombatLockdown = function() return true end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    lua.execute("InCombatLockdown = function() return false end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is True
+    # Later: gone for a quarter of an hour
+    lua.execute("ForeverWowCraftReloadLater.scripts.OnClick(ForeverWowCraftReloadLater); ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    lua.execute("time = function() return os.time() + 2 * ns.remind.Every + 2 end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is True
+    # a merchant window open: not now
+    lua.execute("ForeverWowCraftReload:Hide(); MerchantFrame = CreateFrame('Frame'); MerchantFrame:Show(); ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    lua.execute("MerchantFrame:Hide(); ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is True
+    # Reload now reloads
+    lua.execute("reloaded = 0; C_UI = { Reload = function() reloaded = reloaded + 1 end }; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
+    assert lua.eval("reloaded") == 1 and lua.eval("ForeverWowCraftReload.shown") is False
+    # nothing to say without the helper and nothing recorded: no box; something met: a reason
+    lua.execute("FWCS_PLANS_WRITTEN = nil; time = function() return os.time() + 4 * ns.remind.Every end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    assert list(lua.eval("ns.remind.Reasons()").values()) == []
+    lua.execute("ns.notedAt = time(); time = function() return os.time() + 6 * ns.remind.Every end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.why.text") == "vendors or places met, not yet saved." and lua.eval("ForeverWowCraftReload.shown") is True
+    # off, by the box's own button: no more; on again by the command; the options page has the switch
+    lua.execute("ForeverWowCraftReloadOff.scripts.OnClick(ForeverWowCraftReloadOff)")
+    assert lua.eval("ForeverWowCraftReload.shown") is False and lua.eval("FWCS_DB.__ui.remind") is False and r().Enabled() is False
+    lua.execute("time = function() return os.time() + 8 * ns.remind.Every end; ns.remind.Check()")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("remind on")')
+    assert r().Enabled() is True and "reload reminder on" in lua.eval("printed[#printed]")
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("remind now")')
+    assert lua.eval("ForeverWowCraftReload.shown") is True
+    lua.execute("time = os.time")
+
+
+def test_the_window_says_which_camp_object_the_route_makes():
+    doc = document()
+    doc["plans"]["tailoring-trainer"]["camp"] = [[279941, 44, "Tanning Rack"]]
+    doc["items"]["279941"] = "Tanning Rack"
+    lua = _game(doc)
+    lua.execute("ns.ToggleWindow()")
+    text = lua.eval("ForeverWowCraftWindow.notice.text") if lua.eval("ForeverWowCraftWindow.notice") is not None else lua.globals().AllText()
+    assert "At your camp:" in text and "makes Tanning Rack once, from skill 44" in text

@@ -22,6 +22,7 @@ The site has, beside each auction house's pages, one document for the addon:
                         "learn": [recipe item, copper]}, ...],
              "made": {"<item>": [units a craft, [[item, units a craft], ...], spell], ...},
              "buy": {"<item>": [copper a unit, "ah" | "vendor"], ...},
+             "camp": [[item, the skill it is first needed at, "Tanning Rack"], ...],
              "sell": {"<item>": copper a unit, ...}, "disenchant": [item, ...]}},
          "also": {"<profession>-<variant>+<companion>": {... the same, "companions": ["<companion>"]}, ...},
          "recipes": {"<spell id>": [reagents' cost, what it makes is worth as the route counts it,

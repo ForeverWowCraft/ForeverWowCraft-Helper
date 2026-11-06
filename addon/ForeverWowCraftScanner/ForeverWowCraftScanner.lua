@@ -1262,6 +1262,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     ns.OpenOptions()
   elseif cmd == "arrow" then
     ns.ArrowCommand(arg)
+  elseif cmd == "remind" or cmd == "reload" then
+    ns.RemindCommand(arg)
   elseif cmd == "places" then
     ns.PlacesCommand()
   elseif cmd == "shop" then

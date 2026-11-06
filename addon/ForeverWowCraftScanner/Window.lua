@@ -758,6 +758,12 @@ local function Fill(house, chosen)
   else
     table.insert(notices, string.format("|cff33ccffAuctions:|r counted as they were when the auction house was last open, %s.", Age(c.ahSeen)))
   end
+  for _, c in ipairs(plan.camp or {}) do                   -- [item, skill first needed at, name]: made once, placed at the camp
+    if c[2] <= upto then
+      table.insert(notices, string.format("|cff33ccffAt your camp:|r the route makes %s once, from skill %d, and places it; the recipes that need it "
+        .. "are made beside it. Its reagents are on the list.", N(c[1]), c[2]))
+    end
+  end
   if HelperNote() then table.insert(notices, HelperNote()) end
   SetNotice(table.concat(notices, "\n"))
 

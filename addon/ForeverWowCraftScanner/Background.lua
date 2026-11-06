@@ -175,6 +175,11 @@ local function BuildOptions()
     CheckBox(panel, -352, "The shopping list opens with the auction house",
       "What the next step of the route needs bought, with a Buy button an item. Off, the Make button still opens it.",
       function() return saved().shop ~= false end, function(v) saved().shop = v end),
+    CheckBox(panel, -396, "A reminder to reload, every 15 minutes",
+      "A small box at the top of the screen with a Reload now button, when there is something to save (prices, vendors "
+      .. "and places met) or the routes may have changed on the site: both move only at a reload. Never in combat, "
+      .. "nor while the auction house, a merchant or a profession window is open. Later puts it off a quarter of an hour.",
+      function() return ns.remind.Enabled() end, function(v) ns.RemindCommand(v and "on" or "off") end),
   }
   panel:SetScript("OnShow", function(self) for _, b in ipairs(self.boxes) do b:refresh(b) end end)
   if _G.Settings and _G.Settings.RegisterCanvasLayoutCategory and _G.Settings.RegisterAddOnCategory then
@@ -192,5 +197,5 @@ pcall(BuildOptions)                       -- a client with neither way of regist
 function ns.OpenOptions()
   if _G.Settings and _G.Settings.OpenToCategory and ns.optionsCategory then _G.Settings.OpenToCategory(ns.optionsCategory.ID or ns.optionsCategory)
   elseif InterfaceOptionsFrame_OpenToCategory and ns.options then InterfaceOptionsFrame_OpenToCategory(ns.options); InterfaceOptionsFrame_OpenToCategory(ns.options)
-  else ns.Print("the options are: /fwcs auto | bar | alert | ding") end
+  else ns.Print("the options are: /fwcs auto | bar | alert | ding | remind") end
 end

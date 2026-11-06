@@ -287,6 +287,9 @@ def test_a_watch_waits_longer_each_time_the_pipe_fails_and_starts_over_when_aske
     assert cli.wait_text(30) == "30 s" and cli.wait_text(120) == "2 min" and cli.wait_text(900) == "15 min"
     from fwchelper import pipe as pipemod
     back = _fresh_pc()
+    # a pipe and a site nobody listens on: the watch's freshness and routes fetches must fail here, not
+    # register this test's helper with the real pipe (which every run of the suite did, 6 Nov 2026)
+    os.environ["FWC_PIPE_URL"], os.environ["FWC_SITE_URL"] = "http://127.0.0.1:9", "http://127.0.0.1:9"
     kept = cli.send_once, cli._pause
     waits, calls = [], []
     stop, wake, asks = threading.Event(), threading.Event(), {}
