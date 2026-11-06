@@ -1072,6 +1072,22 @@ def test_the_snapshot_by_itself_waits_while_the_shopping_list_has_buying_to_do()
     lua.execute('Fire("AUCTION_HOUSE_CLOSED")')
 
 
+# ---- the arrow's switch in the window ------------------------------------------------------------------
+def test_the_window_has_a_box_that_turns_the_arrow_off_and_on():
+    lua = _game()
+    lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
+    assert lua.eval("ForeverWowCraftArrowBox.shown") is True and lua.eval("ForeverWowCraftArrowBox.label.text") == "Arrow"
+    assert lua.eval("ns.Settings().arrow") is None                                   # on, as the addon comes
+    lua.execute('ForeverWowCraftArrowBox.GetChecked = function() return false end; ForeverWowCraftArrowBox.scripts.OnClick(ForeverWowCraftArrowBox)')
+    assert lua.eval("ns.Settings().arrow") is False and lua.eval("printed[#printed]").endswith("the arrow is off (/fwcs arrow on brings it back)")
+    lua.execute('ForeverWowCraftArrowBox.GetChecked = function() return true end; ForeverWowCraftArrowBox.scripts.OnClick(ForeverWowCraftArrowBox)')
+    assert lua.eval("ns.Settings().arrow") is None and "the arrow is on" in lua.eval("printed[#printed]")
+    # the command and the box are one switch: the box follows the command at the next draw
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("arrow off"); ForeverWowCraftArrowBox.SetChecked = function(s, on) s.checked = on end; '
+                'SlashCmdList.FOREVERWOWCRAFT(""); SlashCmdList.FOREVERWOWCRAFT("")')         # closed and opened again: drawn again
+    assert lua.eval("ForeverWowCraftArrowBox.checked") is False
+
+
 # ---- a snapshot lost with the window is let go when the house opens again -----------------------------
 def test_a_snapshot_awaited_when_the_house_closes_is_let_go_when_it_opens_again():
     lua = _game()
