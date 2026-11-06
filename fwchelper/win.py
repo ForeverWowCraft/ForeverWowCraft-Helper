@@ -13,6 +13,8 @@ import winreg
 from ctypes import wintypes as wt
 from pathlib import Path
 
+from . import settings
+
 # how the app's messages speak of the icon on this platform
 CLICK = "Right-click the icon"
 WHERE_ICON = "in the notification area, by the clock"

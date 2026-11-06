@@ -200,15 +200,15 @@ class App:
         newer helper out? And the update: by itself when the switch is on and it has not
         failed on this version, or when the menu asked for it."""
         if self.asks.pop("update", False):
-            self.update_now()
+            self.safely("the update", self.update_now)
         if self.asks.pop("check", False):
-            self.check_now()
+            self.safely("the update check", self.check_now)
         if time.time() - self.looked_update >= settings.UPDATE_EVERY:
             self.looked_update = time.time()
-            self.look_for_update()
+            self.safely("the look for an update", self.look_for_update)
         if self.status.update and settings.quiet_update() and self.status.update not in self.tried and self.status.update != self.failed():
             self.tried.add(self.status.update)
-            self.update_now(quiet=True)
+            self.safely("the update by itself", lambda: self.update_now(quiet=True))
         if time.time() - self.looked_addon < ADDON_AGAIN:
             return
         self.looked_addon = time.time()
@@ -267,6 +267,16 @@ class App:
             return str(json.loads((self.updates_dir() / "failed.json").read_text(encoding="utf-8")).get("to") or "") or None
         except (OSError, ValueError, AttributeError):
             return None
+
+    def safely(self, what: str, do) -> None:
+        """A chore of the tick that fails for a reason of its own: said in the log, and the
+        watch goes on. Without this a NameError in the quiet install (1.6.0 to 1.6.9) ended the
+        watch thread: the icon stayed, and every menu click after it did nothing (6 Nov 2026)."""
+        try:
+            do()
+        except Exception as e:  # noqa: BLE001 - whatever it was, the sending and the routes must go on
+            print(f"{what} failed: {e}")
+            print(traceback.format_exc())
 
     def after_update(self) -> None:
         """At the start: what a quiet install begun by the helper before came to."""

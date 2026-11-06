@@ -482,6 +482,40 @@ def test_a_newer_helper_installs_by_itself_when_the_download_is_the_one_github_p
         back()
 
 
+def test_a_chore_that_fails_is_said_and_the_watch_goes_on():
+    """The quiet install raised NameError on 1.6.8 (win.quiet_update, settings not imported):
+    the watch thread ended, the icon stayed, and the menu's Update then did nothing (6 Nov
+    2026). Any failure of a tick's chore is a log line now, and the tick's other chores run."""
+    from fwchelper import update
+    kept = update.latest, update.download
+
+    class BrokenWin(FakeWin):
+        def quiet_update(self, installer, log):
+            raise NameError("name 'settings' is not defined")
+    try:
+        # the quiet install blows up: said, the helper runs on, and that version is not tried by itself again
+        update.latest = lambda url=None, timeout=None: "9.9.9"
+        update.download = lambda version, url=None, into=None, timeout=None: (_ for _ in ()).throw(RuntimeError("the disk is full"))
+        app = _app(BrokenWin())
+        app.status.game = Path("C:/x")
+        app.status.update = "9.9.9"
+        app.looked_addon = app.looked_update = time.time()
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+            app.tick()
+        assert "the update by itself failed: the disk is full" in _log() and "RuntimeError" in _log()
+        assert not app.stop.is_set() and not app.tray.quit_asked and app.tried == {"9.9.9"}
+        # the menu's Update and Check fail the same way: said, consumed, and the tick finishes its round
+        app.asks["update"] = app.asks["check"] = True
+        update.latest = lambda url=None, timeout=None: (_ for _ in ()).throw(RuntimeError("no network stack"))
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert "the update failed: the disk is full" in _log() and "the update check failed: no network stack" in _log()
+        assert app.asks == {} and not app.stop.is_set()
+    finally:
+        update.latest, update.download = kept
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):
