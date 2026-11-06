@@ -1072,6 +1072,41 @@ def test_the_snapshot_by_itself_waits_while_the_shopping_list_has_buying_to_do()
     lua.execute('Fire("AUCTION_HOUSE_CLOSED")')
 
 
+# ---- a snapshot lost with the window is let go when the house opens again -----------------------------
+def test_a_snapshot_awaited_when_the_house_closes_is_let_go_when_it_opens_again():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute('''
+      C_Item.GetItemCount = GetItemCount; GetItemCount = nil
+      C_AuctionHouse.MakeItemKey = function(item) return { itemID = item } end
+      C_AuctionHouse.GetItemKeyInfo = function(key) return { isCommodity = true } end
+      C_AuctionHouse.IsThrottledMessageSystemReady = function() return true end
+      C_AuctionHouse.SendSearchQuery = function(key) end
+      replicated, shift = 0, false
+      C_AuctionHouse.ReplicateItems = function() replicated = replicated + 1 end
+      function IsShiftKeyDown() return shift end
+      AuctionHouseFrame = CreateFrame("Frame"); AuctionHouseFrame.shown = true
+      FWCS_FRESH = {}; skill = 44; bags[0] = { { 2589, 14 } }
+      Fire("AUCTION_HOUSE_SHOW"); RunTimers()
+    ''')
+    assert lua.eval("replicated") == 1 and lua.eval("ns.scanner.Running()") is True
+    assert lua.eval("ForeverWowCraftAHButton.text") == "Scanning..."
+    # closed before the server answered, opened again: the wait is let go at once, the cooldown
+    # shown from the ask (not two minutes of "Scanning..." first), no second ask by itself
+    lua.execute('Fire("AUCTION_HOUSE_CLOSED"); Fire("AUCTION_HOUSE_SHOW"); RunTimers()')
+    assert "the snapshot awaited was lost with the window" in lua.eval("printed[#printed]") and "shift-click the button to try sooner" in lua.eval("printed[#printed]")
+    assert lua.eval("replicated") == 1 and lua.eval("ns.scanner.Running()") is False
+    assert abs(lua.eval("FWCS_DB.__ui.lastFullRefused") - lua.eval("time()")) <= 1
+    assert re.match(r"\|cff808080Prices in 1[45]:\d\d\|r$", lua.eval("ForeverWowCraftAHButton.text"))
+    # the first ask's timers fire later: they belong to the ask let go, and change nothing
+    lua.execute("RunTimers()")
+    assert lua.eval("ns.scanner.Running()") is False and lua.eval("replicated") == 1
+    # a shift-click tries sooner, for whoever wants to see whether the server answers
+    lua.execute("shift = true; ForeverWowCraftAHButton.scripts.OnClick(ForeverWowCraftAHButton)")
+    assert lua.eval("replicated") == 2 and lua.eval("ns.scanner.Running()") is True
+    lua.execute('Fire("AUCTION_HOUSE_CLOSED")')
+
+
 # ---- the freshness gate: no scan box while the house's newest scan is fresh --------------------------
 def test_the_scan_box_is_not_offered_while_the_house_was_scanned_lately_by_anyone():
     lua = _game()

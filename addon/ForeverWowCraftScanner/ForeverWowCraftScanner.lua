@@ -957,6 +957,7 @@ StartSnapshot = function(force)
     return
   end
   Begin("snapshot", CountKeys(wanted))
+  state.askedAt = time()                     -- the server's cooldown is taken to run from here
   local token = state.token
   Print(string.format("full AH snapshot requested (%d queued items to price) ...", state.total))
   Log("waiting for the server's auction list ...")
@@ -1055,6 +1056,17 @@ end
 -- so the reading goes on, and stops with a word if the list went with the window (batch
 -- looks); one not yet answered is read if the server still answers, and the timeout says
 -- otherwise. Either way the chat tells which, and the snapshot is saved on the next visit.
+-- a snapshot let go: the state as after Finish, and one line (not Finish's word about saving:
+-- nothing was recorded)
+local function Drop(reason)
+  state.running, state.current, state.reading = false, nil, nil
+  state.token = state.token + 1
+  if state.ticker then state.ticker:Cancel(); state.ticker = nil end
+  snapshotFrame:UnregisterEvent("REPLICATE_ITEM_LIST_UPDATE")
+  Print(reason)
+  UpdateStatus()
+end
+
 local function SnapshotHouseClosed()
   state.readAway = true
   if state.reading then
@@ -1092,6 +1104,17 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
     state.ahOpen = event == "AUCTION_HOUSE_SHOW"
     state.offered = nil                                   -- the gate: decided once a visit
     if not state.ahOpen and state.running and state.kind == "snapshot" then SnapshotHouseClosed() end
+    if state.ahOpen and state.running and state.kind == "snapshot" and state.readAway and not state.reading and state.done == 0 then
+      -- the snapshot awaited went with the window: a closed house gets no answer (12 Oct 2026),
+      -- and waiting the 120 s out kept the button at "Scanning..." on the reopened house (6 Nov
+      -- 2026). Let go at once, and the server's cooldown taken to run from the ask: whether it
+      -- does is not known (the user, 6 Nov 2026: the first ask most likely starts it), and a
+      -- shift-click on the button, or /fwcs full force, tries sooner for whoever wants to see
+      Settings().lastFullRefused = state.askedAt or time()
+      ArmReadyAlert()
+      Drop(string.format("the snapshot awaited was lost with the window: a closed house gets no answer, and the cooldown runs from the ask. "
+        .. "Prices in %s at the latest; shift-click the button to try sooner.", FormatClock(FullCooldownLeft())))
+    end
     if state.ahOpen then
       local was = Faction()
       openHouse = HouseHere()
@@ -1151,7 +1174,7 @@ ns.scanner = {
   Open = function() return state.ahOpen end,
   CooldownLeft = FullCooldownLeft, CooldownKnown = FullCooldownKnown, Clock = FormatClock,
   HasLists = function() return #QueueNames() > 0 end,
-  StartSnapshot = function() StartSnapshot(false) end,
+  StartSnapshot = function(force) StartSnapshot(force == true) end,       -- force: a shift-click, past the cooldown
   Reload = DoReload,
   BarHidden = BarHidden, AutoScanEnabled = AutoScanEnabled, AlertEnabled = AlertEnabled, ReadyAlertEnabled = ReadyAlertEnabled,
   Refresh = function() UpdateStatus() end, ArmReadyAlert = ArmReadyAlert,

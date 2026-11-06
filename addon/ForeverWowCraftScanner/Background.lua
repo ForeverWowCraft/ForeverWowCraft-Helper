@@ -25,9 +25,9 @@ local function Tip(self)
   elseif sc.Running() then
     GameTooltip:AddLine("Recording the auction house's prices. Keep the auction house open; it takes a moment.", 1, 1, 1, true)
   elseif sc.CooldownLeft() > 0 then
-    GameTooltip:AddLine(string.format("The auction house can be read once every 15 minutes%s. Next in %s%s.",
+    GameTooltip:AddLine(string.format("The auction house can be read once every 15 minutes%s. Next in %s%s.%s",
       sc.AutoScanEnabled() and ", by itself when it is open" or "", sc.Clock(sc.CooldownLeft()),
-      sc.CooldownKnown() and "" or " at the latest"), 1, 1, 1, true)
+      sc.CooldownKnown() and "" or " at the latest", sc.CooldownKnown() and "" or " Shift-click tries now."), 1, 1, 1, true)
   else
     GameTooltip:AddLine("Click to record the auction house's prices. Only AH pricing information is sent to "
       .. "foreverwowcraft.com. Thanks for helping the community by running and saving a scan!", 1, 1, 1, true)
@@ -94,7 +94,7 @@ Button = function()
   button:SetScript("OnClick", function()
     local sc = Scanner()
     if sc.Dirty() then sc.Reload()
-    elseif not sc.Running() and sc.CooldownLeft() <= 0 then sc.StartSnapshot() end
+    elseif not sc.Running() and (sc.CooldownLeft() <= 0 or IsShiftKeyDown and IsShiftKeyDown()) then sc.StartSnapshot(IsShiftKeyDown and IsShiftKeyDown() or false) end
   end)
   button:SetScript("OnEnter", Tip)
   button:SetScript("OnLeave", GameTooltip_Hide)
