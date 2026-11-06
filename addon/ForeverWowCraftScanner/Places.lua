@@ -61,6 +61,36 @@ local function Distance(map, x1, y1, x2, y2)
   return math.sqrt(dx * dx + dy * dy)
 end
 
+-- a map position in the world: continent, x (north), y (west), from the seed's rectangle of
+-- the map (world = { continent, x0, y0, x1, y1 }: the seed's maker puts things on maps the
+-- other way round); nil for a map the seed does not know
+local function World(map, fx, fy)
+  local w = FWCS_SEED and FWCS_SEED.world and FWCS_SEED.world[map]
+  if not w then return end
+  return w[1], w[4] - fy * (w[4] - w[2]), w[5] - fx * (w[5] - w[3])
+end
+
+-- yards between two places on any maps of one continent, through the world; nil across
+-- continents (a boat or a zeppelin, not a thing to measure) or without the seed's rectangles.
+-- Without it, the nearest on another map was the first fitting row of the seed: Westfall was
+-- sent to Brill for Journeyman First Aid (6 Nov 2026)
+local function Far(map1, x1, y1, map2, x2, y2)
+  local c1, a1, b1 = World(map1, x1, y1)
+  local c2, a2, b2 = World(map2, x2, y2)
+  if not c1 or c1 ~= c2 then return nil end
+  return math.sqrt((a1 - a2) ^ 2 + (b1 - b2) ^ 2)
+end
+ns.Far = Far
+
+-- whether a place `d` yards off (nil: not measurable) beats the best so far: the nearer
+-- measured one; a measured one over one that is not; else the one seen last
+local function Nearer(d, p, bestD, best)
+  if not best then return true end
+  if d and bestD then return d < bestD end
+  if d or bestD then return d ~= nil end
+  return (p.t or 0) > (best.t or 0)
+end
+
 -- The way to turn an arrow that points up so that it points from (x1, y1) to (x2, y2), for a
 -- character facing `facing` (radians, 0 north, turning left positive, as GetPlayerFacing):
 -- radians, turning left positive, as SetRotation takes. Map x grows east, y grows south;
@@ -230,10 +260,10 @@ function ns.NearestPlace(kind, what, item, upto)
   local map, x, y = Here()
   local mine = Mine()
   -- asked how far (a rank to train): a trainer that says it teaches that far comes first, on
-  -- this map or another; one that does not say (noted before the addon kept that, 11 Oct
-  -- 2026: it led to the apprentice trainer) is a last resort; one that says 0 (a specialist,
-  -- recipes only) never
-  local best, bestD, other, maybe, maybeD, maybeOther
+  -- this map or another (the nearest through the world: Far); one that does not say (noted
+  -- before the addon kept that, 11 Oct 2026: it led to the apprentice trainer) is a last
+  -- resort; one that says 0 (a specialist, recipes only) never
+  local best, bestD, other, otherD, maybe, maybeD, maybeOther, maybeOtherD
   for _, p in ipairs(All()) do
     if p.kind == kind and (what == nil or p.what == what) and (item == nil or In(p.sells, item)) and Reachable(p, mine) then
       local fits = upto == nil or (p.upto ~= nil and p.upto >= upto)
@@ -246,18 +276,21 @@ function ns.NearestPlace(kind, what, item, upto)
           elseif not maybe or d < maybeD then
             maybe, maybeD = p, d
           end
-        elseif fits then
-          if not other or (p.t or 0) > (other.t or 0) then other = p end
-        elseif not maybeOther or (p.t or 0) > (maybeOther.t or 0) then
-          maybeOther = p
+        else
+          local d = map and Far(map, x, y, p.map, p.x, p.y) or nil
+          if fits then
+            if Nearer(d, p, otherD, other) then other, otherD = p, d end
+          elseif Nearer(d, p, maybeOtherD, maybeOther) then
+            maybeOther, maybeOtherD = p, d
+          end
         end
       end
     end
   end
   if best then return best, Distance(map, best.x, best.y, x, y), true end
-  if other then return other, nil, false end
+  if other then return other, otherD, false end
   if maybe then return maybe, Distance(map, maybe.x, maybe.y, x, y), true end
-  if maybeOther then return maybeOther, nil, false end
+  if maybeOther then return maybeOther, maybeOtherD, false end
 end
 
 -- ================================================================ the arrow

@@ -72,7 +72,7 @@ local function Point(v, by)
       v.target, v.title = p, title
       pointed = { target = p, title = title, note = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn, rank = v.rank }
       table.insert(v.tip, here and (d and string.format("The arrow points at the nearest: %s, %d yd.", title, math.floor(d + 0.5)) or "The arrow points at the nearest: " .. title .. ".")
-        or string.format("The nearest seen is in %s: %s.", ns.places.MapName(p.map), title))
+        or string.format("The nearest seen is in %s: %s%s.", ns.places.MapName(p.map), title, d and string.format(", about %d yd as the crow flies", math.floor(d + 0.5)) or ""))
       ns.SetArrow(p, title, false, v.text, pointed.profession)
     else
       local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1]

@@ -708,6 +708,15 @@ def test_the_seed_knows_the_vanilla_world():
     # a trainer that teaches further than any in the city is sought elsewhere
     found = lua.eval('ns.NearestPlace("trainer", "tailoring", nil, 290)')
     assert found is None or found[0].name != "Georgio Bolero"
+    # from Westfall, where no first-aid trainer is, the one that teaches Journeyman (to 76) is
+    # Goldshire's, the nearest through the world, not the first fitting row of the seed (Brill's,
+    # labelled Western Plaguelands by its rectangle: 6 Nov 2026); yards are said, not pointed
+    lua.execute("map, px, py = 1436, 0.56, 0.47")
+    p, d, here = lua.eval('ns.NearestPlace("trainer", "first-aid", nil, 76)')
+    assert p.name == "Michelle Belle" and here is False and 1000 < d < 2500
+    assert lua.eval("ns.Far(1436, 0.56, 0.47, 1453, 0.53, 0.45)") > lua.eval("ns.Far(1436, 0.56, 0.47, 1429, 0.43, 0.66)")   # Stormwind is further
+    assert lua.eval("ns.Far(1436, 0.56, 0.47, 1454, 0.5, 0.5)") is None                   # Orgrimmar: another continent
+    lua.execute("map, px, py = 1453, 0.52, 0.83")
     # an anvil, and the auction house
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
@@ -749,10 +758,10 @@ def test_places_are_noted_as_the_character_meets_them():
     p, d, here = lua.eval('ns.NearestPlace("vendor", nil, %d)' % THREAD)
     assert p.kind == "vendor" and abs(d - 200) < 1e-6 and here is True
     assert lua.eval('ns.NearestPlace("vendor", nil, 25)') is None
-    # on another map, the one seen last is named, without a distance
+    # on another map, the one seen is named, with the way through the world (Stormwind from Elwynn)
     lua.execute('map = 1429')
     p, d, here = lua.eval('ns.NearestPlace("trainer", "tailoring")')
-    assert p.what == "tailoring" and d is None and here is False
+    assert p.what == "tailoring" and d is not None and 0 < d < 3000 and here is False
 
 
 def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
