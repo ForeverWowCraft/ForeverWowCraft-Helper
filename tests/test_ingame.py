@@ -108,7 +108,7 @@ function GetItemCount(item, withBank)
   return n + (withBank and (bank[item] or 0) or 0)
 end
 skill = 44
-money = 0                           -- copper in the bags
+money = 1000000                     -- copper in the bags: 100 gold, so that nothing is short of gold unless a test says
 function GetMoney() return money end
 function GetNumSkillLines() return 2 end
 function GetSkillLineInfo(i) if i == 1 then return "Professions", true end return "Tailoring", false, false, skill end
@@ -307,6 +307,7 @@ def test_the_window_shows_the_route_less_bags_and_bank():
     # the gold: how far it reaches is said; ticked, the route is cut there (the slider's right end
     # is then the gold's, and moving the left end does not make it the player's)
     plain = lambda: re.sub(r"\|c[0-9a-f]{8}|\|r", "", lua.eval("AllText()"))  # noqa: E731
+    lua.execute('money = 0; Fire("PLAYER_MONEY"); RunTimers()')
     assert "Gold in your bags, 0c: as far as skill 44 of the 60." in plain()
     lua.execute('money = 110; Fire("PLAYER_MONEY"); RunTimers()')           # 25c a point from here, with the alt's bolts
     assert "Gold in your bags, 1s 10c: as far as skill 48 of the 60." in plain() and lua.eval("ForeverWowCraftGold.text") == "1s 10c"
@@ -537,16 +538,6 @@ def test_the_scanner_in_the_background():
     assert lua.eval("ForeverWowCraftAHButton.text") == "Scan Prices"
 
 
-if __name__ == "__main__":
-    if lupa is None:
-        print("skipped: no Lua here (pip install lupa); tests/lua_check.py still reads the addon's files")
-        sys.exit(0)
-    for k, v in list(globals().items()):
-        if k.startswith("test_") and callable(v):
-            v()
-            print("ok", k)
-
-
 # ---- the Make button (Craft.lua) -------------------------------------------------------------
 def _next(lua, skill, have):
     """ns.NextCraft of the document's tailoring route, as Python values."""
@@ -631,6 +622,20 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     assert [lua.eval(f"ForeverWowCraftShop.rows[{i}].name.text") for i in (1, 2, 3)] == ["Linen Cloth", "Coarse Thread", "Bleach"]
     assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 14, have 0" and lua.eval("ForeverWowCraftShop.rows[2].status.text") == "vendor"
     lua.execute("ForeverWowCraftShop:Hide()")
+    # the purse short of what the step buys (6s 65c): the words say by how much and the two ways
+    # out, the cloth farmed instead of bought, not the vendor's thread and dye; no arrow to a
+    # seller, the click still lists; red. The gold back, the verdict is the buy again
+    lua.execute('money = 400; Fire("PLAYER_MONEY")')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    assert strip(text()) == "Short 2s 65c: farm gold or farm 14 Linen Cloth" and mode() == "Short"
+    tip = [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]
+    assert "Gold in the bags: 4s 00c; this needs about 6s 65c." in tip and "Farm the gold, or farm 14 Linen Cloth instead of buying (the rest takes gold)." in tip
+    assert tip[-1] == "Click: the shopping list." and lua.eval("ForeverWowCraftMake.verdict.place") is None
+    assert lua.eval("ForeverWowCraftMake.verdict.short") == 265 and strip(lua.eval("ForeverWowCraftArrow.text.text")).endswith("Short 2s 65c: farm gold or farm 14 Linen Cloth")
+    click()
+    assert lua.eval("ForeverWowCraftShop.shown") is True and strip(lua.eval("printed[#printed]")).startswith("ForeverWowCraft: Short 2s 65c: farm gold or farm 14 Linen Cloth. Click: the shopping list.")
+    lua.execute('ForeverWowCraftShop:Hide(); money = 1000000; Fire("PLAYER_MONEY")')
+    assert text() == "Buy at the auction house (1) and a vendor (2)" and mode() == "Buy"
     # with some bolts already, the bolts still short of the step's 7 come first (5 more), not
     # the shirt the bags could make one of: branches before the root
     lua.execute('bags[0] = { { 2589, 14 }, { 2996, 2 }, { 2320, 7 }, { 2324, 7 } }; Fire("BAG_UPDATE_DELAYED")')
@@ -748,6 +753,38 @@ def test_places_are_noted_as_the_character_meets_them():
     lua.execute('map = 1429')
     p, d, here = lua.eval('ns.NearestPlace("trainer", "tailoring")')
     assert p.what == "tailoring" and d is None and here is False
+
+
+def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
+    """The step's reagents in the bags, the recipe to buy (5s) and 1s in the purse: short, and
+    nothing to farm but the gold. With the silver, the recipe is the next thing."""
+    lua = _game()
+    lua.execute('''
+      learned, reqs = { [2963] = true, [2393] = true, [2385] = false }, {}
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function(id) return reqs[id] or {} end,
+        CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      local doc = FWCS_PLANS["stonespine--horde"]
+      doc.plans["tailoring-trainer"].steps[3].learn = { 6000, 500 }
+      doc.plans["tailoring-trainer"].buy[6000] = { 500, "vendor" }
+      doc.items[6000] = "Pattern: Brown Linen Vest"
+      skill = 51
+      bags[0] = { { 2996, 36 }, { 2320, 12 } }
+      money = 100
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    text = lambda: strip(lua.eval("ForeverWowCraftMake.verdict.text"))  # noqa: E731
+    tip = lambda: [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]  # noqa: E731
+    assert text() == "Short 4s 00c: farm gold" and lua.eval("ForeverWowCraftMake.mode") == "Short"
+    assert "Gold in the bags: 1s 00c; this needs about 5s 00c." in tip() and "Farm the gold: what is short is bought, not farmed." in tip()
+    assert lua.eval("ForeverWowCraftMake.verdict.place") is None and lua.eval("ForeverWowCraftMake.verdict.shopping[1].recipe") is True
+    lua.execute('money = 600; Fire("PLAYER_MONEY")')
+    assert text() == "Learn Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "vendor"
 
 
 def test_the_make_button_points_the_arrow_at_what_it_needs():
@@ -1308,3 +1345,13 @@ def test_the_shopping_list_buys_at_the_auction_house_a_click_and_a_confirm_each(
     assert shop("shown") is False
     lua.execute('ns.ShopCommand("")')
     assert "does not open with the auction house" in lua.eval("printed[#printed]")
+
+
+if __name__ == "__main__":
+    if lupa is None:
+        print("skipped: no Lua here (pip install lupa); tests/lua_check.py still reads the addon's files")
+        sys.exit(0)
+    for k, v in list(globals().items()):
+        if k.startswith("test_") and callable(v):
+            v()
+            print("ok", k)

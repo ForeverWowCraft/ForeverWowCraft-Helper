@@ -493,11 +493,41 @@ local function VerdictOf(given)
   return { text = "Reagents missing", tip = tip }
 end
 
--- the verdict, with its note (the next rank to train, from 25 below the cap)
+-- ================================================================ the gold
+-- A verdict that buys (its shopping list: reagents, a recipe, a tool) is held against the gold
+-- in the bags. Short of it, the words say by how much and the two ways out: gold farmed, or
+-- the reagents farmed instead of bought, where they can be (the recipe and a vendor's goods
+-- take gold; what the house sells drops or grows somewhere). No arrow to a seller for what
+-- cannot be paid; the click still opens the list, with the prices. The user, 6 Nov 2026: told
+-- to buy a cooking recipe without the silver for it.
+local function Short(v)
+  if not v.shopping or not GetMoney then return v end
+  local cost, unknown, farm = 0, false, {}
+  for _, e in ipairs(v.shopping) do
+    local n = e.units - (e.have or 0)
+    if n > 0 then
+      if e.price then cost = cost + e.price * n else unknown = true end
+      if e.source ~= "vendor" and not e.recipe then table.insert(farm, string.format("%d %s", n, N(House() or {}, e.item))) end
+    end
+  end
+  local gold = GetMoney() or 0
+  if cost <= gold then return v end
+  v.short, v.place, v.show = cost - gold, nil, true
+  v.text = string.format("Short %s: farm gold%s", ns.Money(cost - gold), #farm > 0 and (" or farm " .. table.concat(farm, ", ")) or "")
+  local at = #v.tip + 1                                    -- before "Click: ..." when that is the last line
+  if v.tip[#v.tip] and v.tip[#v.tip]:match("^Click") then at = #v.tip end
+  table.insert(v.tip, at, string.format("Gold in the bags: %s; this needs about %s%s.", ns.Money(gold), ns.Money(cost), unknown and " at least" or ""))
+  table.insert(v.tip, at + 1, #farm > 0 and ("Farm the gold, or farm " .. table.concat(farm, ", ") .. " instead of buying" .. (#farm < #v.shopping and " (the rest takes gold)" or "") .. ".")
+                                        or "Farm the gold: what is short is bought, not farmed.")
+  return v
+end
+
+-- the verdict, with its note (the next rank to train, from 25 below the cap) and the gold
 local function Verdict(given)
   asideOf = nil
   local v = VerdictOf(given)
   if type(v) == "table" and asideOf then v.aside = asideOf end
+  if type(v) == "table" then Short(v) end
   return v
 end
 

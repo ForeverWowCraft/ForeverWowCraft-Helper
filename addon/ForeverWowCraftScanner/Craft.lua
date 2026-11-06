@@ -18,13 +18,15 @@ local Verdict, Bags, Shopping, api, NoteStations, Selected, N = V.Verdict, V.Bag
 -- ================================================================ the button
 -- An icon at the top right of the recipe page's detail, a glow pulsing round it in the colour
 -- of what the click does: gold to make, green to buy, blue to learn, orange for a station it
--- needs; no glow, and the icon grey, when it can do nothing. The tooltip has the words and the
+-- needs, red when the gold in the bags is short of what the step buys; no glow, and the icon
+-- grey, when it can do nothing. The tooltip has the words and the
 -- whole story; a click says the words in chat and acts; the arrow, when there is one, has
 -- them in brackets.
 local button, running          -- running = { to, line } while a click's crafting may be going
 local pointed                  -- the last { target, title, text } the arrow was set to, for the Keep arrow box
 
-local GLOWS = { Make = { 0.3, 0.95, 1 }, Buy = { 0.3, 1, 0.4 }, Learn = { 0.75, 0.55, 1 }, Needs = { 1, 0.55, 0.2 } }   -- cyan, green, violet, orange
+local GLOWS = { Make = { 0.3, 0.95, 1 }, Buy = { 0.3, 1, 0.4 }, Learn = { 0.75, 0.55, 1 }, Needs = { 1, 0.55, 0.2 },   -- cyan, green, violet, orange
+                Short = { 1, 0.35, 0.35 } }                                                                             -- red: the gold is short
 local function ModeOf(v)
   local word = v and v.text and v.text:match("^(%a+)")
   if word == "Make" and not v.spell then word = nil end             -- "Make N X first": nothing to make yet
@@ -378,7 +380,7 @@ end
 
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_CLOSE",
-                         "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED",
+                         "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY",
                          "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE" }) do
   pcall(frame.RegisterEvent, frame, event)
 end
