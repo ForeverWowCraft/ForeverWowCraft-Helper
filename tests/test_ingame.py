@@ -521,12 +521,11 @@ def test_a_character_of_a_house_without_routes_is_told_what_to_do():
 def test_the_scanner_in_the_background():
     """The button on the auction house frame, and the options page, against the stub."""
     lua = _game()
-    lua.execute("FWCS_DEV = nil")                                   # as an install from a zip has it
     assert lua.eval("ns.scanner.BarHidden()") and lua.eval("ns.scanner.AutoScanEnabled()") and not lua.eval("ns.scanner.ReadyAlertEnabled()")
-    lua.execute("FWCS_DEV = true")
+    lua.execute("FWCS_DEV = true")                                  # what a helper before 1.5.6 wrote from a checkout: no longer shows the bar
+    assert lua.eval("ns.scanner.BarHidden()") and lua.eval("ns.scanner.AutoScanEnabled()")
+    lua.execute("FWCS_DEV = nil; FWCS_DB.__ui.hidden = false")      # the switch is the only way to the bar
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
-    lua.execute("FWCS_DEV = nil; FWCS_DB.__ui.hidden = false")      # the switch, once set, wins
-    assert not lua.eval("ns.scanner.BarHidden()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
     assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 6

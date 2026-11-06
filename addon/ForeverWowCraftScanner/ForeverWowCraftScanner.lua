@@ -78,13 +78,15 @@ end
 -- Two ways to scan. With the bar (FULL / SCAN / SAVE and the progress box) the scanner is in
 -- view, for whoever runs the project. Without it the scanner is in the background: a small
 -- button on the auction house frame (Background.lua), a scan by itself when the house opens,
--- a sound when there is something to save. The bar is the default only where the helper runs
--- from a checkout of the repository (FWCS_DEV, written into Plans.lua); an install from a zip
--- or CurseForge gets the background. The options page (Interface, AddOns) has the switches.
+-- a sound when there is something to save. The background is the default for everyone: the
+-- bar shows only once it is switched on (the options page, Interface, AddOns, or /fwcs bar),
+-- and the switch is kept for the account. Until 1.5.6 a helper run from a checkout of the
+-- repository wrote FWCS_DEV into Plans.lua and that showed the bar; a stray copy of such a
+-- Plans.lua put the bar in front of a player (6 Nov 2026), so nothing in a file decides now.
 local function BarHidden()
   local s = Settings()
   if s.hidden ~= nil then return s.hidden end
-  return FWCS_DEV ~= true
+  return true
 end
 local function AutoScanEnabled()
   local s = Settings()

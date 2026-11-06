@@ -119,8 +119,7 @@ def test_the_document_is_checked():
 def test_plans_lua_holds_the_document_for_the_addon():
     text = plans.plans_text([document(realm="Classic Beta PvE", house="classicbetapve--horde")], "https://example.test", written=NOW)
     parsed = luatable.parse(text)
-    assert parsed["FWCS_PLANS_WRITTEN"] == NOW and "FWCS_DEV" not in parsed             # an install: the background scanner
-    assert luatable.parse(plans.plans_text([], "x", dev=True))["FWCS_DEV"] is True       # a checkout: the bar
+    assert parsed["FWCS_PLANS_WRITTEN"] == NOW and "FWCS_DEV" not in parsed             # nothing in the file shows the bar (1.5.6)
     held = parsed["FWCS_PLANS"]["classicbetapve--horde"]
     assert held["realms"] == ["classicbetapve"] and held["faction"] == "Horde"       # realms as the addon compares them
     assert held["items"][2568] == 'Brown "Linen" Vest'                                # by number, quotes kept

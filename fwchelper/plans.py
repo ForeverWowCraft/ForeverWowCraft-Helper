@@ -55,8 +55,7 @@ The site has, beside each auction house's pages, one document for the addon:
 
 The addon reads Plans.lua, the same data as a Lua table (FWCS_PLANS[<key>]), at the next /reload
 or login, with FWCS_PLANS_WRITTEN = when the helper last wrote or touched it (the addon says,
-quietly, when the helper is not installed or has not run for days) and FWCS_DEV = true when the
-helper runs from a checkout (the addon then shows its scanner's bar by default). It takes from a
+quietly, when the helper is not installed or has not run for days). It takes from a
 route what the character has, in the game: nothing of what a character has is sent anywhere. Which houses are fetched is told from the characters the
 addon has seen (FWCS_DB.__chars) and the auction houses it has scanned.
 
@@ -335,22 +334,17 @@ def for_addon(doc: dict) -> dict:
     return out
 
 
-def developing() -> bool:
-    """Whether this helper runs from a checkout of the repository (its own, or the core's that
-    holds it), rather than from a zip or a store: the addon then shows its scanner's bar by
-    default, where an installed one scans in the background."""
-    return (settings.ROOT / ".git").exists() or (settings.ROOT.parent / ".git").exists()
-
-
-def plans_text(docs: list[dict], site: str, written: int | None = None, dev: bool = False) -> str:
-    """Plans.lua for these documents: the routes, when they were written (the addon tells from
-    it whether the helper runs), and whether this is a developer's install."""
+def plans_text(docs: list[dict], site: str, written: int | None = None) -> str:
+    """Plans.lua for these documents: the routes, and when they were written (the addon tells
+    from it whether the helper runs). Nothing else: until 1.5.6 a helper run from a checkout
+    of the repository added FWCS_DEV = true, which showed the addon's scanner bar, and a copy
+    of that file in front of a player showed it to them (6 Nov 2026). The bar is a switch in
+    the game now, nothing a file says."""
     return "\n".join([
         f"-- Written by `python fwch.py plans` from {site}; do not edit by hand.",
         "-- The routes of your characters' auction houses, for the /fwc window. See fwchelper/plans.py.",
         f"{PLANS_GLOBAL}_WRITTEN = {int(written if written is not None else time.time())}",
-        f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs})]
-        + (["FWCS_DEV = true"] if dev else []) + [""])
+        f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs}), ""])
 
 
 def kept_file() -> Path:
@@ -375,7 +369,7 @@ def stamps(path: Path | None = None) -> dict[str, int]:
 
 def write(docs: list[dict], site: str) -> list[Path]:
     """Write Plans.lua: the helper's own copy, and the installed addon's when it is installed."""
-    text = plans_text(docs, site, dev=developing())
+    text = plans_text(docs, site)
     targets = [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else [])
     for t in targets:
         t.parent.mkdir(parents=True, exist_ok=True)
