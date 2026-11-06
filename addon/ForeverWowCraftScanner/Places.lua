@@ -229,15 +229,51 @@ local function NoteTrainer()
 end
 
 -- a merchant: which of the routes' items it sells
+-- A merchant's window: the vendor is noted as a place (the route's items it sells, for the
+-- arrow), and its whole stock is kept by the creature's id (FWCS_DB.__vendors, since 1.6.5):
+-- each slot's item, price, stack, how many are in stock (-1: as many as asked for), whether
+-- the character may buy it, and what it costs beside gold (a trade faction's Favor); where the
+-- vendor stood, the character's faction, when, and the client's build. The helper sends that
+-- to the pipe, where the core learns who sells which recipe on Forever, which the client's
+-- tables do not say (6 Nov 2026). Nothing of the character goes in; an item it may not buy
+-- for its reputation is recorded as not usable, not left out.
 local function NoteVendor()
   if not (GetMerchantNumItems and GetMerchantItemLink) then return end
-  local tracked, sells = Tracked(), {}
-  for i = 1, GetMerchantNumItems() do
+  local tracked, sells, wares, n = Tracked(), {}, {}, GetMerchantNumItems()
+  for i = 1, n do
     local link = GetMerchantItemLink(i)
     local item = link and tonumber(link:match("item:(%d+)"))
-    if item and tracked[item] and not In(sells, item) then table.insert(sells, item) end
+    if item then
+      if tracked[item] and not In(sells, item) then table.insert(sells, item) end
+      if GetMerchantItemInfo then
+        local _, _, price, stack, available, _, usable, extended = GetMerchantItemInfo(i)
+        local row = { price = tonumber(price) or 0, stack = tonumber(stack) or 1, n = tonumber(available) or -1, usable = usable and true or false }
+        if extended and GetMerchantItemCostInfo and GetMerchantItemCostItem then
+          local count = GetMerchantItemCostInfo(i)
+          for j = 1, tonumber(count) or 0 do
+            local _, value, costLink = GetMerchantItemCostItem(i, j)
+            local costItem = costLink and (tonumber(costLink:match("item:(%d+)")) or tonumber(costLink:match("currency:(%d+)")))
+            if costItem and value then row.cost = row.cost or {}; row.cost[costItem] = value end
+          end
+        end
+        wares[item] = row
+      end
+    end
   end
-  if #sells > 0 then Note("vendor", Npc() or "?", { name = Npc(), sells = sells }) end
+  local npc = Npc() or "?"
+  if #sells > 0 then Note("vendor", npc, { name = npc, sells = sells }) end
+  local guid = UnitGUID and UnitGUID("npc")
+  local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+  local map, x, y = Here()
+  if id and map and next(wares) then
+    FWCS_DB.__vendors = FWCS_DB.__vendors or {}
+    local v = FWCS_DB.__vendors[id] or { items = {} }
+    local mine = UnitFactionGroup and UnitFactionGroup("player")
+    v.name, v.map, v.x, v.y, v.t, v.faction = npc, map, x, y, time(), (mine == "Alliance" or mine == "Horde") and mine or ""
+    if GetBuildInfo then local _, build = GetBuildInfo(); v.build = build end
+    for item, row in pairs(wares) do row.t = v.t; v.items[item] = row end      -- the union: an item sold out this time stays, with its last sighting
+    FWCS_DB.__vendors[id] = v
+  end
 end
 
 -- The nearest place of a kind: of `what` when given, selling `item` when given, teaching as

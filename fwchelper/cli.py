@@ -261,6 +261,28 @@ def wait_text(seconds: float) -> str:
     return f"{seconds / 60:g} min" if seconds >= 60 else f"{seconds:g} s"
 
 
+def send_vendors_once(p, path: Path | None = None) -> bool:
+    """Send the vendors the addon has seen (scan.vendors), when they changed since they were
+    last sent: one document, the union of every sighting, kept at the pipe per helper.
+    Returns whether anything was sent."""
+    file = path or (scan.find_saved_variables() or [None])[0]
+    seen = scan.vendors(file) if file and file.suffix == ".lua" else {}
+    if not seen:
+        return False
+    doc = pipemod.vendors_document(seen)
+    mark = pipemod.mark_vendors(doc)
+    sent = json.loads(_sent_file().read_text(encoding="utf-8")) if _sent_file().exists() else {}
+    if sent.get("__vendors") == mark:
+        return False
+    answer = p.send_vendors(doc)
+    settings.STATE.mkdir(parents=True, exist_ok=True)
+    sent["__vendors"] = mark
+    _sent_file().write_text(json.dumps(sent), encoding="utf-8")
+    print(f"vendors sent: {len(doc['vendors'])} seen, {sum(len(v['items']) for v in doc['vendors'].values())} wares"
+          + ("" if answer.get("new", True) else " (the pipe had them)"))
+    return True
+
+
 def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,
           stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None,
           tick=None) -> None:
@@ -271,7 +293,7 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
     called every round: the app's own chores (the addon put back when it is missing). The
     watch's lock is the caller's to take (other_watcher) and release (release_watch)."""
     asks = asks if asks is not None else {}
-    last, looked, freshened, told = None, 0.0, 0.0, None
+    last, looked, freshened, told, vendored = None, 0.0, 0.0, None, 0.0
     try:
         failures = 0                                 # refusals or failures in a row, for retry_wait
         while stop is None or not stop.is_set():
@@ -284,6 +306,12 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
             if time.time() - freshened >= settings.FRESH_EVERY:   # when each house was last scanned, for the addon's box
                 freshened = time.time()
                 told = freshen(p, quiet=True) or told
+            if time.time() - vendored >= settings.VENDORS_EVERY:  # the vendors met, when they changed
+                vendored = time.time()
+                try:
+                    send_vendors_once(p, path)
+                except (SystemExit, pipemod.PipeError) as e:
+                    print(f"vendors not sent: {e}")
             found = [path] if path else scan.find_saved_variables()
             try:
                 stamp = (found[0], found[0].stat().st_mtime, found[0].stat().st_size) if found else None

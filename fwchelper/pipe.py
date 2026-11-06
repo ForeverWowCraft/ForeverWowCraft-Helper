@@ -59,7 +59,7 @@ from pathlib import Path
 from . import __version__, settings
 from .scan import FACTIONS, ScanData, ScanItem
 
-SCAN_FORMAT, LISTS_FORMAT = "fwc-scan/1", "fwc-lists/1"
+SCAN_FORMAT, LISTS_FORMAT, VENDORS_FORMAT = "fwc-scan/1", "fwc-lists/1", "fwc-vendors/1"
 
 
 class PipeError(Exception):
@@ -139,6 +139,43 @@ def scan_from_document(doc: dict, source: Path | None = None) -> ScanData:
     return ScanData(items=items, realm=doc["realm"], path=source or Path("pipe"), faction=doc.get("faction", ""),
                     realm_names={str(k): str(v) for k, v in names.items()} if isinstance(names, dict) else {},
                     connected=[str(g) for g in group] if isinstance(group, list) else [])
+
+
+def vendors_document(vendors: dict[int, dict]) -> dict:
+    """The vendors a helper's player has met, for the pipe (POST /v1/vendors): {"format",
+    "helper", "vendors": {creature id: {name, map, x, y, t, faction, build, items: {item id:
+    {price, stack, n, usable, t, cost?}}}}}. Nothing of the player: the vendor's name and where
+    it stood, its wares and their prices, when it was seen."""
+    return {"format": VENDORS_FORMAT, "helper": __version__,
+            "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()}}
+
+
+def check_vendors(doc) -> str | None:
+    """Why this is not a fwc-vendors/1 document, or None when it is one."""
+    if not isinstance(doc, dict) or doc.get("format") != VENDORS_FORMAT:
+        return f"not a {VENDORS_FORMAT} document"
+    if not isinstance(doc.get("vendors"), dict) or not doc["vendors"]:
+        return "no vendors"
+    if len(doc["vendors"]) > 2000:
+        return "too many vendors"
+    for vid, v in doc["vendors"].items():
+        if not str(vid).isdigit() or not isinstance(v, dict) or not isinstance(v.get("name"), str) or len(v["name"]) > 80:
+            return f"vendor {vid!r} is not a vendor"
+        if not (isinstance(v.get("map"), int) and isinstance(v.get("t"), int) and v.get("faction", "") in FACTIONS + ("",)):
+            return f"vendor {vid}: no map, time or faction"
+        if not all(isinstance(v.get(k), (int, float)) and 0 <= v[k] <= 1 for k in ("x", "y")):
+            return f"vendor {vid}: not on its map"
+        if not isinstance(v.get("items"), dict) or len(v["items"]) > 400:
+            return f"vendor {vid}: no items, or too many"
+        for iid, row in v["items"].items():
+            if not str(iid).isdigit() or not isinstance(row, dict) or not all(isinstance(row.get(k), int) for k in ("price", "stack", "n", "t")):
+                return f"vendor {vid}: item {iid!r} is not a ware"
+    return None
+
+
+def mark_vendors(doc: dict) -> str:
+    """What the sightings say, less the helper's version: "already sent" goes by it."""
+    return hashlib.sha256(json.dumps(doc["vendors"], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
 
 
 def lists_document(queue: dict[str, list[tuple[int, str]]]) -> dict:
@@ -293,6 +330,13 @@ class Pipe:
     def set_sender(self, name: str, trust: str, note: str = "") -> dict:
         return self.ask("PUT", f"/v1/senders/{name}", json.dumps({"trust": trust, "note": note}).encode(), packed=False)
 
+    def send_vendors(self, doc: dict) -> dict:
+        """POST /v1/vendors: the vendors seen. {"vendors": n, "new": true|false}."""
+        problem = check_vendors(doc)
+        if problem:
+            raise PipeError(problem)
+        return self.ask("POST", "/v1/vendors", pack(doc))
+
     def send_scan(self, doc: dict, sender: str | None = None) -> dict:
         """Send a scan. `sender` is for the core's token alone: the name the pipe keeps the scan
         under (what the core read from Blizzard's API is from "blizzard-api", not "core")."""
@@ -327,6 +371,15 @@ class Pipe:
 
     def scan(self, scan_id: int) -> dict:
         return self.ask("GET", f"/v1/scans/{int(scan_id)}")
+
+    def vendors(self, after: int = 0) -> list[dict]:
+        """The vendors documents the helpers sent (the core's: GET /v1/vendors): [{sender,
+        received_at, helper, vendors, wares, bytes}], those received after `after`."""
+        return self.ask("GET", f"/v1/vendors?after={int(after)}")["vendors"]
+
+    def vendor_doc(self, sender: str) -> dict:
+        """One sender's vendors document, the newest (the core's: GET /v1/vendors/<sender>)."""
+        return self.ask("GET", f"/v1/vendors/{urllib.request.quote(sender)}")
 
     # ---- the core's state, so that the core can run anywhere -------------------------------
     def state(self) -> bytes | None:

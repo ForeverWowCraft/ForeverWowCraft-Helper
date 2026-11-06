@@ -767,6 +767,22 @@ def test_places_are_noted_as_the_character_meets_them():
     # a vendor selling thread (a route's item) and a sword (not): the thread is kept
     lua.execute('px = 0.70; wares = { 2320, 25 }; Fire("MERCHANT_SHOW")')
     assert len(places()) == 2 and places()[1]["kind"] == "vendor" and list(places()[1]["sells"].values()) == [THREAD]
+    # the vendor's whole stock, by the creature's id, for the helper to send (nothing of the character)
+    lua.execute('''
+      function GetMerchantItemInfo(i) if i == 1 then return "Coarse Thread", "tex", 10, 1, -1, true, true, false end return "Sword", "tex", 500, 1, 2, true, false, true end
+      function GetMerchantItemCostInfo(i) return i == 2 and 1 or 0 end
+      function GetMerchantItemCostItem(i, j) return "tex", 45, "|cffffffff|Hitem:250000::::::::1:::::::|h[Favor]|h|r", "Favor" end
+      function UnitGUID(unit) return "Creature-0-4170-0-10-3579-000057A14C" end
+      function GetBuildInfo() return "1.60.1", "70790", "Nov 3 2026", 16001 end
+      Fire("MERCHANT_SHOW")
+    ''')
+    v = lua.eval("FWCS_DB.__vendors[3579]")
+    assert v.name == "Thrallson" and v.map == 1453 and abs(v.x - 0.70) < 1e-9 and v.faction == "Horde" and v.build == "70790" and v.t > 0   # the stub's npc is named so
+    thread, sword = v["items"][THREAD], v["items"][25]
+    assert (thread.price, thread.stack, thread.n, thread.usable) == (10, 1, -1, True) and thread.cost is None
+    assert (sword.price, sword.n, sword.usable) == (500, 2, False) and dict(sword.cost) == {250000: 45}
+    lua.execute('GetMerchantItemInfo, GetMerchantItemCostInfo, GetMerchantItemCostItem, UnitGUID, GetBuildInfo = nil, nil, nil, nil, nil')
+    assert len(places()) == 2                                                              # the place list is as before
     # the auctioneer, in another part of town
     lua.execute('px, py = 0.60, 0.30; Fire("AUCTION_HOUSE_SHOW")')
     assert [p["kind"] for p in places()] == ["trainer", "vendor", "auction"]
@@ -903,6 +919,22 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     assert text() == "Make 1 Blacksmith Hammer first"
     lua.execute("ForeverWowCraftMake.scripts.OnClick(ForeverWowCraftMake)")
     assert [list(r.values()) for r in lua.eval("crafted").values()][-1] == [9999, 1]
+    # a place the client asks for that a recipe of the profession makes is a camp object (Forever,
+    # 6 Nov 2026): made here, not looked for in the world; made and in the bags, placed
+    lua.execute('''
+      reqs[2385] = { { name = "Tanning Rack", met = false, type = 2 } }
+      names = { [9998] = "Tanning Rack" }
+      C_TradeSkillUI.GetAllRecipeIDs = function() return { 2385, 9998 } end
+      learned[9998] = true; reqs[9998] = {}
+      Fire("TRADE_SKILL_LIST_UPDATE")
+    ''')
+    assert text() == "Make 1 Tanning Rack first" and lua.eval("ForeverWowCraftMake.verdict.place") is None
+    lua.execute('GetItemInfoInstant = function(name) if name == "Tanning Rack" then return 279941 end end; bags[0][5] = { 279941, 1 }; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Place Tanning Rack first" and lua.eval("ForeverWowCraftMake.mode") == "Place"
+    assert tip()[-1] == "Brown Linen Vest needs Tanning Rack beside you: it is in your bags, place it at your camp."
+    lua.execute('GetItemInfoInstant = nil; bags[0][5] = nil; learned[9998] = false; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Learn Tanning Rack first"                                        # not known: the trainer first, as a tool's recipe
+    lua.execute('reqs[2385] = {}; learned[9998] = true; C_TradeSkillUI.GetAllRecipeIDs = function() return { 2385 } end; Fire("TRADE_SKILL_LIST_UPDATE")')
     lua.execute('reqs[2385] = { { name = "Anvil", met = false, type = 0 }, { name = "Blacksmith Hammer", met = true, type = 1 } }; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert text() == "Needs Anvil"
     lua.execute('C_TradeSkillUI.GetAllRecipeIDs = nil; reqs[2385] = { { name = "Blacksmith Hammer", met = false, type = 1 } }; Fire("TRADE_SKILL_LIST_UPDATE")')

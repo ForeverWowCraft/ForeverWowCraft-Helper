@@ -280,6 +280,36 @@ def _newest(table: dict) -> int:
     return max((int(rec.get("t") or 0) for iid, rec in table.items() if isinstance(iid, int) and isinstance(rec, dict)), default=0)
 
 
+def vendors(path: Path | None = None) -> dict[int, dict]:
+    """The vendors the addon has seen (FWCS_DB.__vendors, since addon 1.6.5): {creature id:
+    {"name", "map", "x", "y", "t", "faction", "build", "items": {item id: {"price", "stack",
+    "n", "usable", "t", "cost"?}}}}. Empty without the file or the table."""
+    if path is None:
+        found = find_saved_variables()
+        if not found:
+            return {}
+        path = found[0]
+    try:
+        data = luatable.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
+        return {}
+    db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    held = db.get("__vendors") if isinstance(db, dict) else None
+    out: dict[int, dict] = {}
+    for vid, v in (held.items() if isinstance(held, dict) else []):
+        if not (isinstance(vid, int) and isinstance(v, dict) and isinstance(v.get("items"), dict)):
+            continue
+        items = {}
+        for iid, row in v["items"].items():
+            if isinstance(iid, int) and isinstance(row, dict):
+                items[iid] = {"price": int(row.get("price") or 0), "stack": int(row.get("stack") or 1), "n": int(row.get("n", -1) if row.get("n") is not None else -1),
+                              "usable": bool(row.get("usable")), "t": int(row.get("t") or 0),
+                              **({"cost": {int(k): int(c) for k, c in row["cost"].items() if isinstance(k, int)}} if isinstance(row.get("cost"), dict) else {})}
+        out[vid] = {"name": str(v.get("name") or ""), "map": int(v.get("map") or 0), "x": float(v.get("x") or 0), "y": float(v.get("y") or 0),
+                    "t": int(v.get("t") or 0), "faction": str(v.get("faction") or ""), "build": v.get("build"), "items": items}
+    return out
+
+
 def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:
     """What a saved file holds: [(realm, faction, items, time of the newest scan)], the most
     recently scanned first."""

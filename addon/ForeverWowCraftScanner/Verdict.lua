@@ -428,7 +428,9 @@ local function VerdictOf(given)
       local needs, place, tools = {}, nil, {}
       for _, r in ipairs(api.Requirements(c.spell)) do
         if not r.met then
-          if r.place then
+          -- a place the client asks for that a recipe of this profession makes is a camp object
+          -- (a Tanning Rack, a Spinning Wheel: Forever, 6 Nov 2026): made and placed, not found
+          if r.place and not api.ToolRecipe(r.name) then
             table.insert(needs, r.name)
             if not place then place = { "station", r.name, nil, r.name } end
           else
@@ -442,6 +444,11 @@ local function VerdictOf(given)
       if #tools > 0 then
         local tool = tools[1]
         local recipe = api.ToolRecipe(tool)
+        local owned = recipe and api.ItemByName(tool)
+        if owned and (ns.inv.Count(owned) or 0) > 0 then           -- a camp object made and in the bags: put it down
+          table.insert(tip, string.format("%s needs %s beside you: it is in your bags, place it at your camp.", c.what, tool))
+          return { text = "Place " .. tool .. " first", tip = tip, show = true, profession = profession }
+        end
         if recipe and not recipe.learned then
           table.insert(tip, string.format("%s needs %s: learn it at the trainer.", c.what, tool))
           return { text = "Learn " .. recipe.name .. " first", tip = tip, learn = recipe.spell, profession = profession,
