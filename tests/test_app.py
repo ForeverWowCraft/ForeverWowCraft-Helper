@@ -236,7 +236,30 @@ def test_the_menu_does_what_it_says():
         assert not app.startup_on() and tray.RUN_VALUE not in win.run
         app.chosen(tray.SEND)
         app.chosen(tray.ROUTES)
-        assert app.asks == {"send": True, "plans": True} and app.wake.is_set()
+        app.chosen(tray.CHECK)
+        assert app.asks == {"send": True, "plans": True, "check": True} and app.wake.is_set()
+        # the check asked for: GitHub asked at once; the newest already, a newer one installed quietly, or not reachable
+        from fwchelper import update
+        kept_latest, kept_update_now = update.latest, app.update_now
+        installed = []
+        app.update_now = lambda quiet=False: installed.append(quiet)
+        try:
+            update.latest = lambda *a, **k: appmod.__version__
+            with contextlib.redirect_stdout(app.log):
+                app.check_now()
+            assert f"update check: this is the newest, ForeverWowCraft Helper {appmod.__version__}" in _log() and installed == []
+            update.latest = lambda *a, **k: "99.0.0"
+            with contextlib.redirect_stdout(app.log):
+                app.check_now()
+            assert installed == [True] and app.status.update == "99.0.0" and "99.0.0 is out" in _log()
+            update.latest = lambda *a, **k: None
+            with contextlib.redirect_stdout(app.log):
+                app.check_now()
+            assert "update check: GitHub could not be reached" in _log() and installed == [True]
+        finally:
+            update.latest, app.update_now = kept_latest, kept_update_now
+        app.asks.pop("check")
+        app.status.update = None                    # the pretend 99.0.0 is not at the top of the menu below
         app.chosen(tray.LOG)
         app.chosen(tray.HELP)
         assert win.opened == [str(app.log.path), tray.HELP_URL]
@@ -445,7 +468,7 @@ def test_a_newer_helper_installs_by_itself_when_the_download_is_the_one_github_p
         app5 = _app(QuietWin())
         app5.status.game = Path("C:/x")
         app5.chosen(tray.AUTO)
-        assert settings.quiet_update() is False and app5.items()[-4] == (tray.AUTO, "Update by itself", True, False)
+        assert settings.quiet_update() is False and app5.items()[-5] == (tray.AUTO, "Update by itself", True, False)
         update.digest = lambda *a, **k: good
         app5.looked_addon = time.time()
         with contextlib.redirect_stdout(app5.log):

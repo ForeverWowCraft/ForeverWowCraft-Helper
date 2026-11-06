@@ -25,11 +25,16 @@ def test_the_tooltip_says_how_things_stand_in_127_characters():
     assert len(tray.tooltip(s)) == 127 and tray.tooltip(s).endswith("...")
 
 
+def by_id(rows):
+    return {r[0]: r for r in rows if r}
+
+
 def test_the_menu_has_what_the_player_may_want_and_says_whether_it_starts_with_windows():
     s = tray.Status()
     rows = tray.menu(s, startup=True)
     ids = [r[0] for r in rows if r]
-    assert ids == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.HELP, tray.QUIT]
+    assert ids == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.CHECK, tray.HELP, tray.QUIT]
+    assert by_id(rows)[tray.CHECK] == (tray.CHECK, "Check for an update now", True, False)
     assert rows.count(None) == 1 and rows[-2] is None                  # a line before Quit, as other apps have it
     assert max(len(r[1]) for r in rows if r) <= 26                     # short rows: how things stand is the tooltip's
     by = {r[0]: r for r in rows if r}
@@ -45,7 +50,8 @@ def test_a_newer_helper_is_at_the_top_of_the_menu_and_in_the_tooltip():
     s = tray.Status(game=Path("C:/Games"), update="9.9.9")
     rows = tray.menu(s, startup=False)
     assert rows[0] == (tray.UPDATE, "Update to 9.9.9...", True, False) and rows[1] is None
-    assert [r[0] for r in rows if r][1:] == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.HELP, tray.QUIT]
+    assert [r[0] for r in rows if r][1:] == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.CHECK, tray.HELP, tray.QUIT]
+    assert tray.balloon("update check: this is the newest, ForeverWowCraft Helper 1.6.8") == (tray.UPDATE_CHECK, "this is the newest, ForeverWowCraft Helper 1.6.8")
     assert [r for r in rows if r and r[0] == tray.AUTO][0] == (tray.AUTO, "Update by itself", True, True)
     assert [r for r in tray.menu(s, startup=False, auto=False) if r and r[0] == tray.AUTO][0][3] is False
     assert tray.balloon("updated to ForeverWowCraft Helper 9.9.9 by itself") == (tray.UPDATED, "Updated to ForeverWowCraft Helper 9.9.9 by itself")

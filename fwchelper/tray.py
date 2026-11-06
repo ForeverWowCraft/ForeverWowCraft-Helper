@@ -16,7 +16,7 @@ from .scan import age_text
 LOG_KEEP = 1_000_000                        # bytes, before the log rolls over (the one before is kept as .1)
 RUN_VALUE = f"{settings.NAME} Helper"       # the Run key's value, and the Start Menu shortcut's name
 HELP_URL = settings.SITE_URL + "/helper"
-STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT, UPDATE, AUTO = range(1, 11)      # the menu's items
+STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT, UPDATE, AUTO, CHECK = range(1, 12)      # the menu's items
 STARTUP_LABEL = "Start at login" if sys.platform == "darwin" else "Start with Windows"
 
 
@@ -60,6 +60,7 @@ def menu(s: Status, startup: bool, auto: bool = True) -> list:
             (LOG, "Open the log", True, False),
             (STARTUP, STARTUP_LABEL, True, startup),
             (AUTO, "Update by itself", True, auto),
+            (CHECK, "Check for an update now", True, False),    # and install it quietly when one is out (the user, 6 Nov 2026)
             (HELP, "Help", True, False), None,
             (QUIT, "Quit", True, False)]
 
@@ -90,6 +91,7 @@ def app_exe() -> Path:
 TROUBLE = "Trouble"
 UPDATE_OUT = "Update available"
 UPDATED = "Updated"
+UPDATE_CHECK = "Update check"
 TROUBLE_STARTS = ("not sent", "routes not fetched", "lists not fetched", "the pipe could not", "could not register",
                   "addon not installed", "Game not found", "the helper stopped", "update not downloaded", "update not installed")
 # lines that say something went right: the status shows them in place of the last trouble
@@ -108,6 +110,8 @@ def balloon(line: str) -> tuple[str, str] | None:
         return UPDATE_OUT, line[len("update available: "):]
     if line.startswith("updated to "):
         return UPDATED, line[0].upper() + line[1:]
+    if line.startswith("update check: "):                    # asked for from the menu: the answer, whatever it is
+        return UPDATE_CHECK, line[len("update check: "):]
     return None
 
 

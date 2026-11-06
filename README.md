@@ -198,7 +198,10 @@ is back in a moment, settings and all, and a balloon says once that it was updat
 out, a balloon says it once, and **Update to 1.6.0...** at the top of the menu installs it (the
 installer opens, closes the helper and starts it again). The quiet install's log is
 `updates\install.log` in the state folder; one that failed is said once, and that version then
-waits in the menu. On the Mac the update always waits in the menu: it is a disk image to drag.
+waits in the menu. **Check for an update now** in the menu asks GitHub at once instead of
+waiting for the day's look: a balloon says the answer, and a newer helper is installed quietly
+right away, whether or not it updates by itself as a rule (since 1.6.8). On the Mac the update
+always waits in the menu: it is a disk image to drag.
 (By itself since 1.6.0; from the menu since 1.5.5. A helper from before has to be updated by
 hand once: the installer from the site's helper page.)
 On the Mac the download is the new release's disk image: it opens, the helper quits, and you

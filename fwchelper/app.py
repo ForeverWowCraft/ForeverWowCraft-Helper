@@ -106,6 +106,9 @@ class App:
         elif ident == tray.UPDATE:
             self.asks["update"] = True
             self.wake.set()
+        elif ident == tray.CHECK:
+            self.asks["check"] = True
+            self.wake.set()
         elif ident == tray.AUTO:
             on = not settings.quiet_update()
             settings.store("UPDATE_QUIET", "1" if on else "0")
@@ -198,6 +201,8 @@ class App:
         failed on this version, or when the menu asked for it."""
         if self.asks.pop("update", False):
             self.update_now()
+        if self.asks.pop("check", False):
+            self.check_now()
         if time.time() - self.looked_update >= settings.UPDATE_EVERY:
             self.looked_update = time.time()
             self.look_for_update()
@@ -224,6 +229,26 @@ class App:
             else:
                 print(f"update available: {settings.NAME} Helper {found} is out (this one is {__version__}). {self.win.CLICK} and choose Update.")
             self.refresh()
+
+    def check_now(self) -> None:
+        """Check for an update now, from the menu: GitHub asked at once, the answer a balloon
+        whatever it is, and a newer helper installed quietly right away, whether or not it
+        installs by itself as a rule, and even if that version failed once before (the user
+        asked). Where a quiet install cannot be (the Mac, no published checksum), update_now
+        says so and the update waits at the top of the menu."""
+        self.looked_update = time.time()
+        found = update.latest()
+        if not found:
+            print("update check: GitHub could not be reached, so whether a newer helper is out cannot be told; try again later")
+            return
+        if not update.newer(found, __version__):
+            print(f"update check: this is the newest, {settings.NAME} Helper {__version__}")
+            return
+        self.status.update = found
+        self.tried.add(found)
+        self.refresh()
+        print(f"update check: {settings.NAME} Helper {found} is out (this one is {__version__}); installing it now")
+        self.update_now(quiet=True)
 
     # ---- the update itself ----------------------------------------------------------------------
     # By itself (since 1.6.0): the installer downloaded, its SHA-256 checked against the one
