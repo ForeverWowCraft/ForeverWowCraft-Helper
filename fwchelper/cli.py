@@ -102,10 +102,11 @@ class Stamped:
         self.out, self.at_start = out, True
 
     def write(self, text: str) -> int:
+        from . import tray
         for line in text.splitlines(keepends=True):
             if self.at_start and line.strip():
                 self.out.write(now() + "  ")
-            self.out.write(line)
+            self.out.write(tray.redact(line))
             self.at_start = line.endswith("\n")
         return len(text)
 

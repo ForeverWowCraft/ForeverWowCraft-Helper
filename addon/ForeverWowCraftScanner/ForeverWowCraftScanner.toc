@@ -2,7 +2,7 @@
 ## Title: ForeverWowCraft Scanner
 ## Notes: /fwc: what your professions still need, less what you have. The FWC button on the profession window crafts the route a step at a time, an arrow leads to what it needs, and a list buys it at the auction house. Records auction prices: open the auction house.
 ## Author: ForeverWowCraft
-## Version: 1.6.2
+## Version: 1.6.3
 ## SavedVariables: FWCS_DB
 ## IconTexture: Interface\AddOns\ForeverWowCraftScanner\icon
 

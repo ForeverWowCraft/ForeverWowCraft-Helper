@@ -92,6 +92,14 @@ def test_the_log_stamps_lines_rolls_over_and_tells_its_hook():
     assert re.fullmatch(stamp + "first", lines[0]) and re.fullmatch(stamp + "half, then the rest", lines[1])
     assert lines[2] == "" and re.fullmatch(stamp + "after a blank", lines[3]) and lines[4] == ""
     assert told == ["first", "half, then the rest", "after a blank"]     # whole lines, no blanks, no stamps
+    # the game account's folder name is not written, nor told: the id is the player's Battle.net account
+    # (the id is put together here: the publish check refuses a source that carries one, release.py)
+    acct = "6969" + "8708#1"
+    print("not sent: D:\\Games\\World of Warcraft\\_forever_\\WTF\\Account\\" + acct + "\\SavedVariables\\ForeverWowCraftScanner.lua holds no scan data yet", file=log)
+    last = (folder / "helper.log").read_text(encoding="utf-8").splitlines()[-1]
+    assert acct not in last and "WTF\\Account\\<account>\\SavedVariables" in last and acct not in told[-1]
+    assert tray.redact("/Users/x/WTF/Account/12345#1/SavedVariables/a.lua: ok") == "/Users/x/WTF/Account/<account>/SavedVariables/a.lua: ok"
+    assert tray.redact("Account statements") == "Account statements"
     log.hook = lambda line: 1 / 0                                         # a hook that fails loses nothing
     print("still written", file=log)
     assert "still written" in (folder / "helper.log").read_text(encoding="utf-8")

@@ -3,6 +3,7 @@ tooltip and menu say, which line of the log is worth a balloon, whether the help
 Windows, and the log itself. fwchelper/win.py (ctypes) and fwchelper/mac.py (PyObjC) are the
 hands, fwchelper/app.py drives both."""
 from __future__ import annotations
+import re
 import sys
 import threading
 import time
@@ -111,6 +112,18 @@ def balloon(line: str) -> tuple[str, str] | None:
 
 
 # ---- the log ------------------------------------------------------------------------------------
+# The game keeps its saved variables under WTF\Account\<account id>#1\...: the id is the player's
+# Battle.net account, and the helper names that file in its lines ("not sent: ... holds no scan
+# data yet"). It is not for a log that is opened from the menu and pasted for help: the folder's
+# name is replaced before a line is written (the user, 6 Nov 2026: no personal data leaking).
+ACCOUNT_FOLDER = re.compile(r"([\\/])Account([\\/])[^\\/\s]+")
+
+
+def redact(line: str) -> str:
+    """The line with the game account's folder name replaced by <account>."""
+    return ACCOUNT_FOLDER.sub(r"\1Account\2<account>", line)
+
+
 class Log:
     """A file in which every line starts with the date and time, rolled over at LOG_KEEP bytes
     (the one before is kept as .1). What print() writes while the app runs: it stands in for
@@ -130,6 +143,7 @@ class Log:
         return len(text)
 
     def _line(self, line: str) -> None:
+        line = redact(line)
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if self.path.exists() and self.path.stat().st_size > LOG_KEEP:
