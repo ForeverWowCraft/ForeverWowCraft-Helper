@@ -311,7 +311,7 @@ local function Describe(d, here)
   end
   table.insert(lines, title)
   if target.none then                                                     -- nothing to point at: no way to say
-  elseif not here then table.insert(lines, "in " .. MapName(target.map))
+  elseif not here then table.insert(lines, "in " .. MapName(target.map) .. (d and string.format(", about %d yd", math.floor(d + 0.5)) or ""))
   elseif d and d >= 10 then table.insert(lines, string.format("%d yd", math.floor(d + 0.5))) end
   if target.note then table.insert(lines, "(" .. target.note .. ")") end
   if target.aside then                                                    -- the note: folded to its title; a click opens it
@@ -346,8 +346,22 @@ local function Update()
     return
   end
   if map ~= target.map then
-    arrow.tex:Hide()
-    arrow.text:SetText(Describe(nil, false))
+    -- another map: the arrow points the way through the world, as the crow flies, when both
+    -- are on one continent (the seed's rectangles: World), with the map's name and about how
+    -- far; across continents, or off the seed's maps, the words alone. Until 1.6.0 the arrow
+    -- went with the map's name only, and the player in Westfall sent to Goldshire had the
+    -- words and no arrow (6 Nov 2026: "the arrow is surprisingly important")
+    local c1, n1, w1 = World(map, x, y)
+    local c2, n2, w2 = World(target.map, target.x, target.y)
+    if c1 and c1 == c2 then
+      arrow.tex:Show()
+      local facing = GetPlayerFacing and GetPlayerFacing() or 0
+      arrow.tex:SetRotation(ns.Bearing(0, 0, w1 - w2, n1 - n2, facing))     -- east is less west, south is less north
+      arrow.text:SetText(Describe(math.sqrt((n1 - n2) ^ 2 + (w1 - w2) ^ 2), false))
+    else
+      arrow.tex:Hide()
+      arrow.text:SetText(Describe(nil, false))
+    end
     return
   end
   arrow.tex:Show()

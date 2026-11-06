@@ -14,15 +14,15 @@ below, and <https://www.foreverwowcraft.com/privacy>.
 | | |
 |---|---|
 | **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code) and notes the ones it sees you at. At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Nothing of yours is sent: prices only |
-| **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon |
+| **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon. On Windows and on the Mac |
 
 ```
 python fwch.py where            what was found on this PC
 python fwch.py install-addon    copy the two addons into the game (--force: over a newer scanner)
 python fwch.py status           what the saved scans hold
-python fwch.py app              the Windows application: an icon by the clock that does all of the below by itself
+python fwch.py app              the application: an icon by the clock (Windows) or in the menu bar (Mac) that does all of the below by itself
 python fwch.py send --watch     the same sending, in a window (send.cmd)
-python fwch.py autostart        have the app start when you log on to Windows (--off undoes it)
+python fwch.py autostart        have the app start when you log in (--off undoes it)
 python fwch.py lists            fetch the lists to scan and write them into the addon
 python fwch.py plans            fetch your auction houses' routes and write them into the addon
 python fwch.py fresh            when each auction house was last scanned by anyone; the addon waits while that is fresh
@@ -79,6 +79,18 @@ none. A helper from before 1.5.0 kept its state in `state\` beside itself: the f
 
 If you had the addon under its old name, ForeverCraft Scanner, the helper replaces it and
 carries its saved scans over.
+
+**On a Mac:** download `ForeverWowCraft-Helper-<version>.dmg`, open it, and drag
+**ForeverWowCraft Helper** into Applications. Python is inside the application: nothing else to
+install. The application is not signed yet (the project's business signs it once it has its
+Apple Developer membership), so the first time, macOS says it cannot check it for malware:
+System Settings > Privacy & Security, scroll down, **Open Anyway**. Then it is an icon in the
+menu bar, at the top right, with the same menu: **Start at login** puts a launch agent in your
+Library (System Settings > General > Login Items lists it under "Allow in the Background"). It
+looks for the game in `/Applications/World of Warcraft`; **Choose the game folder...** in the
+menu is for anywhere else. What the helper keeps is in `~/Library/Application Support/ForeverWowCraft/Helper`:
+its log, its name and token at the pipe, and `settings.json` with the folder you chose. The
+game is the same client and the same addon folder as on Windows. (Since 1.6.0.)
 
 ## In game: what you still need
 
@@ -177,15 +189,26 @@ without spaces. The site shows the realm's name as the game does.
 ## Updating
 
 The helper looks once a day whether a newer release is out (where the newest release's address
-on GitHub redirects to; nothing of yours is sent). When one is, the icon's tooltip says so, a
-balloon says it once, and the menu has **Update to 1.5.5...** at the top: it downloads the
-installer into the helper's state folder and opens it. The installer closes the running helper,
-puts the new one over it and starts it again at the end, settings and all. (Since 1.5.5. A
-helper from before has to be updated by hand once: the installer from the site's helper page.)
+on GitHub redirects to; nothing of yours is sent). When one is, it updates by itself: the
+installer is downloaded into the helper's state folder, its SHA-256 checked against the one
+GitHub publishes for the release (a download that does not match is deleted, not installed),
+and installed with nothing shown (a per-user install: no administrator); the helper closes and
+is back in a moment, settings and all, and a balloon says once that it was updated. Untick
+**Update by itself** in the menu and the update waits instead: the tooltip says a newer one is
+out, a balloon says it once, and **Update to 1.6.0...** at the top of the menu installs it (the
+installer opens, closes the helper and starts it again). The quiet install's log is
+`updates\install.log` in the state folder; one that failed is said once, and that version then
+waits in the menu. On the Mac the update always waits in the menu: it is a disk image to drag.
+(By itself since 1.6.0; from the menu since 1.5.5. A helper from before has to be updated by
+hand once: the installer from the site's helper page.)
+On the Mac the download is the new release's disk image: it opens, the helper quits, and you
+drag the new one over the old in Applications and start it again.
 
 ## Settings
 
-Environment variables. On Windows, `setx NAME value` saves one for good.
+Environment variables. On Windows, `setx NAME value` saves one for good; on the Mac, the
+application reads them from `settings.json` in its state folder too, which is where its menu
+saves the game folder.
 
 | Setting | For |
 |---|---|
@@ -228,7 +251,9 @@ python tests/lua_check.py addon/ForeverWowCraftScanner/*.lua
 
 Each test file runs on its own, with nothing installed (`test_ingame.py` runs the addon's Lua
 when `lupa` is there, and passes without it). `test_app.py` and `test_tray.py` are the app with
-Windows stood in for; `test_installer.py` is what the installer puts in, without building it.
+Windows stood in for; `test_installer.py` is what the installer puts in, without building it;
+`test_mac.py` is the Mac's side without a Mac: the launch agent, the settings file, the lock,
+and what the application bundle holds.
 
 ## The installer
 
@@ -239,6 +264,14 @@ the installer does: a per-user install, a Start Menu entry, the Run entry that s
 at logon, "Start the helper now" at the end, and the running app closed before an upgrade or a
 removal. A release (a `v<version>` tag) builds it on a Windows runner and puts it on the
 GitHub release beside the zips.
+
+`python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac: the
+application bundle (`ForeverWowCraft Helper.app`: the helper's files, a standalone Python from
+python-build-standalone fetched and checked against its hash, PyObjC installed into it for the
+menu bar, the icon, and a launcher script; `LSUIElement`, so no Dock icon) and a disk image
+with a link to Applications beside it. A release builds it on the project's own Mac, a
+self-hosted runner, and puts it on the release too. The application is unsigned until the
+project's business has an Apple Developer membership (`docs/signing.md` in the core).
 
 `test_ingame.py` runs the addon's Lua against a stand-in for the game, and needs a Lua for
 that: `pip install lupa`. Without it, it says so and passes.

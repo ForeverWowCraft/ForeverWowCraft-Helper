@@ -5,7 +5,7 @@
   status         what the addon's saved scans hold
   send           send the latest scan through the pipe; with --watch, after every SAVE in game
   app            the same, as a Windows application: an icon by the clock, no window (fwchelper/app.py)
-  autostart      have the app start when you log on to Windows (--off undoes it)
+  autostart      have the app start when you log in (--off undoes it)
   lists          fetch the lists from the pipe and write them into the addon
   plans          fetch the routes of your characters' auction houses from the site and write them
                  into the addon, for its /fwc window; `send --watch` does it by itself
@@ -43,11 +43,11 @@ def where() -> None:
     print("Scan files:     " + (", ".join(f"{p} ({scan.age_text(int(p.stat().st_mtime))})" for p in found[:3]) if found
                                 else "none yet (open the auction house in game and click Save Prices)"))
     print(f"State folder:   {settings.STATE}")
-    if os.name == "nt":
-        from . import win
-        on = tray.startup_on(win.run_value(tray.RUN_VALUE), win.approved(tray.RUN_VALUE))
-        old = (startup_dir() / f"{settings.NAME} Helper.cmd").exists()
-        print("At logon:       " + ("the app starts" if on else "nothing (python fwch.py autostart, or the icon's menu)")
+    if os.name == "nt" or sys.platform == "darwin":
+        from .app import hands
+        on = hands().startup_on()
+        old = os.name == "nt" and (startup_dir() / f"{settings.NAME} Helper.cmd").exists()
+        print("At login:       " + ("the app starts" if on else "nothing (python fwch.py autostart, or the icon's menu)")
               + (" (and the old send.cmd entry is still there; the app removes it)" if old else ""))
     if not (base / flav).is_dir():
         print("\nSet FWC_WOW_DIR to the World of Warcraft folder and FWC_WOW_FLAVOR to the client folder "
@@ -351,8 +351,11 @@ def autostart(on: bool = True, registry=None) -> str:
     false, take it out. Returns the command written, or "" when taken out. `registry` is
     fwchelper/win.py, or in tests anything with its run_value, set_run_value and approve."""
     if registry is None:
+        if sys.platform == "darwin":
+            from . import mac
+            return mac.set_startup(on)
         if os.name != "nt":
-            raise SystemExit("autostart is for Windows: elsewhere, have your session start `python fwch.py send --watch`")
+            raise SystemExit("autostart is for Windows and the Mac: elsewhere, have your session start `python fwch.py send --watch`")
         from . import win as registry
     retire_startup_entry()
     if not on:
@@ -467,8 +470,8 @@ def main(argv=None) -> None:
     p.add_argument("--path", help="a scan file (default: the newest found)")
     p.add_argument("--realm")
     p.add_argument("--faction", help="Alliance or Horde (default: every auction house the file holds)")
-    sub.add_parser("app", help="run as a Windows application: an icon by the clock, no window; sends, fetches, installs the addon")
-    p = sub.add_parser("autostart", help="have the app start when you log on to Windows")
+    sub.add_parser("app", help="run as an application: an icon by the clock (Windows) or in the menu bar (Mac), no window; sends, fetches, installs the addon")
+    p = sub.add_parser("autostart", help="have the app start when you log in")
     p.add_argument("--off", action="store_true", help="undo that")
     sub.add_parser("lists", help="fetch the lists from the pipe and write them into the addon")
     p = sub.add_parser("plans", help="fetch the routes of your characters' auction houses and write them into the addon")
@@ -491,8 +494,9 @@ def main(argv=None) -> None:
             app.run()
         elif a.cmd == "autostart":
             command = autostart(not a.off)
-            print("The app no longer starts when you log on to Windows." if a.off
-                  else f"The app starts when you log on to Windows (Settings > Apps > Startup has a switch for it):\n  {command}")
+            switch = "System Settings > General > Login Items" if sys.platform == "darwin" else "Settings > Apps > Startup"
+            print("The app no longer starts when you log in." if a.off
+                  else f"The app starts when you log in ({switch} has a switch for it):\n  {command}")
         elif a.cmd == "lists":
             lists()
         elif a.cmd == "plans":

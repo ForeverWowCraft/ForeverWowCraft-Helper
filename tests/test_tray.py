@@ -29,12 +29,13 @@ def test_the_menu_has_what_the_player_may_want_and_says_whether_it_starts_with_w
     s = tray.Status()
     rows = tray.menu(s, startup=True)
     ids = [r[0] for r in rows if r]
-    assert ids == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.HELP, tray.QUIT]
+    assert ids == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.HELP, tray.QUIT]
     assert rows.count(None) == 1 and rows[-2] is None                  # a line before Quit, as other apps have it
     assert max(len(r[1]) for r in rows if r) <= 26                     # short rows: how things stand is the tooltip's
     by = {r[0]: r for r in rows if r}
     assert by[tray.SEND][2] is False and by[tray.ROUTES][2] is False  # nothing to send without the game
-    assert by[tray.STARTUP] == (tray.STARTUP, "Start with Windows", True, True)
+    assert by[tray.STARTUP] == (tray.STARTUP, tray.STARTUP_LABEL, True, True)
+    assert tray.STARTUP_LABEL in ("Start with Windows", "Start at login")      # the platform's word for it
     s.game = Path("C:/Games")
     by = {r[0]: r for r in tray.menu(s, startup=False) if r}
     assert by[tray.SEND][2] is True and by[tray.STARTUP][3] is False
@@ -44,7 +45,11 @@ def test_a_newer_helper_is_at_the_top_of_the_menu_and_in_the_tooltip():
     s = tray.Status(game=Path("C:/Games"), update="9.9.9")
     rows = tray.menu(s, startup=False)
     assert rows[0] == (tray.UPDATE, "Update to 9.9.9...", True, False) and rows[1] is None
-    assert [r[0] for r in rows if r][1:] == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.HELP, tray.QUIT]
+    assert [r[0] for r in rows if r][1:] == [tray.SEND, tray.ROUTES, tray.FOLDER, tray.LOG, tray.STARTUP, tray.AUTO, tray.HELP, tray.QUIT]
+    assert [r for r in rows if r and r[0] == tray.AUTO][0] == (tray.AUTO, "Update by itself", True, True)
+    assert [r for r in tray.menu(s, startup=False, auto=False) if r and r[0] == tray.AUTO][0][3] is False
+    assert tray.balloon("updated to ForeverWowCraft Helper 9.9.9 by itself") == (tray.UPDATED, "Updated to ForeverWowCraft Helper 9.9.9 by itself")
+    assert tray.balloon("update not installed: the helper is still 1.5.9")[0] == tray.TROUBLE
     assert f"Helper {__version__} (9.9.9 is out)" in tray.tooltip(s) and len(tray.tooltip(s)) <= 127
     assert tray.balloon("update available: ForeverWowCraft Helper 9.9.9 is out") == (tray.UPDATE_OUT, "ForeverWowCraft Helper 9.9.9 is out")
     assert tray.balloon("update not downloaded: no connection") == (tray.TROUBLE, "update not downloaded: no connection")

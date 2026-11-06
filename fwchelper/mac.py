@@ -1,0 +1,270 @@
+"""The Mac, through PyObjC (AppKit): the icon in the menu bar with its menu and notifications,
+the lock that keeps the app to one instance, the launch agent that starts it at login, a folder
+dialog, opening a file or an address, a user setting. Nothing here decides anything:
+fwchelper/tray.py does, and fwchelper/app.py drives, asking the same of this as of
+fwchelper/win.py. Imported on the Mac only; AppKit is imported where it is used, so that the
+plain parts (the launch agent, the settings file, the lock) are tested anywhere."""
+from __future__ import annotations
+import os
+import plistlib
+import queue
+import subprocess
+import sys
+from pathlib import Path
+
+from . import settings
+
+try:
+    import fcntl
+except ImportError:                                  # Windows, where this module is only read by the tests
+    fcntl = None
+
+# how the app's messages speak of the icon on this platform
+CLICK = "Click the icon in the menu bar"
+WHERE_ICON = "in the menu bar, at the top right"
+UPDATE_HOW = "the disk image opens: drag the new helper over the one in Applications, then start it again"
+
+ICON = Path(__file__).with_name("helper-menubar.png")
+ICON_POINTS = 18                                     # the menu bar's icons are 18 points tall; the image is 64 px and scaled
+LABEL = "com.foreverwowcraft.helper"                 # the launch agent's, and the application bundle's identifier
+_held: list = []                                     # the lock's file, open as long as the app runs
+
+
+# ---- one instance ---------------------------------------------------------------------------
+def one_instance(name: str) -> bool:
+    """Take the lock named by `name` (a file in the state folder); False when another process
+    of this user holds it already."""
+    if fcntl is None:
+        return True
+    path = settings.STATE / (name.rsplit("\\", 1)[-1] + ".lock")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(path, "a+")
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    _held.append(f)
+    return True
+
+
+# ---- starting at login ----------------------------------------------------------------------
+def agents_dir() -> Path:
+    return Path.home() / "Library" / "LaunchAgents"
+
+
+def agent_path() -> Path:
+    return agents_dir() / f"{LABEL}.plist"
+
+
+def app_bundle(executable: str | None = None) -> Path | None:
+    """The application bundle this Python runs from, or None when it runs from a checkout."""
+    p = Path(executable or sys.executable).resolve()
+    for parent in p.parents:
+        if parent.suffix == ".app" and (parent / "Contents" / "MacOS").is_dir():
+            return parent
+    return None
+
+
+def app_command(executable: str | None = None, script: Path | None = None) -> list[str]:
+    """What starts the app: the bundle's own executable when installed, else this Python and
+    fwch.py."""
+    bundle = app_bundle(executable)
+    if bundle:
+        return [str(bundle / "Contents" / "MacOS" / bundle.stem)]
+    return [executable or sys.executable, str(script or settings.ROOT / "fwch.py"), "app"]
+
+
+def launch_agent(command: list[str]) -> dict:
+    """The launch agent, as launchd reads it: run at login, and left alone after (the app keeps
+    itself alive; one that quit stays quit until the next login)."""
+    return {"Label": LABEL, "ProgramArguments": command, "RunAtLoad": True, "KeepAlive": False, "ProcessType": "Interactive"}
+
+
+def startup_on() -> bool:
+    """Whether the app starts at login: its launch agent is there. (System Settings > General >
+    Login Items lists it under "Allow in the Background", with a switch of its own: that switch
+    off keeps the agent from running, which this cannot see.)"""
+    return agent_path().exists()
+
+
+def set_startup(on: bool) -> str:
+    """Have the app start at login, or not: the launch agent written and loaded, or unloaded
+    and removed. Returns the agent's path, or "" when taken out."""
+    path = agent_path()
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    if not on:
+        subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], capture_output=True)
+        path.unlink(missing_ok=True)
+        return ""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        plistlib.dump(launch_agent(app_command()), f)
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], capture_output=True)        # an older one, so that the new is read
+    subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(path)], capture_output=True)
+    return str(path)
+
+
+# ---- the user's setting, the game, files -------------------------------------------------------
+def set_user_setting(name: str, value: str) -> None:
+    """Keep a setting for the user (settings.json in the state folder), and in this process."""
+    settings.store(name[len(settings.ENV_PREFIX):] if name.startswith(settings.ENV_PREFIX) else name, value)
+
+
+def open_path(what: str | Path) -> None:
+    """Open a file with what the Mac opens it with, or an address in the browser."""
+    subprocess.Popen(["open", str(what)])
+
+
+def game_running() -> bool:
+    """Whether a World of Warcraft client runs (its process is inside World of Warcraft.app,
+    whatever the flavour)."""
+    try:
+        r = subprocess.run(["pgrep", "-f", "World of Warcraft"], capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def message(title: str, text: str) -> None:
+    """A box with the text and an OK button."""
+    from AppKit import NSAlert, NSApplication
+    NSApplication.sharedApplication()
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_(title)
+    alert.setInformativeText_(text)
+    alert.runModal()
+
+
+def browse_folder(title: str) -> Path | None:
+    """A folder the user picks, or None. On the main thread, where the icon runs."""
+    from AppKit import NSOpenPanel
+    panel = NSOpenPanel.openPanel()
+    panel.setCanChooseDirectories_(True)
+    panel.setCanChooseFiles_(False)
+    panel.setAllowsMultipleSelection_(False)
+    panel.setMessage_(title)
+    panel.setPrompt_("Choose")
+    if panel.runModal() != 1:                       # NSModalResponseOK
+        return None
+    url = panel.URL()
+    return Path(url.path()) if url else None
+
+
+# ---- the icon ---------------------------------------------------------------------------------
+def _delegate_class():
+    """The AppKit object the menu and the application talk to, made once AppKit is wanted."""
+    import objc
+    from AppKit import NSObject
+
+    class Delegate(NSObject):
+        def initWithTray_(self, tray):
+            self = objc.super(Delegate, self).init()
+            if self is None:
+                return None
+            self.tray = tray
+            return self
+
+        def menuNeedsUpdate_(self, menu):
+            self.tray._fill(menu)
+
+        def pick_(self, sender):
+            self.tray.chosen(sender.tag())
+
+        def applicationWillTerminate_(self, note):
+            self.tray.closing()
+
+        def runCall_(self, box):
+            self.tray._drain()
+
+    return Delegate
+
+
+class Tray:
+    """The icon in the menu bar: its menu is built each time it opens (items()), a row picked
+    is chosen(id), and the application quitting is closing(). run() is the main thread's,
+    and everything else reaches it through call()."""
+
+    def __init__(self, title: str, icon: Path, items, chosen, closing):
+        self.title, self.icon, self.items, self.chosen, self.closing = title, icon, items, chosen, closing
+        self.calls: queue.Queue = queue.Queue()
+        self.app = self.item = self.delegate = None
+
+    def run(self) -> None:
+        from AppKit import (NSApplication, NSApplicationActivationPolicyAccessory, NSImage, NSMenu, NSSize, NSStatusBar,
+                            NSVariableStatusItemLength)
+        self.app = NSApplication.sharedApplication()
+        self.app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)     # no Dock icon, no menu of its own
+        self.delegate = _delegate_class().alloc().initWithTray_(self)
+        self.app.setDelegate_(self.delegate)
+        self.item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
+        image = NSImage.alloc().initWithContentsOfFile_(str(self.icon))
+        if image:
+            image.setSize_(NSSize(ICON_POINTS, ICON_POINTS))
+            self.item.button().setImage_(image)
+        else:
+            self.item.button().setTitle_("FWC")
+        self.item.button().setToolTip_(self.title)
+        menu = NSMenu.alloc().initWithTitle_(self.title)
+        menu.setAutoenablesItems_(False)
+        menu.setDelegate_(self.delegate)
+        self.item.setMenu_(menu)
+        self.app.run()
+
+    def _fill(self, menu) -> None:
+        from AppKit import NSMenuItem
+        menu.removeAllItems()
+        for row in self.items():
+            if row is None:
+                menu.addItem_(NSMenuItem.separatorItem())
+                continue
+            ident, label, enabled, checked = row
+            it = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(label, "pick:", "")
+            it.setTarget_(self.delegate)
+            it.setTag_(ident)
+            it.setEnabled_(enabled)
+            it.setState_(1 if checked else 0)
+            menu.addItem_(it)
+
+    def _drain(self) -> None:
+        while True:
+            try:
+                fn = self.calls.get_nowait()
+            except queue.Empty:
+                return
+            fn()
+
+    def call(self, fn) -> None:
+        """Run fn on the main thread, from any thread."""
+        self.calls.put(fn)
+        if self.delegate is not None:
+            self.delegate.performSelectorOnMainThread_withObject_waitUntilDone_("runCall:", None, False)
+
+    def tooltip(self, text: str) -> None:
+        if self.item is not None:
+            self.item.button().setToolTip_(text)
+
+    def balloon(self, title: str, text: str) -> None:
+        """A notification. Through the notification center when the app is a bundle it knows
+        of; else through the system's script runner, which says it as any script's."""
+        try:
+            from AppKit import NSUserNotification, NSUserNotificationCenter
+            center = NSUserNotificationCenter.defaultUserNotificationCenter()
+        except Exception:  # noqa: BLE001 - AppKit without the (old) notification classes
+            center = None
+        if center is not None:
+            note = NSUserNotification.alloc().init()
+            note.setTitle_(title)
+            note.setInformativeText_(text)
+            center.deliverNotification_(note)
+            return
+        script = f'display notification "{_quoted(text)}" with title "{_quoted(title)}"'
+        subprocess.Popen(["osascript", "-e", script])
+
+    def quit(self) -> None:
+        """Stop the event loop: run() returns, and app.py closes the rest."""
+        from PyObjCTools import AppHelper
+        AppHelper.stopEventLoop()
+
+
+def _quoted(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')

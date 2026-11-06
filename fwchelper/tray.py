@@ -1,6 +1,7 @@
-"""The tray application's mind, with nothing of Windows in it: what the icon's tooltip and
-menu say, which line of the log is worth a balloon, whether the helper starts with Windows,
-and the log itself. fwchelper/win.py is the hands (ctypes), fwchelper/app.py drives both."""
+"""The tray application's mind, with nothing of Windows or the Mac in it: what the icon's
+tooltip and menu say, which line of the log is worth a balloon, whether the helper starts with
+Windows, and the log itself. fwchelper/win.py (ctypes) and fwchelper/mac.py (PyObjC) are the
+hands, fwchelper/app.py drives both."""
 from __future__ import annotations
 import sys
 import threading
@@ -14,7 +15,8 @@ from .scan import age_text
 LOG_KEEP = 1_000_000                        # bytes, before the log rolls over (the one before is kept as .1)
 RUN_VALUE = f"{settings.NAME} Helper"       # the Run key's value, and the Start Menu shortcut's name
 HELP_URL = settings.SITE_URL + "/helper"
-STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT, UPDATE = range(1, 10)      # the menu's items
+STATUS, SEND, ROUTES, FOLDER, LOG, STARTUP, HELP, QUIT, UPDATE, AUTO = range(1, 11)      # the menu's items
+STARTUP_LABEL = "Start at login" if sys.platform == "darwin" else "Start with Windows"
 
 
 @dataclass
@@ -46,15 +48,17 @@ def tooltip(s: Status) -> str:
     return text if len(text) <= 127 else text[:124] + "..."
 
 
-def menu(s: Status, startup: bool) -> list:
+def menu(s: Status, startup: bool, auto: bool = True) -> list:
     """The menu's rows: (id, label, enabled, checked), or None for a line between groups. The
-    actions alone, short, as other apps' menus are: how things stand is the icon's tooltip."""
+    actions alone, short, as other apps' menus are: how things stand is the icon's tooltip.
+    `auto`: whether a newer helper installs by itself (ticked) or waits at the top of the menu."""
     return ([(UPDATE, f"Update to {s.update}...", True, False), None] if s.update else []) + \
            [(SEND, "Send prices now", s.game is not None, False),
             (ROUTES, "Fetch routes now", s.game is not None, False),
             (FOLDER, "Choose the game folder...", True, False),
             (LOG, "Open the log", True, False),
-            (STARTUP, "Start with Windows", True, startup),
+            (STARTUP, STARTUP_LABEL, True, startup),
+            (AUTO, "Update by itself", True, auto),
             (HELP, "Help", True, False), None,
             (QUIT, "Quit", True, False)]
 
@@ -84,8 +88,9 @@ def app_exe() -> Path:
 # ---- what is worth a balloon --------------------------------------------------------------------
 TROUBLE = "Trouble"
 UPDATE_OUT = "Update available"
+UPDATED = "Updated"
 TROUBLE_STARTS = ("not sent", "routes not fetched", "lists not fetched", "the pipe could not", "could not register",
-                  "addon not installed", "Game not found", "the helper stopped", "update not downloaded")
+                  "addon not installed", "Game not found", "the helper stopped", "update not downloaded", "update not installed")
 # lines that say something went right: the status shows them in place of the last trouble
 GOOD_STARTS = ("sent ", f"Installed {settings.NAME} Scanner", "routes for the addon's /fwc window: ", "This helper sends as ")
 
@@ -100,6 +105,8 @@ def balloon(line: str) -> tuple[str, str] | None:
         return TROUBLE, line
     if line.startswith("update available: "):
         return UPDATE_OUT, line[len("update available: "):]
+    if line.startswith("updated to "):
+        return UPDATED, line[0].upper() + line[1:]
     return None
 
 

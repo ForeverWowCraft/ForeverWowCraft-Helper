@@ -73,3 +73,31 @@ jobs:
           $msi = (Get-ChildItem dist/*.msi).FullName
           Copy-Item $msi dist/ForeverWowCraft-Helper.msi
           gh release upload "$env:GITHUB_REF_NAME" $msi dist/ForeverWowCraft-Helper.msi
+
+  # The Mac application, on the project's own Mac: a self-hosted runner, "imac", which only a tag
+  # of the project's reaches (this workflow runs on tags alone, and the repository asks approval
+  # for every outside contributor's workflow). The repository variable MAC_RUNNER switched away
+  # from "on" skips the job while the Mac is off. The upload is the API itself: the Mac has no gh.
+  mac:
+    needs: release
+    if: vars.MAC_RUNNER == 'on'
+    runs-on: [self-hosted, macOS, imac]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: "The application and its disk image: Python fetched and checked, PyObjC into it (installer/build_mac.py)"
+        run: |
+          echo "/Library/Frameworks/Python.framework/Versions/3.14/bin" >> "$GITHUB_PATH"
+          /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 installer/build_mac.py --out dist --cache "$HOME/Library/Caches/ForeverWowCraft-build"
+      - name: On the release, by its version and by its fixed name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dmg=$(ls dist/*.dmg)
+          cp "$dmg" dist/ForeverWowCraft-Helper.dmg
+          id=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          for f in "$dmg" dist/ForeverWowCraft-Helper.dmg; do
+            curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f"               "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=$(basename "$f")" > /dev/null
+            echo "uploaded $(basename "$f")"
+          done

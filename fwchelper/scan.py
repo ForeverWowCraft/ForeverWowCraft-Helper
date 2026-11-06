@@ -184,8 +184,10 @@ class ScanData:
 
 
 # ---- locating things --------------------------------------------------------------------
-COMMON_WOW_DIRS = (r"C:\Program Files (x86)\World of Warcraft", r"C:\World of Warcraft", r"C:\Games\World of Warcraft",
-                   r"D:\World of Warcraft", r"D:\Games\World of Warcraft", r"D:\WorldOfWarcraft\World of Warcraft")
+COMMON_WOW_DIRS = ("/Applications/World of Warcraft", "~/Applications/World of Warcraft", "/Applications/Games/World of Warcraft") \
+    if sys.platform == "darwin" else \
+    (r"C:\Program Files (x86)\World of Warcraft", r"C:\World of Warcraft", r"C:\Games\World of Warcraft",
+     r"D:\World of Warcraft", r"D:\Games\World of Warcraft", r"D:\WorldOfWarcraft\World of Warcraft")
 
 
 def _registry_wow_dirs() -> list[Path]:
@@ -221,7 +223,7 @@ def wow_dir() -> Path:
     if env:
         return Path(env)
     configured = Path(config.WOW_DIR)
-    candidates = [configured] + _registry_wow_dirs() + [Path(c) for c in COMMON_WOW_DIRS]
+    candidates = [configured] + _registry_wow_dirs() + [Path(c).expanduser() for c in COMMON_WOW_DIRS]
     for c in candidates:
         if (c / flavor()).is_dir():
             return c

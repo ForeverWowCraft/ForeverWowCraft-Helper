@@ -724,6 +724,23 @@ def test_the_seed_knows_the_vanilla_world():
     assert "and 1604 that the addon came with" in lua.eval("printed[#printed]")
 
 
+def test_the_arrow_points_across_maps_on_one_continent():
+    """From Sentinel Hill to Goldshire's trainer: the arrow turns north-east, the words say the
+    map and about how far; to Orgrimmar, the other continent, the words alone."""
+    lua = _game()
+    lua.execute(PLACES_GAME + "FWCS_SEED.places = seedplaces; map, px, py = 1436, 0.56, 0.47")
+    lua.execute('ns.SetArrow({ map = 1429, x = 0.43, y = 0.66, kind = "trainer" }, "First Aid trainer: Michelle Belle", false, "Learn Journeyman First Aid", "First Aid")')
+    lua.execute("ForeverWowCraftArrow.tex.SetRotation = function(t, r) t.rotation = r end; ForeverWowCraftArrow.scripts.OnUpdate(ForeverWowCraftArrow, 1)")
+    arrow = lua.eval("ForeverWowCraftArrow")
+    assert arrow.tex.shown is True and arrow.text.text.startswith("First Aid\nTrainer: Michelle Belle\nin Elwynn Forest, about ")
+    yards = int(re.search(r"about (\d+) yd", arrow.text.text).group(1))
+    assert 1000 < yards < 2500
+    import math
+    assert -math.pi / 2 < lua.eval("ForeverWowCraftArrow.tex.rotation") < 0          # facing north, Goldshire is to the north-east: a turn right
+    lua.execute('ns.SetArrow({ map = 1454, x = 0.5, y = 0.5, kind = "trainer" }, "First Aid trainer: Arnok", false, nil, "First Aid"); ForeverWowCraftArrow.scripts.OnUpdate(ForeverWowCraftArrow, 1)')
+    assert lua.eval("ForeverWowCraftArrow.tex.shown") is False and lua.eval("ForeverWowCraftArrow.text.text").endswith("in Elwynn Forest")     # the stub names every other map so
+
+
 def test_the_bearing_turns_an_arrow_that_points_up():
     lua = _game()
     import math

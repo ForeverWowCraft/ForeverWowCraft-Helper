@@ -1,15 +1,22 @@
 """Windows, through ctypes: the icon in the notification area with its menu and balloons, the
 mutex that keeps the app to one instance, the Run key and Windows' own startup switch, a
 folder dialog, opening a file or an address, a user setting. Nothing here decides anything:
-fwchelper/tray.py does, and fwchelper/app.py drives. Imported on Windows only."""
+fwchelper/tray.py does, and fwchelper/app.py drives. Imported on Windows only; fwchelper/mac.py
+is the same hands on the Mac, and app.py asks the same of both."""
 from __future__ import annotations
 import ctypes
 import os
 import queue
 import subprocess
+import sys
 import winreg
 from ctypes import wintypes as wt
 from pathlib import Path
+
+# how the app's messages speak of the icon on this platform
+CLICK = "Right-click the icon"
+WHERE_ICON = "in the notification area, by the clock"
+UPDATE_HOW = "the helper closes now, and the installer starts it again when it is done"
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -263,6 +270,27 @@ def open_path(what: str | Path) -> None:
     shell32.ShellExecuteW(None, "open", str(what), None, None, SW_SHOWNORMAL)
 
 
+def quiet_update(installer: Path, log: Path) -> bool:
+    """Install a newer helper with nothing shown: a script of its own, started here and left
+    running, waits a moment for this helper to close, runs the installer without a window
+    (msiexec /qn: a per-user install, no administrator, so nothing asks) with its log in `log`,
+    and starts the new helper. True when the script was started; the helper then quits."""
+    from . import tray
+    script = installer.with_name("update.cmd")
+    try:
+        script.write_text("\r\n".join([
+            "@echo off",
+            "ping -n 4 127.0.0.1 >nul",
+            f'msiexec /i "{installer}" /qn /norestart /l*v "{log}"',
+            f'start "" "{tray.app_exe()}" "{settings.ROOT / "fwch.py"}" app',
+            ""]), encoding="utf-8")
+        subprocess.Popen(["cmd", "/c", str(script)], close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    except OSError:
+        return False
+    return True
+
+
 def game_running() -> bool:
     """Whether a World of Warcraft client runs (its process is Wow..., whatever the flavour)."""
     try:
@@ -313,6 +341,18 @@ def approve(name: str) -> None:
     """Turn Windows' own switch for a Run entry on."""
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, APPROVED_KEY) as k:
         winreg.SetValueEx(k, name, 0, winreg.REG_BINARY, bytes([2]) + bytes(11))
+
+
+def startup_on() -> bool:
+    """Whether the app starts when the user logs on (fwchelper/tray.py reads the records)."""
+    from . import tray
+    return tray.startup_on(run_value(tray.RUN_VALUE), approved(tray.RUN_VALUE))
+
+
+def set_startup(on: bool) -> None:
+    """Have the app start when the user logs on, or not (fwchelper/cli.py writes the Run entry)."""
+    from . import cli
+    cli.autostart(on, registry=sys.modules[__name__])
 
 
 def set_user_setting(name: str, value: str) -> None:

@@ -1,6 +1,7 @@
 """The app's first run and its menu, with Windows (fwchelper/win.py) stood in for, against the
 test pipe of test_register.py and a game folder made for the occasion."""
 import contextlib
+import json
 import os
 import sys
 import tempfile
@@ -34,6 +35,14 @@ class FakeTray:
 
 class FakeWin:
     """fwchelper/win.py as the app sees it, with a registry of its own."""
+
+    CLICK, WHERE_ICON, UPDATE_HOW = "Right-click the icon", "by the clock", "the installer starts it again"
+
+    def startup_on(self):
+        return tray.startup_on(self.run_value(tray.RUN_VALUE), self.approved(tray.RUN_VALUE))
+
+    def set_startup(self, on):
+        cli.autostart(on, registry=self)
 
     def __init__(self, folder=None):
         self.run, self.records, self.opened, self.settings, self.folder, self.game_runs = {}, {}, [], {}, folder, False
@@ -221,7 +230,7 @@ def test_the_menu_does_what_it_says():
         assert not app.startup_on()
         with contextlib.redirect_stdout(app.log):
             app.chosen(tray.STARTUP)
-        assert app.startup_on() and win.run[tray.RUN_VALUE].endswith('" app') and "starts with Windows" in _log()
+        assert app.startup_on() and win.run[tray.RUN_VALUE].endswith('" app') and "starts at login" in _log()
         with contextlib.redirect_stdout(app.log):
             app.chosen(tray.STARTUP)
         assert not app.startup_on() and tray.RUN_VALUE not in win.run
@@ -318,7 +327,7 @@ def test_a_watch_waits_longer_each_time_the_pipe_fails_and_starts_over_when_aske
 def test_the_app_says_once_when_a_newer_helper_is_out_and_installs_it_when_asked():
     from fwchelper import update
     back = _fresh_pc()
-    kept = update.latest, update.download
+    kept = update.latest, update.download, update.digest
     got = []
 
     def download(version, url=None, into=None, timeout=None):
@@ -326,7 +335,8 @@ def test_the_app_says_once_when_a_newer_helper_is_out_and_installs_it_when_asked
         path.write_bytes(update.MSI_MAGIC)
         got.append(version)
         return path
-    update.latest, update.download = (lambda url=None, timeout=None: "9.9.9"), download
+    update.latest, update.download, update.digest = (lambda url=None, timeout=None: "9.9.9"), download, (lambda *a, **k: None)
+    os.environ["FWC_UPDATE_QUIET"] = "0"                                                  # the switch off: the update waits in the menu
     try:
         app = _app(FakeWin())
         app.status.game = Path("C:/x")
@@ -355,7 +365,94 @@ def test_the_app_says_once_when_a_newer_helper_is_out_and_installs_it_when_asked
             app2.tick()
         assert app2.status.problem == "update not downloaded: no connection" and not app2.stop.is_set()
     finally:
-        update.latest, update.download = kept
+        update.latest, update.download, update.digest = kept
+        del os.environ["FWC_UPDATE_QUIET"]
+        back()
+
+
+def test_a_newer_helper_installs_by_itself_when_the_download_is_the_one_github_publishes():
+    from fwchelper import update
+    back = _fresh_pc()
+    kept = update.latest, update.download, update.digest
+    files = []
+
+    def download(version, url=None, into=None, timeout=None):
+        path = Path(tempfile.mkdtemp()) / f"ForeverWowCraft-Helper-{version}.msi"
+        path.write_bytes(update.MSI_MAGIC + b"new")
+        files.append(path)
+        return path
+    good = __import__("hashlib").sha256(update.MSI_MAGIC + b"new").hexdigest()
+    __version__ = appmod.__version__
+    update.latest, update.download, update.digest = (lambda url=None, timeout=None: "9.9.9"), download, (lambda *a, **k: good)
+
+    class QuietWin(FakeWin):
+        def __init__(self):
+            super().__init__()
+            self.quiet = []
+
+        def quiet_update(self, installer, log):
+            self.quiet.append((str(installer), str(log)))
+            return True
+    try:
+        # the switch is on by default: the newer helper is downloaded, checked, installed with nothing shown; one line, no balloon
+        app = _app(QuietWin())
+        app.status.game = Path("C:/x")
+        app.looked_addon = time.time()
+        with contextlib.redirect_stdout(app.log):
+            app.tick()
+        assert app.win.quiet and app.win.quiet[0][0] == str(files[0]) and app.win.quiet[0][1].endswith("install.log")
+        assert app.stop.is_set() and app.tray.quit_asked and app.tray.balloons == [] and app.win.opened == []
+        assert "it installs by itself" in _log() and "updating to ForeverWowCraft Helper 9.9.9 by itself" in _log()
+        mark = json.loads((settings.STATE / "updates" / "updated.json").read_text(encoding="utf-8"))
+        assert mark["to"] == "9.9.9" and mark["from"] == __version__
+        # the new helper starts: it says so once, as a balloon
+        app2 = _app(QuietWin())
+        kept_version = appmod.__version__
+        appmod.__version__ = "9.9.9"
+        try:
+            with contextlib.redirect_stdout(app2.log):
+                app2.after_update()
+        finally:
+            appmod.__version__ = kept_version
+        assert app2.tray.balloons == [("Updated", "Updated to ForeverWowCraft Helper 9.9.9 by itself (from " + __version__ + ")")]
+        assert not (settings.STATE / "updates" / "updated.json").exists()
+        # the install failed (the old helper is back): trouble, and that version is not tried by itself again
+        (settings.STATE / "updates" / "updated.json").write_text(json.dumps({"from": __version__, "to": "9.9.9"}), encoding="utf-8")
+        app3 = _app(QuietWin())
+        app3.status.game = Path("C:/x")
+        app3.looked_addon = time.time()
+        with contextlib.redirect_stdout(app3.log):
+            app3.after_update()
+            app3.tick()
+        assert app3.status.problem.startswith("update not installed: the helper is still") and app3.failed() == "9.9.9"
+        assert app3.win.quiet == [] and not app3.stop.is_set() and app3.items()[0][1] == "Update to 9.9.9..."       # the menu's Update stays
+        assert [t for t, _ in app3.tray.balloons] == ["Trouble", "Update available"]
+        # a download that is not what GitHub publishes is deleted, not installed
+        update.digest = lambda *a, **k: "0" * 64
+        app4 = _app(QuietWin())
+        app4.status.game = Path("C:/x")
+        app4.status.update = "9.9.9"
+        app4.asks["update"] = True
+        app4.looked_addon = app4.looked_update = time.time()
+        with contextlib.redirect_stdout(app4.log):
+            app4.tick()
+        assert app4.status.problem.startswith("update not installed: the installer downloaded is not the one GitHub publishes")
+        assert not files[-1].exists() and app4.win.quiet == [] and app4.win.opened == [] and not app4.stop.is_set()
+        # the menu's switch: off, the update waits in the menu (a platform without a quiet install waits too)
+        app5 = _app(QuietWin())
+        app5.status.game = Path("C:/x")
+        app5.chosen(tray.AUTO)
+        assert settings.quiet_update() is False and app5.items()[-4] == (tray.AUTO, "Update by itself", True, False)
+        update.digest = lambda *a, **k: good
+        app5.looked_addon = time.time()
+        with contextlib.redirect_stdout(app5.log):
+            app5.tick()
+        assert app5.win.quiet == [] and not app5.stop.is_set() and [t for t, _ in app5.tray.balloons] == ["Update available"]
+        app5.chosen(tray.AUTO)
+        assert settings.quiet_update() is True and app5.wake.is_set()
+    finally:
+        update.latest, update.download, update.digest = kept
+        os.environ.pop("FWC_UPDATE_QUIET", None)
         back()
 
 

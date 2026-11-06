@@ -28,6 +28,19 @@ class _Releases(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if not head:
                 self.wfile.write(body)
+        elif self.path in ("/releases/api", "/releases/api-old", "/releases/api-none"):
+            import hashlib
+            import json
+            tag = "v1.0.0" if self.path.endswith("-old") else "v9.9.9"
+            assets = [] if self.path.endswith("-none") else [{"name": "other.zip", "digest": "sha256:" + "0" * 64},
+                                                                {"name": "ForeverWowCraft-Helper.msi", "digest": "sha256:" + hashlib.sha256(update.MSI_MAGIC + b"\0" * 500).hexdigest()}]
+            body = json.dumps({"tag_name": tag, "assets": assets}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if not head:
+                self.wfile.write(body)
         elif self.path == "/page.msi":
             body = b"<html>not an installer</html>"
             self.send_response(200)
@@ -89,6 +102,23 @@ def test_the_installer_is_downloaded_and_checked_to_be_one():
             except update.UpdateError:
                 pass
         assert sorted(p.name for p in into.iterdir()) == ["ForeverWowCraft-Helper-9.9.9.msi"]     # nothing half-downloaded left behind
+    finally:
+        srv.shutdown()
+
+
+def test_the_digest_github_publishes_is_read_and_the_download_checked_against_it():
+    srv, url = _server()
+    into = Path(tempfile.mkdtemp())
+    try:
+        expected = update.digest("9.9.9", url + "/releases/api", timeout=5, file="ForeverWowCraft-Helper.msi")   # the test release is Windows' (on a Mac the platform's file is the .dmg)
+        assert expected and len(expected) == 64
+        assert update.digest("9.9.9", url + "/releases/api-old", timeout=5) is None          # another version's page
+        assert update.digest("9.9.9", url + "/releases/api-none", timeout=5) is None         # no installer among the assets
+        assert update.digest("9.9.9", url + "/nowhere", timeout=5) is None                   # not JSON
+        assert update.digest("9.9.9", "http://127.0.0.1:9/", timeout=1) is None               # nothing listening
+        path = update.download("9.9.9", url + "/ForeverWowCraft-Helper.msi", into, timeout=5)
+        assert update.verified(path, expected) and update.verified(path, expected.upper()) and not update.verified(path, "0" * 64)
+        assert not update.verified(into / "missing.msi", expected)
     finally:
         srv.shutdown()
 

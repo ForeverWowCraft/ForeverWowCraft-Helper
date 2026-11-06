@@ -1,7 +1,9 @@
-"""The helper's settings: where things are and what they are called. Nothing here reads files or
-the network."""
+"""The helper's settings: where things are and what they are called. Nothing here reads the
+network, and the one file read is the settings the icon's menu saved (stored())."""
 from __future__ import annotations
+import json
 import os
+import sys
 from pathlib import Path
 
 NAME = "ForeverWowCraft"
@@ -17,15 +19,55 @@ OLD_ADDON_NAME = "ForeverCraftScanner"
 
 
 def env(name: str, default: str | None = None) -> str | None:
-    """The setting FWC_<name>, or the FC_<name> of an older install, or `default`."""
-    return os.environ.get(ENV_PREFIX + name) or os.environ.get(OLD_ENV_PREFIX + name) or default
+    """The setting FWC_<name>, or the FC_<name> of an older install, or what the icon's menu
+    saved (stored()), or `default`."""
+    value = os.environ.get(ENV_PREFIX + name) or os.environ.get(OLD_ENV_PREFIX + name)
+    if not value and name != "STATE":                 # the saved settings live in STATE: it is named by the environment alone
+        value = stored().get(ENV_PREFIX + name)
+    return value or default
+
+
+# The settings the icon's menu saves ("Choose the game folder") where there is no registry to
+# keep them in, the Mac: settings.json in STATE, {"FWC_WOW_DIR": "..."}. Windows keeps them as
+# user environment variables (fwchelper/win.py), which env() sees as any other.
+SETTINGS_FILE = "settings.json"
+_stored: tuple[float | None, dict] = (None, {})
+
+
+def stored() -> dict:
+    """What settings.json holds, read again when it changed."""
+    global _stored
+    path = STATE / SETTINGS_FILE
+    try:
+        stamp = path.stat().st_mtime
+    except OSError:
+        return {}
+    if stamp != _stored[0]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        _stored = (stamp, data if isinstance(data, dict) else {})
+    return _stored[1]
+
+
+def store(name: str, value: str) -> Path:
+    """Keep FWC_<name> in settings.json, for every helper run from now on, and in this process."""
+    data = dict(stored())
+    data[ENV_PREFIX + name] = value
+    STATE.mkdir(parents=True, exist_ok=True)
+    path = STATE / SETTINGS_FILE
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.environ[ENV_PREFIX + name] = value
+    return path
 
 
 # What the helper keeps of its own: its name and token at the pipe, what it sent, the routes
-# and lists it fetched, its log. On Windows that is the user's local application data, so that
-# an install under Program Files or a reinstall touches none of it; FWC_STATE names another
-# folder. An install from a zip of before 22 Oct 2026 kept it in state/ beside the helper:
-# carry_state() moves that over the first time the helper runs.
+# and lists it fetched, its log. On Windows that is the user's local application data, on the
+# Mac the user's Application Support, so that an install under Program Files or Applications
+# or a reinstall touches none of it; FWC_STATE names another folder. An install from a zip of
+# before 22 Oct 2026 kept it in state/ beside the helper: carry_state() moves that over the
+# first time the helper runs.
 def _state_dir() -> Path:
     given = env("STATE")
     if given:
@@ -33,6 +75,8 @@ def _state_dir() -> Path:
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(base) / NAME / "Helper"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / NAME / "Helper"
     return ROOT / "state"
 
 
@@ -78,7 +122,7 @@ def saved(name: str) -> str | None:
 # The game. When this folder does not exist the helper looks at what Battle.net registered and at
 # common install folders (scan.wow_dir); FWC_WOW_DIR / FWC_WOW_FLAVOR override everything.
 # `where` shows what was detected.
-WOW_DIR = r"D:\WorldOfWarcraft\World of Warcraft"
+WOW_DIR = "/Applications/World of Warcraft" if sys.platform == "darwin" else r"D:\WorldOfWarcraft\World of Warcraft"
 WOW_FLAVOR = "_forever_"        # the Forever client folder (the beta's _classic_beta_ until 31 Oct 2026)
 
 # The pipe: where scans are sent and lists come from. FWC_PIPE_URL names another one. The helper
@@ -97,10 +141,21 @@ RETRY_MAX = 900       # ... up to this (15 min): a pipe that is down is not aske
 
 # Updates (fwchelper/update.py): where the helper's releases are, asked once a day whether a newer
 # one is out (the newest release's address redirects to its tag: no API, no key), and the installer
-# of the newest, by its fixed name, for the tray's "Update to ..." row. FWC_UPDATE_URL names another
-# place to ask (a test).
+# of the newest, by its fixed name, for the tray's "Update to ..." row: the .msi on Windows, the
+# .dmg on the Mac. FWC_UPDATE_URL names another place to ask (a test).
 HELPER_REPO = "https://github.com/ForeverWowCraft/ForeverWowCraft-Helper"
 UPDATE_CHECK_URL = HELPER_REPO + "/releases/latest"
-UPDATE_FILE = f"{NAME}-Helper.msi"
+UPDATE_KIND = "dmg" if sys.platform == "darwin" else "msi"
+UPDATE_FILE = f"{NAME}-Helper.{UPDATE_KIND}"
 UPDATE_URL = HELPER_REPO + "/releases/latest/download/" + UPDATE_FILE
 UPDATE_EVERY = 86400  # seconds between two looks for a newer helper
+# The release's page on GitHub's API, for the SHA-256 GitHub publishes for the installer: a
+# newer helper installs by itself only when the download matches it (FWC_UPDATE_API: a test).
+UPDATE_API = "https://api.github.com/repos/ForeverWowCraft/ForeverWowCraft-Helper/releases/latest"
+UPDATE_QUIET = True   # a newer helper installs by itself; the menu's "Update by itself" keeps FWC_UPDATE_QUIET
+
+
+def quiet_update() -> bool:
+    """Whether a newer helper installs by itself (the menu's "Update by itself", kept in the
+    saved settings as FWC_UPDATE_QUIET), or waits in the menu."""
+    return env("UPDATE_QUIET", "1" if UPDATE_QUIET else "0") != "0"
