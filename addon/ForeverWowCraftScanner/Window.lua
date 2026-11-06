@@ -22,6 +22,13 @@ local REFRESH_DELAY = 0.4                  -- seconds bag changes are gathered f
 
 local win, Refresh, SetSliders, ShowRange, picker, DrawPicker, DrawProfessions
 
+-- the window drawn again after a click that changes the route, and the arrow, the Make button
+-- and the shopping list moved to it at once (Craft.lua)
+local function Repoint()
+  Refresh()
+  if ns.RoutePicked then ns.RoutePicked() end
+end
+
 -- ================================================================ text
 local function Money(copper)
   if not copper then return "|cff808080?|r" end
@@ -942,7 +949,7 @@ DrawProfessions = function(chosen)
       b:SetPoint("TOPLEFT", 12 + (i - 1) * (PROF_WIDTH + PROF_GAP), -38)
       b:SetNormalFontObject("GameFontNormalSmall")
       b:SetHighlightFontObject("GameFontHighlightSmall")
-      b:SetScript("OnClick", function() Char().picked = name; win.scroll:SetVerticalScroll(0); Refresh() end)
+      b:SetScript("OnClick", function() Char().picked = name; win.scroll:SetVerticalScroll(0); Repoint() end)
       b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine(Title(name))
@@ -983,13 +990,13 @@ DrawPicker = function()
   end
   table.insert(rows, { text = "|cff33ccffAlso have|r  |cff808080(counts a second profession)|r" })
   table.insert(rows, { text = (chosen.also == nil and "|cff40ff40(x)|r " or "( ) ") .. "None",
-    click = function() c.also[mine] = false; Refresh() end })
+    click = function() c.also[mine] = false; Repoint() end })
   for _, name in ipairs(chosen.names) do
     if name ~= mine and not IsSecondary(by, name) then
       local on = chosen.also == name
       local changes = WithCompanion(house, by[mine][ns.Settings().variant or ""], name) ~= nil
       table.insert(rows, { text = (on and "|cff40ff40(x)|r " or "( ) ") .. label(name) .. (changes and "" or "  |cff808080changes nothing|r"),
-        click = function() c.also[mine] = name; Refresh() end })
+        click = function() c.also[mine] = name; Repoint() end })
     end
   end
   for i, row in ipairs(rows) do
@@ -1091,7 +1098,7 @@ local function Wire()
     local keys = Distinct(house, part, default)
     local to = Cycle(keys, at.focus, 1)
     s.variant = VariantFor(house, at.recipes, to) or s.variant
-    Refresh()
+    Repoint()
   end
   win.focus:SetScript("OnClick", function() Turn(4, function() return "profit" end) end)
   win.focus:SetScript("OnEnter", function(self)
@@ -1214,7 +1221,7 @@ SlashCmdList.FOREVERWOWCRAFT = function(msg)
     elseif chosen.by[name] and IsSecondary(chosen.by, name) then ns.Print(Title(name) .. " is a secondary profession: not counted as a second one yet") return
     elseif chosen.by[name] and name ~= plan.profession then c.also[plan.profession] = name
     else ns.Print("no such profession: " .. arg .. ". /fwc also <profession> | none | auto") return end
-    Refresh()
+    Repoint()
     chosen = Chosen(house)
     ns.Print(chosen.also and string.format("%s is planned with %s%s.", Title(plan.profession), Title(chosen.also),
       chosen.applied and "" or " (which changes nothing in it)") or (Title(plan.profession) .. " is planned on its own."))

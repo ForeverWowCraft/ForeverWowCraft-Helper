@@ -197,8 +197,8 @@ local function BuildOptions()
       function() return saved().alts and true or false end,
       function(v) saved().alts = v or nil; if ns.RefreshWindow then ns.RefreshWindow() end end),
     CheckBox(page, Next(76), "A reminder to reload, every 15 minutes",
-      "A small box at the top of the screen with a Reload now button, when there is something to save (prices, vendors "
-      .. "and places met) or the routes may have changed on the site: both move only at a reload. Never in combat, "
+      "A small box at the top of the screen with a Reload now button, when there is something to save "
+      .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
       .. "nor while the auction house, a merchant or a profession window is open. Later puts it off a quarter of an hour.",
       function() return ns.remind.Enabled() end, function(v) ns.RemindCommand(v and "on" or "off") end),
   }

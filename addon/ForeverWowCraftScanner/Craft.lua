@@ -78,7 +78,7 @@ local function Point(v, by)
       local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1]
       local how = v.place[1] == "station" and "open this panel at one" or v.place[1] == "trainer" and "open a trainer's window"
         or v.place[1] == "vendor" and "open a merchant's window" or "open the auction house"
-      table.insert(v.tip, string.format("No %s seen yet: the addon notes one when you %s, and the arrow then points there.", what, how))
+      table.insert(v.tip, string.format("No %s seen yet: %s, and the arrow points there from then on.", what, how))
       -- nothing of the kind known: the arrow stays, a question mark for a point, and says so
       pointed = { title = "No " .. what .. " seen yet", note = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn }
       ns.SetArrow(nil, pointed.title, false, v.text, pointed.profession)
@@ -413,6 +413,14 @@ frame:SetScript("OnEvent", function(_, event, name)
 end)
 Place()
 if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(5, Headless) end
+
+-- the route changed by a click in the /fwc window (skill-up, the second profession, another
+-- profession picked): the Make button's words, the arrow and the shopping list at once, not at
+-- the next pass (the user asked whether the arrow follows the skill-up box, 6 Nov 2026)
+function ns.RoutePicked()
+  if PanelShown() then Refresh() else Headless() end
+  if ns.ReloadShopping then ns.ReloadShopping() end
+end
 
 -- /fwcs needs: what the client says a recipe requires, raw, for the recipe selected in the
 -- panel and for the one the button's verdict is about (a spell id as the argument asks of

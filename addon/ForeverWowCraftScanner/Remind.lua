@@ -2,8 +2,8 @@
 -- now" button (the user, 6 Nov 2026: another addon does this every quarter of an hour, and it
 -- keeps what goes in and out in step).
 --
--- Why a reload: what the addon records (prices, the vendors and places met) reaches the disk,
--- and so the helper and the site, only when the interface reloads or the character logs out;
+-- Why a reload: what the addon records reaches the disk, and so the helper and the site,
+-- only when the interface reloads or the character logs out;
 -- and the routes the helper writes (Plans.lua, as the site has them) load only then. So every
 -- EVERY seconds, when there is a reason, the box is shown. It waits while a reload would get
 -- in the way: in combat, dead, while the scanner records, while the auction house, a merchant
@@ -29,8 +29,9 @@ local function Scanner() return ns.scanner end
 local function Reasons()
   local out = {}
   local sc = Scanner()
-  if sc and sc.Dirty() then table.insert(out, "prices recorded, not yet saved") end
-  if (ns.notedAt or 0) > loadedAt then table.insert(out, "vendors or places met, not yet saved") end
+  -- prices named; the rest of what the addon notes is not spelt out (the user, 6 Nov 2026)
+  if sc and sc.Dirty() then table.insert(out, "prices recorded, not yet saved")
+  elseif (ns.notedAt or 0) > loadedAt then table.insert(out, "something noted, not yet saved") end
   -- the helper runs (it writes the routes as the site has them; a reload loads them): the routes
   -- may be newer than those on show
   if FWCS_PLANS_WRITTEN then table.insert(out, "the routes may have changed on the site") end
@@ -71,7 +72,11 @@ local function Build()
   box.why:SetWordWrap(true)
   box.now = ns.Button(box, 100, "|cffff4040Reload now|r", "ForeverWowCraftReloadNow")
   box.now:SetPoint("TOPRIGHT", -12, -12)
-  box.now:SetScript("OnClick", function() box:Hide(); Scanner().Reload() end)
+  box.now:SetScript("OnClick", function()
+    box:Hide()
+    ns.Print("reloading")                      -- seen only when the reload does not come: the click landed
+    Scanner().Reload()
+  end)
   box.later = ns.Button(box, 56, "Later", "ForeverWowCraftReloadLater")
   box.later:SetPoint("TOPRIGHT", box.now, "BOTTOMRIGHT", 0, -2)
   box.later:SetScript("OnClick", function() box:Hide(); due = time() + LATER end)

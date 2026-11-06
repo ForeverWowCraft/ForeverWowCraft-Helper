@@ -269,8 +269,14 @@ local function NoteFullArrived()
   s.lastFull, s.lastFullRefused = time(), nil
 end
 
+-- ReloadUI first: what /reload itself calls, so it is known to work on this client; the
+-- newer C_UI.Reload where there is no other. A refusal (an error) is said, not swallowed (the
+-- Reload now button did nothing once, 6 Nov 2026: with script errors off, nothing told why)
 local function DoReload()
-  if C_UI and C_UI.Reload then C_UI.Reload() else ReloadUI() end
+  local ok, err = pcall(function()
+    if ReloadUI then ReloadUI() elseif C_UI and C_UI.Reload then C_UI.Reload() else error("no reload function") end
+  end)
+  if not ok then Print("the reload was refused: " .. tostring(err) .. ". /reload, typed, does the same.") end
 end
 
 -- ================================================================ state

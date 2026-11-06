@@ -417,10 +417,15 @@ def test_the_focus_button_turns_between_the_profit_and_the_skill_up_route():
     assert lua.eval("ns.Settings().variant") == "trainer"
     # no button chooses the recipes any more: every route may buy them (2 Nov 2026)
     assert lua.eval("ForeverWowCraftVariant") is None
+    # the click moves the arrow, the Make button and the shopping list at once (Craft.lua's pass, not its next tick)
+    lua.execute("repointed = 0; ns.ReloadShopping = function() repointed = repointed + 1 end")
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
     assert lua.eval("ForeverWowCraftFocus.text") == "|cff40ff40[x]|r skill-up" and lua.eval("ns.Settings().variant") == "trainer-skill"
+    assert lua.eval("repointed") == 1
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
-    assert lua.eval("ns.Settings().variant") == "trainer"
+    assert lua.eval("ns.Settings().variant") == "trainer" and lua.eval("repointed") == 2
+    lua.execute("ForeverWowCraftProfessionTailoring.scripts.OnClick(ForeverWowCraftProfessionTailoring)")
+    assert lua.eval("repointed") == 3
     # a document from before there was a focus has the profit routes alone, and no button for it
     lua = _game()
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
@@ -1517,15 +1522,21 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     assert lua.eval("ForeverWowCraftReload.shown") is False
     lua.execute("MerchantFrame:Hide(); ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is True
-    # Reload now reloads
+    # Reload now reloads: by ReloadUI (what /reload calls) when the client has it, else C_UI.Reload; a refusal is said
     lua.execute("reloaded = 0; C_UI = { Reload = function() reloaded = reloaded + 1 end }; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
     assert lua.eval("reloaded") == 1 and lua.eval("ForeverWowCraftReload.shown") is False
+    lua.execute("ReloadUI = function() reloaded = reloaded + 10 end; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
+    assert lua.eval("reloaded") == 11
+    lua.execute("ReloadUI = function() error('blocked') end; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
+    assert lua.eval("reloaded") == 11 and "the reload was refused" in lua.eval("printed[#printed]") and "/reload" in lua.eval("printed[#printed]")
+    lua.execute("ReloadUI = nil")
     # nothing to say without the helper and nothing recorded: no box; something met: a reason
     lua.execute("FWCS_PLANS_WRITTEN = nil; time = function() return os.time() + 4 * ns.remind.Every end; ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is False
     assert list(lua.eval("ns.remind.Reasons()").values()) == []
     lua.execute("ns.notedAt = time(); time = function() return os.time() + 6 * ns.remind.Every end; ns.remind.Check()")
-    assert lua.eval("ForeverWowCraftReload.why.text") == "vendors or places met, not yet saved." and lua.eval("ForeverWowCraftReload.shown") is True
+    assert lua.eval("ForeverWowCraftReload.why.text") == "something noted, not yet saved." and lua.eval("ForeverWowCraftReload.shown") is True
+    assert "vendor" not in lua.eval("ForeverWowCraftReload.why.text") and "place" not in lua.eval("ForeverWowCraftReload.why.text")
     # off, by the box's own button: no more; on again by the command; the options page has the switch
     lua.execute("ForeverWowCraftReloadOff.scripts.OnClick(ForeverWowCraftReloadOff)")
     assert lua.eval("ForeverWowCraftReload.shown") is False and lua.eval("FWCS_DB.__ui.remind") is False and r().Enabled() is False

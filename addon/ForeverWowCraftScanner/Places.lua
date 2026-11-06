@@ -542,7 +542,7 @@ function ns.PlacesCommand()
   local counts, seed = {}, 0
   for _, p in ipairs(Places()) do counts[p.kind] = (counts[p.kind] or 0) + 1 end
   for _ in ipairs(Seeded()) do seed = seed + 1 end
-  print(PREFIX .. string.format("places seen: %d trainers, %d vendors, %d auctioneers, %d crafting stations, noted as you meet them; and %d that the addon came with.",
+  print(PREFIX .. string.format("places known: %d trainers, %d vendors, %d auctioneers, %d crafting stations seen, and %d that the addon came with.",
     counts.trainer or 0, counts.vendor or 0, counts.auction or 0, counts.station or 0, seed))
 end
 
