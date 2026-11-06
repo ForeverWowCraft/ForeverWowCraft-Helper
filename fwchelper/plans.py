@@ -187,10 +187,11 @@ _wanted_memo: dict[Path, tuple[tuple, set]] = {}     # path -> ((size, mtime), w
 
 
 def wanted(paths: list[Path] | None = None) -> set[tuple[str, str]]:
-    """Whose routes to fetch: {(realm however spelt, faction)} of every character the addon has
-    seen and every auction house it has scanned, over every saved-variables file found. A file
-    is read again only once it has changed (reading one takes seconds, and `send --watch` asks
-    every minute)."""
+    """Whose routes to fetch: {(realm, faction)} of every character the addon has seen and
+    every auction house it has scanned, over every saved-variables file found; each realm both
+    as spelt (`spelt`, which the houses' lists are matched by) and as the game shows it (which
+    the site's name rules are matched by: `by_rule`). A file is read again only once it has
+    changed (reading one takes seconds, and `send --watch` asks every minute)."""
     out = set()
     for path in (paths if paths is not None else scan.find_saved_variables()):
         try:
@@ -205,8 +206,9 @@ def wanted(paths: list[Path] | None = None) -> set[tuple[str, str]]:
         found = set()
         for c in characters(path):
             found |= {(spelt(r), c["faction"]) for r in (c["realm"], c["house"]) if r}
+            found |= {(c["realm"], c["faction"])} if c["realm"] else set()
         try:
-            found |= {(spelt(r), f) for r, f, _, _ in scan.datasets(path)}
+            found |= {(s, f) for r, f, _, _ in scan.datasets(path) for s in (spelt(r), r)}
         except (OSError, SyntaxError):
             pass
         if stamp:
@@ -215,10 +217,37 @@ def wanted(paths: list[Path] | None = None) -> set[tuple[str, str]]:
     return {(r, f) for r, f in out if r and f in ("Alliance", "Horde")}     # a character's own house, never the shared one
 
 
+def ruled(realm: str, rules: list) -> str | None:
+    """The auction house a realm's name is of by the site's rules (`rules` of houses.json:
+    [pattern, name] pairs, the core's config.HOUSE_PATTERNS), or None. A rule that is not a
+    pattern and a replacement is skipped."""
+    for rule in rules or []:
+        if not (isinstance(rule, list) and len(rule) == 2 and all(isinstance(x, str) for x in rule)):
+            continue
+        try:
+            if re.fullmatch(rule[0], realm):
+                return re.sub(rule[0], rule[1], realm)
+        except re.error:
+            continue
+    return None
+
+
+def by_rule(house: dict, want: set[tuple[str, str]]) -> list[str]:
+    """The wanted realms that are of this house by the site's rules though the house's list
+    does not have them: nobody has scanned from them yet. A character there gets the house's
+    routes all the same (6 Nov 2026: on Forever every realm of a ruleset in a region is one
+    house, and a list of the realms scanned from is not the house)."""
+    rules, name, faction = house.get("rules"), house.get("realm"), house.get("faction", "")
+    if not rules or not name:
+        return []
+    return sorted(r for r, f in want if f == faction and ruled(r, rules) == name)
+
+
 def is_of(house: dict, want: set[tuple[str, str]]) -> bool:
-    """Whether a house of houses.json is one of the wanted."""
+    """Whether a house of houses.json is one of the wanted: a wanted realm is in its list, or
+    is of it by the site's name rules."""
     names = {spelt(str(r)) for r in [house.get("realm") or "", str(house.get("key") or "").split("--")[0]] + list(house.get("realms") or [])}
-    return any((n, house.get("faction", "")) in want for n in names if n)
+    return any((n, house.get("faction", "")) in want for n in names if n) or bool(by_rule(house, want))
 
 
 def choose(houses: list[dict], want: set[tuple[str, str]]) -> list[dict]:
@@ -274,7 +303,8 @@ def houses(site: str | None = None) -> list[dict]:
     listed = doc.get("houses") if isinstance(doc, dict) else None
     if not isinstance(listed, list):
         raise PlansError("the site lists no auction houses")
-    return [h for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])]
+    rules = doc.get("rules") if isinstance(doc.get("rules"), list) else []      # the name rules, on every house for by_rule
+    return [dict(h, rules=rules) for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])]
 
 
 def version_tuple(s) -> tuple[int, ...]:
@@ -398,7 +428,8 @@ def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], l
     the site has something newer than what was written (or `force`). Returns (the documents
     now written, the files written): no files when nothing was new."""
     site = site or site_url()
-    chosen = choose(houses(site), wanted())
+    want = wanted()
+    chosen = choose(houses(site), want)
     have = stamps()
     current = {h["key"]: int(h.get("generated") or 0) for h in chosen}
     missing = installed_file().parent.is_dir() and not installed_file().exists()
@@ -408,6 +439,9 @@ def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], l
     docs = [fetch(h, site) for h in chosen]
     for d, h in zip(docs, chosen):                      # as houses.json has it, so that "nothing new" is told from it alone
         d["generated"] = int(h.get("generated") or d.get("generated") or 0)
+        mine = by_rule(h, want)                         # a realm of the house by its name: into the list the addon finds its house by
+        if mine:
+            d["realms"] = sorted({*(d.get("realms") or []), *mine})
     return docs, write(docs, site)
 
 

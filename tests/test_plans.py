@@ -149,7 +149,8 @@ def test_the_characters_say_whose_routes_to_fetch():
     assert [c["name"] for c in chars] == ["Thrallson", "Bankalt"]                     # the last played first
     assert chars[0]["items"] == {2996: [5, 12]} and chars[0]["skills"] == {197: 44}
     want = plans.wanted([f])
-    assert want == {("stonespine", "Horde"), ("classicbetapve2", "Alliance"), ("classicbetapve", "Alliance")}
+    assert {(plans.spelt(r), f) for r, f in want} == {("stonespine", "Horde"), ("classicbetapve2", "Alliance"), ("classicbetapve", "Alliance")}
+    assert ("Stonespine", "Horde") in want                                            # as the game shows it too, for the site's rules
     houses = [{"key": "stonespine--horde", "realm": "Stonespine", "faction": "Horde", "realms": ["Stonespine"]},
               {"key": "stonespine--alliance", "realm": "Stonespine", "faction": "Alliance", "realms": ["Stonespine"]},
               # a house of connected realms, named by the first: the character on the second is of it
@@ -163,6 +164,34 @@ def test_the_characters_say_whose_routes_to_fetch():
     assert plans.choose(houses * 3, set()) == []
     assert plans.choose([dict(houses[0], ingame=False)], set()) == []                 # a house without routes for the addon
     assert plans.choose([{k: v for k, v in houses[0].items() if k != "ingame"}], want) == []      # a site from before it had any
+    # a realm nobody has scanned from is of the house its name says, by the site's rules (6 Nov 2026)
+    rules = [["^CAMWOW (?:US|AU)\\d+ Realm \\d+ (PvE|PvP|RP PvP|RP)$", "US \\1"], ["^CAMWOW (EU|TW|KR)\\d+ Realm \\d+ (PvE|PvP|RP PvP|RP)$", "\\1 \\2"]]
+    us = {"key": "uspve--alliance", "realm": "US PvE", "faction": "Alliance", "realms": ["CAMWOW US1 Realm 1 PvE", "USPvE"], "rules": rules, "ingame": True}
+    new = {("CAMWOW AU1 Realm 9 PvE", "Alliance"), ("camwowau1realm9pve", "Alliance"), ("CAMWOW US1 Realm 4 PvP", "Alliance"),
+           ("CAMWOW US1 Realm 9 PvE", "Horde")}
+    assert plans.by_rule(us, new) == ["CAMWOW AU1 Realm 9 PvE"] and plans.choose([us], new) == [us]
+    assert plans.choose([dict(us, rules=[])], new) == [] and plans.choose([dict(us, rules=[["(", "x"], "no"])], new) == []
+    assert plans.ruled("CAMWOW EU4 Realm 2 PvP", rules) == "EU PvP" and plans.ruled("Stonespine", rules) is None
+
+
+def test_a_realm_nobody_scanned_from_gets_its_house_by_the_sites_rules():
+    doc = document(realm="Rock", house="rock--horde")
+    listed = [{"key": "rock--horde", "realm": "Rock", "faction": "Horde", "realms": ["Rock"], "generated": NOW, "ingame": True}]
+    site, srv, root = _site({"rock--horde": doc}, listed, rules=[["^Stone(spine)$", "Rock"]])     # Thrallson is on Stonespine
+    game = Path(tempfile.mkdtemp())
+    (game / scan.ADDON_NAME).mkdir()
+    (game / scan.PLANS_ADDON).mkdir()
+    saved = _saved()
+    kept = settings.STATE, scan.addons_dir, scan.find_saved_variables
+    settings.STATE, scan.addons_dir, scan.find_saved_variables = Path(tempfile.mkdtemp()) / "state", (lambda: game), (lambda: [saved])
+    try:
+        docs, written = plans.refresh(site)
+        assert [d["house"] for d in docs] == ["rock--horde"]
+        held = luatable.parse(written[0].read_text(encoding="utf-8"))["FWCS_PLANS"]["rock--horde"]
+        assert "stonespine" in held["realms"]                     # as the addon compares: it finds the character's house in game
+    finally:
+        settings.STATE, scan.addons_dir, scan.find_saved_variables = kept
+        srv.shutdown()
 
 
 def test_nothing_a_character_has_is_sent():
@@ -172,10 +201,10 @@ def test_nothing_a_character_has_is_sent():
     assert "Thrallson" not in sent and "__chars" not in sent and "2996" not in sent and "skills" not in sent
 
 
-def _site(docs: dict, houses: list) -> tuple[str, http.server.ThreadingHTTPServer]:
+def _site(docs: dict, houses: list, rules: list | None = None) -> tuple[str, http.server.ThreadingHTTPServer]:
     root = Path(tempfile.mkdtemp())
     (root / "data").mkdir()
-    (root / "data" / "houses.json").write_text(json.dumps({"houses": houses}), encoding="utf-8")
+    (root / "data" / "houses.json").write_text(json.dumps({"houses": houses, **({"rules": rules} if rules else {})}), encoding="utf-8")
     for key, doc in docs.items():
         (root / "data" / key).mkdir()
         (root / "data" / key / "ingame.json").write_text(json.dumps(doc), encoding="utf-8")
