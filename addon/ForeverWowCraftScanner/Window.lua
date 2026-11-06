@@ -1175,6 +1175,13 @@ watcher:SetScript("OnEvent", function(_, event)
   RefreshSoon()
 end)
 
+-- for the options page: the window drawn again (a switch of its changed there), and back in the middle
+function ns.RefreshWindow() if win then Refresh() end end
+function ns.ResetWindowPosition()
+  ns.Settings().winPos = nil
+  if win then win:ClearAllPoints(); win:SetPoint("CENTER") end
+end
+
 SLASH_FOREVERWOWCRAFT1 = "/fwc"
 SlashCmdList.FOREVERWOWCRAFT = function(msg)
   msg = (msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")

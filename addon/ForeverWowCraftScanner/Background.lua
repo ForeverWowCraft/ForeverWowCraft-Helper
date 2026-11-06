@@ -141,47 +141,106 @@ end
 local function BuildOptions()
   local panel = CreateFrame("Frame", "ForeverWowCraftOptions")
   panel.name = "ForeverWowCraft"
-  local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+  -- every setting of the addon is here (the user, 6 Nov 2026: a box or an entry for each, not a
+  -- command alone); more than the options canvas is tall, so the page scrolls
+  local scroll = CreateFrame("ScrollFrame", "ForeverWowCraftOptionsScroll", panel, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 0, -4)
+  scroll:SetPoint("BOTTOMRIGHT", -28, 4)
+  local page = CreateFrame("Frame", nil, scroll)
+  page:SetSize(600, 900)
+  scroll:SetScrollChild(page)
+  local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", 16, -16)
   title:SetText("ForeverWowCraft")
-  local blurb = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  local blurb = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   blurb:SetPoint("TOPLEFT", 16, -40)
   blurb:SetWidth(560)
   blurb:SetJustifyH("LEFT")
   blurb:SetWordWrap(true)
   blurb:SetText("The addon records the auction house's prices and sends them, through the helper on this PC, to "
     .. "foreverwowcraft.com, where every scanner's prices make the routes that /fwc shows. Nothing of yours is sent: "
-    .. "prices only.")
+    .. "prices only. Each switch here has a command too (/fwcs); this page is the same settings.")
   local saved = ns.Settings
+  local y = -92
+  local function Next(h) local at = y; y = y - h; return at end
   panel.boxes = {
-    CheckBox(panel, -96, "Scan by itself when the auction house opens",
+    CheckBox(page, Next(54), "Scan by itself when the auction house opens",
       "When the auction house can be read again (once every 15 minutes). Otherwise the button on the auction house "
       .. "frame, or /fwcs full, starts a scan.",
       function() return Scanner().AutoScanEnabled() end, function(v) saved().auto = v end),
-    CheckBox(panel, -152, "A sound when prices are ready to save",
+    CheckBox(page, Next(44), "A sound when prices are ready to save",
       "With the button lighting up on the auction house frame.",
       function() return Scanner().AlertEnabled() end, function(v) saved().alert = v end),
-    CheckBox(panel, -196, "Show the scanner's own bar (FULL, SCAN, SAVE, progress)",
+    CheckBox(page, Next(54), "Show the scanner's own bar (FULL, SCAN, SAVE, progress)",
       "For running scans by hand and watching them: the per-list SCAN, the telemetry panel. Off, the scanner is in "
       .. "the background and the button on the auction house frame is all there is.",
       function() return not Scanner().BarHidden() end, function(v) saved().hidden = not v end),
-    CheckBox(panel, -252, "A sound when the auction house can be read again",
+    CheckBox(page, Next(44), "The telemetry panel under the bar",
+      "What the scan is doing, list by list. Only with the bar.",
+      function() return saved().log ~= false end, function(v) saved().log = v end),
+    CheckBox(page, Next(54), "A sound when the auction house can be read again",
       "Wherever you are, every 15 minutes. Off by default without the bar: the scan then starts by itself anyway.",
       function() return Scanner().ReadyAlertEnabled() end, function(v) saved().ding = v; Scanner().ArmReadyAlert() end),
-    CheckBox(panel, -308, "The arrow stays when the profession window closes",
-      "The Make button's arrow to a trainer, a vendor or an anvil: kept until what it points at is reached or it is "
-      .. "right-clicked. Unticked, it goes with the window. /fwcs arrow off turns the arrow off altogether.",
+    CheckBox(page, Next(54), "The arrow to what the Make button needs",
+      "A trainer, a vendor, an auctioneer or a crafting station, and how far. The Arrow box at the top of the /fwc "
+      .. "window is the same switch.",
+      function() return saved().arrow ~= false end, function(v) ns.ArrowCommand(v and "on" or "off") end),
+    CheckBox(page, Next(54), "The arrow stays when the profession window closes",
+      "Kept until what it points at is reached or it is right-clicked. Unticked, it goes with the window.",
       function() return saved().arrowKeep ~= false end, function(v) saved().arrowKeep = v end),
-    CheckBox(panel, -352, "The shopping list opens with the auction house",
+    CheckBox(page, Next(44), "The shopping list opens with the auction house",
       "What the next step of the route needs bought, with a Buy button an item. Off, the Make button still opens it.",
       function() return saved().shop ~= false end, function(v) saved().shop = v end),
-    CheckBox(panel, -396, "A reminder to reload, every 15 minutes",
+    CheckBox(page, Next(54), "Count other characters' bags and banks",
+      "What your other characters of this auction house hold is taken off the /fwc window's list too. The "
+      .. "'other characters' button in the window is the same switch.",
+      function() return saved().alts and true or false end,
+      function(v) saved().alts = v or nil; if ns.RefreshWindow then ns.RefreshWindow() end end),
+    CheckBox(page, Next(76), "A reminder to reload, every 15 minutes",
       "A small box at the top of the screen with a Reload now button, when there is something to save (prices, vendors "
       .. "and places met) or the routes may have changed on the site: both move only at a reload. Never in combat, "
       .. "nor while the auction house, a merchant or a profession window is open. Later puts it off a quarter of an hour.",
       function() return ns.remind.Enabled() end, function(v) ns.RemindCommand(v and "on" or "off") end),
   }
-  panel:SetScript("OnShow", function(self) for _, b in ipairs(self.boxes) do b:refresh(b) end end)
+  -- where the prices are kept: told from where the character stands, unless said here
+  local where = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  where:SetPoint("TOPLEFT", 20, Next(22))
+  where:SetText("Keep the prices as the auction house of")
+  local wnote = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  wnote:SetPoint("TOPLEFT", 20, Next(34))
+  wnote:SetWidth(540)
+  wnote:SetJustifyH("LEFT")
+  wnote:SetWordWrap(true)
+  wnote:SetText("Told from where you stand, unless you say otherwise: a character who scans the other faction's house, or the "
+    .. "neutral one both factions share (which is not scanned), says which. /fwcs house is the same.")
+  panel.houses = {}
+  local row, x = Next(30), 20
+  for _, choice in ipairs({ { "auto", "Where you stand" }, { "alliance", "Alliance" }, { "horde", "Horde" }, { "neutral", "Neutral" } }) do
+    local b = ns.Button(page, 130, choice[2], "ForeverWowCraftOptionsHouse" .. choice[2]:gsub(" ", ""))
+    b:SetPoint("TOPLEFT", x, row)
+    x = x + 136
+    b.choice, b.label = choice[1], choice[2]
+    b:SetScript("OnClick", function() ns.HouseCommand(choice[1]); panel:refresh() end)
+    table.insert(panel.houses, b)
+  end
+  -- what was dragged, back where it started
+  local reset = ns.Button(page, 200, "Put things back where they were", "ForeverWowCraftOptionsReset")
+  reset:SetPoint("TOPLEFT", 20, Next(26))
+  reset:SetScript("OnClick", function() ns.ResetPositions() end)
+  local rnote = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+  rnote:SetPoint("TOPLEFT", 20, Next(20))
+  rnote:SetWidth(540)
+  rnote:SetJustifyH("LEFT")
+  rnote:SetText("The scanner's bar, the /fwc window and the arrow, after being dragged about.")
+  panel.refresh = function(self)
+    for _, box in ipairs(self.boxes) do box:refresh(box) end
+    local now = saved().house
+    for _, hb in ipairs(self.houses) do
+      local on = (now == nil and hb.choice == "auto") or (now ~= nil and now:lower() == hb.choice)
+      hb:SetText((on and "|cff40ff40[x]|r " or "") .. hb.label)
+    end
+  end
+  panel:SetScript("OnShow", function(self) self:refresh() end)
   if _G.Settings and _G.Settings.RegisterCanvasLayoutCategory and _G.Settings.RegisterAddOnCategory then
     local category = _G.Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     category.ID = panel.name
@@ -192,10 +251,18 @@ local function BuildOptions()
   end
   ns.options = panel
 end
+
+-- the scanner's bar, the /fwc window and the arrow back where they started (the options page)
+function ns.ResetPositions()
+  Scanner().ResetBar()
+  ns.ArrowCommand("reset")
+  if ns.ResetWindowPosition then ns.ResetWindowPosition() end
+  ns.Print("the bar and the window are back where they started too")
+end
 pcall(BuildOptions)                       -- a client with neither way of registering still has the slash commands
 
 function ns.OpenOptions()
   if _G.Settings and _G.Settings.OpenToCategory and ns.optionsCategory then _G.Settings.OpenToCategory(ns.optionsCategory.ID or ns.optionsCategory)
   elseif InterfaceOptionsFrame_OpenToCategory and ns.options then InterfaceOptionsFrame_OpenToCategory(ns.options); InterfaceOptionsFrame_OpenToCategory(ns.options)
-  else ns.Print("the options are: /fwcs auto | bar | alert | ding | remind") end
+  else ns.Print("the options are: /fwcs auto | bar | log | alert | ding | arrow | shop | house | remind") end
 end

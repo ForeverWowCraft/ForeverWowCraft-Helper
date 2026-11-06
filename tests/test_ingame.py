@@ -529,8 +529,31 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 7
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 10
     assert lua.eval("registered_panel == ns.options")
+    # every setting is on the page (the user, 6 Nov 2026): the switches, by their getters and setters
+    lua.execute("ns.options:refresh()")
+    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 11)]
+    assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
+    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "A reminder to reload, every 15 minutes"
+    lua.execute("local b = ns.options.boxes[9]; b.GetChecked = function() return true end; b.scripts.OnClick(b)")
+    assert lua.eval("FWCS_DB.__ui.alts") is True
+    lua.execute("local b = ns.options.boxes[6]; b.GetChecked = function() return false end; b.scripts.OnClick(b)")
+    assert lua.eval("FWCS_DB.__ui.arrow") is False
+    lua.execute("local b = ns.options.boxes[6]; b.GetChecked = function() return true end; b.scripts.OnClick(b); FWCS_DB.__ui.alts = nil")
+    assert lua.eval("FWCS_DB.__ui.arrow") is None
+    # which auction house the prices are kept as: four buttons, the one in force marked
+    lua.execute("ns.options:refresh()")
+    assert lua.eval("ForeverWowCraftOptionsHouseWhereyoustand.text") == "|cff40ff40[x]|r Where you stand"
+    lua.execute("ForeverWowCraftOptionsHouseHorde.scripts.OnClick(ForeverWowCraftOptionsHouseHorde)")
+    assert lua.eval("FWCS_DB.__ui.house") == "Horde" and lua.eval("ForeverWowCraftOptionsHouseHorde.text") == "|cff40ff40[x]|r Horde"
+    assert lua.eval("ForeverWowCraftOptionsHouseWhereyoustand.text") == "Where you stand"
+    lua.execute("ForeverWowCraftOptionsHouseWhereyoustand.scripts.OnClick(ForeverWowCraftOptionsHouseWhereyoustand)")
+    assert lua.eval("FWCS_DB.__ui.house") is None
+    # the dragged things back where they started
+    lua.execute("FWCS_DB.__ui.pos = { 'TOP', 'TOP', 10, -10 }; FWCS_DB.__ui.winPos = { 'TOP', 'TOP', 1, 1 }; FWCS_DB.__ui.arrowPos = { 'TOP', 'TOP', 2, 2 }; "
+                "ForeverWowCraftOptionsReset.scripts.OnClick(ForeverWowCraftOptionsReset)")
+    assert lua.eval("FWCS_DB.__ui.pos") is None and lua.eval("FWCS_DB.__ui.winPos") is None and lua.eval("FWCS_DB.__ui.arrowPos") is None
     # the auction house opens: the button appears, dim while the snapshot is on its cooldown, lit once there is something to save
     lua.execute('AuctionHouseFrame = CreateFrame("Frame"); FWCS_DB.__ui.lastFull = time() - 60; Fire("AUCTION_HOUSE_SHOW")')
     assert lua.eval("ForeverWowCraftAHButton.text").startswith("|cff808080Prices in ")

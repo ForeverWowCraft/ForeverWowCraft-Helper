@@ -1176,9 +1176,32 @@ ns.scanner = {
   HasLists = function() return #QueueNames() > 0 end,
   StartSnapshot = function(force) StartSnapshot(force == true) end,       -- force: a shift-click, past the cooldown
   Reload = DoReload,
+  ResetBar = function() Settings().pos = nil; RestorePosition() end,
   BarHidden = BarHidden, AutoScanEnabled = AutoScanEnabled, AlertEnabled = AlertEnabled, ReadyAlertEnabled = ReadyAlertEnabled,
   Refresh = function() UpdateStatus() end, ArmReadyAlert = ArmReadyAlert,
 }
+
+-- /fwcs house neutral | alliance | horde | auto: the auction house the prices are kept as, when
+-- not the one where the character stands (the options page has the same four)
+local function HouseCommand(arg)
+  local named = { neutral = "Neutral", alliance = "Alliance", horde = "Horde" }
+  local function Where()
+    return SharedHouse() and "the auction house both factions share, which is not scanned" or DatasetName()
+  end
+  if named[arg] then
+    Settings().house = named[arg]
+    Print((SharedHouse() and "the open house is taken for " or "scans are kept as ") .. Where()
+          .. " from now on, wherever you are. /fwcs house auto undoes that.")
+  elseif arg == "auto" then
+    Settings().house = nil
+    Print("the auction house is told from where you stand again: now " .. Where())
+  else
+    Print((SharedHouse() and "the open house is taken for " or "scans are kept as ") .. Where()
+          .. (Settings().house and " (you said so)" or "") .. ". /fwcs house neutral | alliance | horde | auto")
+  end
+  UpdateStatus()
+end
+ns.HouseCommand = HouseCommand
 
 SLASH_FOREVERWOWCRAFTSCANNER1 = "/fwcs"
 SLASH_FOREVERWOWCRAFTSCANNER2 = "/fcs"    -- what it was before the addon was renamed
@@ -1200,22 +1223,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     FWCS_DB[DatasetKey()] = {}
     Print("cleared the scan data of " .. DatasetName() .. " (takes effect on /reload)")
   elseif cmd == "house" then
-    local named = { neutral = "Neutral", alliance = "Alliance", horde = "Horde" }
-    local function Where()
-      return SharedHouse() and "the auction house both factions share, which is not scanned" or DatasetName()
-    end
-    if named[arg] then
-      Settings().house = named[arg]
-      Print((SharedHouse() and "the open house is taken for " or "scans are kept as ") .. Where()
-            .. " from now on, wherever you are. /fwcs house auto undoes that.")
-    elseif arg == "auto" then
-      Settings().house = nil
-      Print("the auction house is told from where you stand again: now " .. Where())
-    else
-      Print((SharedHouse() and "the open house is taken for " or "scans are kept as ") .. Where()
-            .. (Settings().house and " (you said so)" or "") .. ". /fwcs house neutral | alliance | horde | auto")
-    end
-    UpdateStatus()
+    HouseCommand(arg)
   elseif cmd == "bar" then
     Settings().hidden = not BarHidden()
     Print(BarHidden() and "the scanner's bar is hidden: it scans in the background, with a button at the auction house"
