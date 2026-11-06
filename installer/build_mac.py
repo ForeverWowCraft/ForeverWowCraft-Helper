@@ -96,7 +96,7 @@ def python_tree(cache: Path, into: Path) -> None:
     python.chmod(python.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     env = dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONDONTWRITEBYTECODE="1")
     run([str(python), "-m", "pip", "install", "--quiet", "--no-compile", "--no-warn-script-location", *PYOBJC], env=env)
-    for p in list(into.rglob("__pycache__")):
+    for p in list(into.rglob("__pycache__")) + list(into.rglob("*.dSYM")):      # bytecode, and PyObjC's debug symbols
         shutil.rmtree(p, ignore_errors=True)
 
 
@@ -136,6 +136,9 @@ def dmg(app: Path, out: Path, ver: str) -> Path:
     (work / "Applications").symlink_to("/Applications")
     target = out / f"ForeverWowCraft-Helper-{ver}.dmg"
     target.unlink(missing_ok=True)
+    # the files in the image carry the building account's numeric user id and no name; a Mac that mounts the
+    # image ignores ownership on it, as on any removable volume (hdiutil's -uid 99 would make them nobody's, but
+    # this hdiutil refuses it with -srcfolder)
     run(["hdiutil", "create", "-volname", NAME, "-srcfolder", str(work), "-ov", "-format", "UDZO", "-quiet", str(target)])
     shutil.rmtree(work)
     return target

@@ -85,6 +85,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: "Nothing of the Mac's in the log: the home folder and the account name are masked (the log is public)"
+        run: |
+          echo "::add-mask::$HOME"
+          echo "::add-mask::$(whoami)"
       - uses: actions/checkout@v4
       - name: "The application and its disk image: Python fetched and checked, PyObjC into it (installer/build_mac.py)"
         run: |
