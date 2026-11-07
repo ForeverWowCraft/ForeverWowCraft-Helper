@@ -272,22 +272,35 @@ def open_path(what: str | Path) -> None:
     shell32.ShellExecuteW(None, "open", str(what), None, None, SW_SHOWNORMAL)
 
 
+def update_script(installer: Path, log: Path, exe: Path, fwch: Path) -> str:
+    """The Windows Script Host script that installs a newer helper with nothing shown: it waits
+    a moment for this helper to close, runs the installer without a window (msiexec /qn: a
+    per-user install, no administrator, so nothing asks; window style 0, hidden) with its log
+    in `log`, and starts the new helper. A VBScript run by wscript.exe, which has no console:
+    the cmd script of before, started with no console of its own, had every console program
+    in it (the ping that waited) open a black window of its own, which unsettled a player who
+    is no developer (the user, 7 Nov 2026). Inside a VBScript string a quote is doubled."""
+    def q(path: Path) -> str:
+        return '""' + str(path) + '""'
+    return "\r\n".join([
+        'Set sh = CreateObject("WScript.Shell")',
+        "WScript.Sleep 3000",
+        f'sh.Run "msiexec /i {q(installer)} /qn /norestart /l*v {q(log)}", 0, True',
+        f'sh.Run "{q(exe)} {q(fwch)} app", 1, False',
+        ""])
+
+
 def quiet_update(installer: Path, log: Path) -> bool:
-    """Install a newer helper with nothing shown: a script of its own, started here and left
-    running, waits a moment for this helper to close, runs the installer without a window
-    (msiexec /qn: a per-user install, no administrator, so nothing asks) with its log in `log`,
-    and starts the new helper. True when the script was started; the helper then quits."""
+    """Install a newer helper with nothing shown (update_script), the script started here and
+    left running. True when it was started; the helper then quits."""
     from . import tray
-    script = installer.with_name("update.cmd")
+    script = installer.with_name("update.vbs")
     try:
-        script.write_text("\r\n".join([
-            "@echo off",
-            "ping -n 4 127.0.0.1 >nul",
-            f'msiexec /i "{installer}" /qn /norestart /l*v "{log}"',
-            f'start "" "{tray.app_exe()}" "{settings.ROOT / "fwch.py"}" app',
-            ""]), encoding="utf-8")
-        subprocess.Popen(["cmd", "/c", str(script)], close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        installer.with_name("update.cmd").unlink(missing_ok=True)       # the script of before 1.6.15
+        script.write_text(update_script(installer, log, tray.app_exe(), settings.ROOT / "fwch.py"), encoding="utf-16")
+        subprocess.Popen(["wscript.exe", "//B", "//Nologo", str(script)], close_fds=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
     except OSError:
         return False
     return True

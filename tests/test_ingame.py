@@ -884,7 +884,8 @@ def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
     assert "Gold in the bags: 1s 00c; this needs about 5s 00c." in tip() and "Farm the gold: what is short is bought, not farmed." in tip()
     assert lua.eval("ForeverWowCraftMake.verdict.place") is None and lua.eval("ForeverWowCraftMake.verdict.shopping[1].recipe") is True
     lua.execute('money = 600; Fire("PLAYER_MONEY")')
-    assert text() == "Learn Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "vendor"
+    assert text() == "Buy the recipe for Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "vendor"   # not "Learn": a pattern, not a trainer's
+    assert any("a pattern sold or dropped, not a trainer's" in line for line in tip()) and lua.eval("ForeverWowCraftMake.mode") == "Buy"
 
 
 def test_the_make_button_points_the_arrow_at_what_it_needs():

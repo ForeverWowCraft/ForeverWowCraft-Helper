@@ -377,7 +377,7 @@ local function VerdictOf(given)
       asideOf = { text = "Then learn " .. ns.RecipeName(step) .. " at the trainer", place = trainer }
       return v
     end
-    table.insert(tip, learn and string.format("The route buys the recipe, %s, for %s.", N(house, learn[1]), ns.Money(learn[2]))
+    table.insert(tip, learn and string.format("The route buys the recipe, %s, for %s: a pattern sold or dropped, not a trainer's.", N(house, learn[1]), ns.Money(learn[2]))
       or "The trainer teaches it.")
     Char().tolearn = learn and { spell = nxt.spell, item = learn[1], cost = learn[2] } or nil
     local shopping = learn and ShoppingOf(plan, nxt, Char().tolearn) or nil
@@ -387,7 +387,9 @@ local function VerdictOf(given)
       asideOf = { text = "Then " .. buy.text:sub(1, 1):lower() .. buy.text:sub(2), place = buy.place }
       table.insert(tip, "The trainer is nearer; the needs come after (the arrow's note).")
     end
-    return { text = "Learn " .. ns.RecipeName(step) .. " first", tip = tip, shopping = shopping, learn = nxt.spell,
+    -- "Buy the recipe" for a pattern the route buys: "Learn" read as the trainer's to a player
+    -- who then looked for Red Linen Vest there (the user, 7 Nov 2026)
+    return { text = (learn and "Buy the recipe for " or "Learn ") .. ns.RecipeName(step) .. " first", tip = tip, shopping = shopping, learn = nxt.spell,
              place = learn and Seller(plan, learn[1]) or trainer, profession = profession }
   end
   Char().tolearn = nil
