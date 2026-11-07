@@ -297,7 +297,7 @@ def vendors(path: Path | None = None) -> dict[int, dict]:
     held = db.get("__vendors") if isinstance(db, dict) else None
     out: dict[int, dict] = {}
     for vid, v in (held.items() if isinstance(held, dict) else []):
-        if not (isinstance(vid, int) and isinstance(v, dict) and isinstance(v.get("items"), dict)):
+        if not (isinstance(vid, (int, str)) and isinstance(v, dict) and isinstance(v.get("items"), dict)):     # a name where the client gave no id
             continue
         items = {}
         for iid, row in v["items"].items():
@@ -327,7 +327,7 @@ def trainers(path: Path | None = None) -> dict[int, dict]:
     held = db.get("__trainers") if isinstance(db, dict) else None
     out: dict[int, dict] = {}
     for tid, t in (held.items() if isinstance(held, dict) else []):
-        if not (isinstance(tid, int) and isinstance(t, dict) and isinstance(t.get("teaches"), dict) and t.get("skill")):
+        if not (isinstance(tid, (int, str)) and isinstance(t, dict) and isinstance(t.get("teaches"), dict) and t.get("skill")):
             continue
         teaches = {str(n): int(level) for n, level in t["teaches"].items() if isinstance(n, str) and isinstance(level, (int, float))}
         out[tid] = {"name": str(t.get("name") or ""), "map": int(t.get("map") or 0), "x": float(t.get("x") or 0), "y": float(t.get("y") or 0),

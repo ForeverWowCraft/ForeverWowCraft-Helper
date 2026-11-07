@@ -764,7 +764,8 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1604 that the addon came with" in lua.eval("printed[#printed]")
+    assert "and 1604 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services.")
 
 
 def test_the_arrow_points_across_maps_on_one_continent():
@@ -833,6 +834,11 @@ def test_places_are_noted_as_the_character_meets_them():
     lua.execute('services = { "Brown Linen Vest" }; GetTrainerServiceSkillReq = function(i) return skillreq[i], 20 end; Fire("TRAINER_SHOW"); '
                 'GetTrainerServiceSkillReq = function(i) return skillreq[i] end; services = { "Journeyman Tailor", "White Linen Shirt", "Brown Linen Vest" }')
     assert dict(lua.eval("FWCS_DB.__trainers[3579].teaches")) == {"Journeyman Tailor": 50, "White Linen Shirt": 1, "Brown Linen Vest": 20}   # the union; the newest skill
+    # a GUID laid out otherwise (another client), and none at all: the creature's id before the last part, else its name
+    lua.execute('function UnitGUID(unit) return "Creature-0-1-2-4200-00AB12" end; px = 0.70; wares = { 2320 }; Fire("MERCHANT_SHOW")')
+    assert lua.eval("FWCS_DB.__vendors[4200].name") == "Thrallson"
+    lua.execute('UnitGUID = nil; Fire("MERCHANT_SHOW")')
+    assert lua.eval('FWCS_DB.__vendors["Thrallson"].items[2320].price') == 10
     lua.execute('GetMerchantItemInfo, GetMerchantItemCostInfo, GetMerchantItemCostItem, UnitGUID, GetBuildInfo = nil, nil, nil, nil, nil')
     assert len(places()) == 2                                                              # the place list is as before
     # the auctioneer, in another part of town

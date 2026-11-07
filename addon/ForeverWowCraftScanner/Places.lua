@@ -179,6 +179,19 @@ ns.NotePlace = Note
 
 local function Npc() return UnitName and UnitName("npc") or nil end
 
+-- What a merchant's or a trainer's window is kept under: the creature's id out of the unit's
+-- GUID. Not one vendor window was kept in a day of 1.6.5+ on Forever while the same vendors
+-- were noted as places (7 Nov 2026): the strict GUID pattern of before did not fit this
+-- client's. Now the id is the number before the last (hex) part, whatever comes before it;
+-- and with no GUID at all, the creature's name, so that nothing seen is lost
+local function NpcKey()
+  local guid = UnitGUID and UnitGUID("npc")
+  local id = guid and (tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-")) or tonumber(guid:match("%-(%d+)%-%x+$")))
+  if id then return id end
+  local name = Npc()
+  return name and name ~= "" and name or nil
+end
+
 -- the names a profession goes by, spelt plainly: the routes' and the client's
 local function Spellings(plan)
   local out = { [ns.inv.Spelt(plan.profession)] = true, [ns.inv.Spelt(ns.Title(plan.profession))] = true }
@@ -232,8 +245,7 @@ local function NoteTrainer()
   -- taught at on the server, which the client's tables do not say, and the routes planned on
   -- vanilla's levels were wrong by it (Embossed Leather Gloves, the user, 7 Nov 2026). The
   -- union over visits: a service a filter hid this time stays from the last
-  local guid = UnitGUID and UnitGUID("npc")
-  local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+  local id = NpcKey()
   local map, x, y = Here()
   if id and map and GetTrainerServiceSkillReq then
     local asks, counts, skillName = {}, {}, nil
@@ -293,8 +305,7 @@ local function NoteVendor()
   end
   local npc = Npc() or "?"
   if #sells > 0 then Note("vendor", npc, { name = npc, sells = sells }) end
-  local guid = UnitGUID and UnitGUID("npc")
-  local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+  local id = NpcKey()
   local map, x, y = Here()
   if id and map and next(wares) then
     ns.notedAt = time()
@@ -574,6 +585,10 @@ function ns.PlacesCommand()
   for _ in ipairs(Seeded()) do seed = seed + 1 end
   print(PREFIX .. string.format("places known: %d trainers, %d vendors, %d auctioneers, %d crafting stations seen, and %d that the addon came with.",
     counts.trainer or 0, counts.vendor or 0, counts.auction or 0, counts.station or 0, seed))
+  local windows, wares, taught, services = 0, 0, 0, 0
+  for _, v in pairs(FWCS_DB.__vendors or {}) do windows = windows + 1; for _ in pairs(v.items or {}) do wares = wares + 1 end end
+  for _, t in pairs(FWCS_DB.__trainers or {}) do taught = taught + 1; for _ in pairs(t.teaches or {}) do services = services + 1 end end
+  print(PREFIX .. string.format("kept for the helper: %d merchant window(s), %d wares; %d trainer window(s), %d services.", windows, wares, taught, services))
 end
 
 local frame = CreateFrame("Frame")

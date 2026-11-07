@@ -85,6 +85,9 @@ def test_the_vendors_met_are_read_and_make_a_document_the_pipe_takes():
     both = pipe.vendors_document(seen, met)
     assert pipe.check_vendors(both) is None and both["trainers"]["3363"]["teaches"]["Embossed Leather Gloves"] == 45 and doc["trainers"] == {}
     assert pipe.check_vendors(pipe.vendors_document({}, met)) is None                     # trainers alone are a document
+    named = pipe.vendors_document({"Gloria Femmel": dict(seen[3579], name="Gloria Femmel")}, {"Thuwd": dict(met[3363], name="Thuwd")})
+    assert pipe.check_vendors(named) is None and "Gloria Femmel" in named["vendors"]        # a name for a key where the client gave no id (1.6.14)
+    assert pipe.check_vendors({"format": pipe.VENDORS_FORMAT, "vendors": {"": seen[3579]}}) == "vendor '' is not a vendor"
     assert pipe.mark_vendors(both) != pipe.mark_vendors(doc)                              # a trainer seen is a change
     bad = pipe.vendors_document(seen, met)
     bad["trainers"]["3363"]["teaches"]["Embossed Leather Gloves"] = "45"

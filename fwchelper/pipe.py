@@ -167,7 +167,7 @@ def check_vendors(doc) -> str | None:
     if len(trainers) > 500:
         return "too many trainers"
     for tid, t in trainers.items():
-        if not str(tid).isdigit() or not isinstance(t, dict) or not isinstance(t.get("name"), str) or len(t["name"]) > 80:
+        if not (isinstance(tid, str) and 0 < len(tid) <= 80) or not isinstance(t, dict) or not isinstance(t.get("name"), str) or len(t["name"]) > 80:
             return f"trainer {tid!r} is not a trainer"
         if not (isinstance(t.get("map"), int) and isinstance(t.get("t"), int) and t.get("faction", "") in FACTIONS + ("",)):
             return f"trainer {tid}: no map, time or faction"
@@ -181,7 +181,7 @@ def check_vendors(doc) -> str | None:
             if not isinstance(name, str) or len(name) > 80 or not isinstance(level, int) or level < 0:
                 return f"trainer {tid}: {str(name)[:40]!r} is not a service"
     for vid, v in doc["vendors"].items():
-        if not str(vid).isdigit() or not isinstance(v, dict) or not isinstance(v.get("name"), str) or len(v["name"]) > 80:
+        if not (isinstance(vid, str) and 0 < len(vid) <= 80) or not isinstance(v, dict) or not isinstance(v.get("name"), str) or len(v["name"]) > 80:
             return f"vendor {vid!r} is not a vendor"
         if not (isinstance(v.get("map"), int) and isinstance(v.get("t"), int) and v.get("faction", "") in FACTIONS + ("",)):
             return f"vendor {vid}: no map, time or faction"
