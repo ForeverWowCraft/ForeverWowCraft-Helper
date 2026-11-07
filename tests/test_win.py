@@ -39,6 +39,26 @@ def test_the_quiet_update_runs_through_the_script_host_with_no_window():
     assert installer.with_name("update.vbs").read_text(encoding="utf-16").startswith("Set sh")
 
 
+def test_the_console_programs_the_helper_runs_open_no_window():
+    """tasklist, run from the windowless helper for the game and for another watcher, opened a
+    console window for a moment at every start (the user, 7 Nov 2026)."""
+    if sys.platform != "win32":
+        return
+    from fwchelper import cli, win
+    calls = []
+
+    class Done:
+        stdout = '"Wow.exe","1","Console","1","100 K"' + chr(10)
+    kept = subprocess.run
+    subprocess.run = lambda args, **kw: calls.append((args, kw)) or Done()
+    try:
+        assert win.game_running() is True and cli._running(1) is True
+    finally:
+        subprocess.run = kept
+    assert len(calls) == 2 and all(kw["creationflags"] & subprocess.CREATE_NO_WINDOW for _, kw in calls)
+
+
 if __name__ == "__main__":
     test_the_quiet_update_runs_through_the_script_host_with_no_window()
+    test_the_console_programs_the_helper_runs_open_no_window()
     print("ok")

@@ -208,7 +208,10 @@ def _watch_lock() -> Path:
 def _running(pid: int) -> bool:
     """Whether a process with this id is alive."""
     if os.name == "nt":                                   # os.kill(pid, 0) would end it on Windows
-        out = subprocess.run(["tasklist", "/fi", f"PID eq {pid}", "/nh", "/fo", "csv"], capture_output=True, text=True).stdout
+        # CREATE_NO_WINDOW: run from the windowless helper, a console program opens a black window of its own
+        # otherwise, seen for a moment at every start (the user, 7 Nov 2026)
+        out = subprocess.run(["tasklist", "/fi", f"PID eq {pid}", "/nh", "/fo", "csv"], capture_output=True, text=True,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         return f'"{pid}"' in out
     try:
         os.kill(pid, 0)
