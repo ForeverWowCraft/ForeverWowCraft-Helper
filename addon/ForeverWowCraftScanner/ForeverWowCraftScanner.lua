@@ -485,7 +485,7 @@ UpdateStatus = function()
 
   if state.running then
     ui.mode = "progress"; SaveButton(false)
-    LayoutProgress(s.log ~= false)
+    LayoutProgress(s.log == true)                   -- the telemetry panel: off unless switched on (the shipped defaults, 7 Nov 2026)
     local finished = state.done + state.skipped
     local elapsed = state.startedAt and (GetTime() - state.startedAt) or 0
     ui.bar:SetMinMaxValues(0, math.max(1, state.total))
@@ -1294,8 +1294,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     Print(ReadyAlertEnabled() and ("cooldown alert ON: a sound when the full snapshot is ready again"
             .. (left > 0 and (", in " .. FormatClock(left)) or "")) or "cooldown alert OFF")
   elseif cmd == "log" then
-    Settings().log = Settings().log == false
-    Print("telemetry panel " .. (Settings().log ~= false and "shown" or "hidden"))
+    Settings().log = not (Settings().log == true)
+    Print("telemetry panel " .. (Settings().log == true and "shown" or "hidden"))
     UpdateStatus()
   elseif cmd == "plan" or cmd == "plans" then
     ns.ToggleWindow()

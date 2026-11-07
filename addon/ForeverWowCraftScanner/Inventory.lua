@@ -235,7 +235,7 @@ end
 local function Have()
   local me, have = Char(), {}
   for _, c in pairs(FWCS_DB.__chars or {}) do
-    if c == me or (ns.Settings().alts and c.house == me.house and c.faction == me.faction) then
+    if c == me or (ns.Settings().alts ~= false and c.house == me.house and c.faction == me.faction) then
       for item, n in pairs(c.items or {}) do
         have[item] = (have[item] or 0) + (n[1] or 0) + (n[2] or 0) + (n[3] or 0) + (n[4] or 0)
       end

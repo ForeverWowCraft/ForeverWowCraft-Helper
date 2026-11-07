@@ -157,7 +157,7 @@ local function ShowItemTip(row)
   GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
   if GameTooltip.SetItemByID then GameTooltip:SetItemByID(row.item) else GameTooltip:AddLine(row.name:GetText() or "") end
   -- the characters that can hand things to this one: the same auction house and faction
-  local me, alts = Char(), ns.Settings().alts
+  local me, alts = Char(), ns.Settings().alts ~= false
   for _, c in pairs(FWCS_DB.__chars or {}) do
     local n = c.items and c.items[row.item]
     if n and c.house == me.house and c.faction == me.faction then
@@ -724,7 +724,7 @@ local function Fill(house, chosen)
   elseif variant.focus == "profit" then win.focus:SetText("[  ] skill-up")
   else win.focus:SetText("For: " .. FocusLabel(house, variant.focus)) end
   if house.focus then win.focus:Show() else win.focus:Hide() end      -- a document from before: profit alone
-  win.alts:SetText((ns.Settings().alts and "|cff40ff40[x]|r" or "[  ]") .. " other characters")
+  win.alts:SetText((ns.Settings().alts ~= false and "|cff40ff40[x]|r" or "[  ]") .. " other characters")
   win.title:SetText(string.format("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r  %s (%s), prices scanned %s",
     house.realm or "?", house.faction or "?", Age(house.scanned_at)))
   local whose = c.from[plan.profession] and "from the skill you gave (/fwc from auto undoes it)"
@@ -1111,7 +1111,7 @@ local function Wire()
   end)
   win.focus:SetScript("OnLeave", GameTooltip_Hide)
   win.alts:SetScript("OnClick", function()
-    ns.Settings().alts = not ns.Settings().alts
+    ns.Settings().alts = ns.Settings().alts == false        -- counted unless switched off (the shipped default, 7 Nov 2026)
     Refresh()
   end)
   win.alts:SetScript("OnEnter", function(self)
@@ -1227,8 +1227,8 @@ SlashCmdList.FOREVERWOWCRAFT = function(msg)
     ns.Print(chosen.also and string.format("%s is planned with %s%s.", Title(plan.profession), Title(chosen.also),
       chosen.applied and "" or " (which changes nothing in it)") or (Title(plan.profession) .. " is planned on its own."))
   elseif cmd == "alts" then
-    ns.Settings().alts = not ns.Settings().alts
-    ns.Print(ns.Settings().alts and "your other characters' bags and banks are counted too" or "only this character's bags and bank are counted")
+    ns.Settings().alts = ns.Settings().alts == false
+    ns.Print(ns.Settings().alts ~= false and "your other characters' bags and banks are counted too" or "only this character's bags and bank are counted")
     Refresh()
   elseif cmd == "help" or cmd == "?" then
     ns.Print("/fwc shows what your professions still need, less what you have. /fwc from <skill> | from auto"

@@ -264,12 +264,14 @@ def test_the_window_shows_the_route_less_bags_and_bank():
     # a skill gained and a bag change draw it again
     lua.execute('skill = 51; bags[0][1] = nil; Fire("CHAT_MSG_SKILL"); RunTimers()')
     assert "Tailoring 51 to 60" in lua.eval("AllText()") and "White Linen Shirt" not in lua.eval("AllText()")
-    # another character's things count when asked for
-    lua.execute('FWCS_DB.__chars["Stonespine|Bankalt"] = { name = "Bankalt", house = "Stonespine", faction = "Horde", items = { [2996] = { 0, 36 } } }')
-    before = lua.eval("AllText()")
+    # another character's things count unless switched off (the shipped default since 1.6.13); /fwc alts switches
+    lua.execute('FWCS_DB.__chars["Stonespine|Bankalt"] = { name = "Bankalt", house = "Stonespine", faction = "Horde", items = { [2996] = { 0, 36 } } }; Fire("BAG_UPDATE_DELAYED"); RunTimers()')
+    counted = lua.eval("AllText()")
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("alts")')
-    after = lua.eval("AllText()")
-    assert "Make on the way" in before and "Make on the way" not in after
+    alone = lua.eval("AllText()")
+    assert "Make on the way" not in counted and "Make on the way" in alone and lua.eval("FWCS_DB.__ui.alts") is False
+    lua.execute('SlashCmdList.FOREVERWOWCRAFT("alts")')
+    assert "Make on the way" not in lua.eval("AllText()") and lua.eval("FWCS_DB.__ui.alts") is True
     # said by hand, the skill to plan from; and a character without the profession gets the whole route
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("from 1")')
     assert "Tailoring 1 to 60, from the skill you gave" in lua.eval("AllText()")
@@ -543,6 +545,17 @@ def test_the_scanner_in_the_background():
     labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 11)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
     assert labels[8] == "Count other characters' bags and banks" and labels[9] == "A reminder to reload, every 15 minutes"
+    # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
+    # (ready sound off), arrow, arrow kept, shopping list, other characters, reminder
+    lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 11)] == [True, True, False, False, False, True, True, True, True, True]
+    # the Settings window's own hooks: OnRefresh reads the boxes again (OnShow never fired for a frame made at load,
+    # and every box showed unticked after an update, 7 Nov 2026); OnDefault puts the shipped defaults back
+    lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false }; ns.options:OnRefresh()")
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10)] == [False, True, False, False]
+    lua.execute("ns.options:OnDefault()")
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 11)] == [True, True, False, False, False, True, True, True, True, True]
+    assert lua.eval("FWCS_DB.__ui.auto") is None and lua.eval("FWCS_DB.__ui.alts") is None
     lua.execute("local b = ns.options.boxes[9]; b.GetChecked = function() return true end; b.scripts.OnClick(b)")
     assert lua.eval("FWCS_DB.__ui.alts") is True
     lua.execute("local b = ns.options.boxes[6]; b.GetChecked = function() return false end; b.scripts.OnClick(b)")

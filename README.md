@@ -109,10 +109,10 @@ ones you do not have are grey (their whole route shows, from the trainer on). **
 them is a second profession to count, as the site's "also have": your other profession by
 itself, or the one you pick. Then the recipes a route may use (a trainer's only, or also
 recipes bought from the auction house when they pay off), what the route is **for** (profit:
-what you make is sold, and the route is the cheapest once it is; skill-up: nothing is counted
-as sold, so it takes the cheapest reagents per skill point and leaves less to list), and
-whether your **other characters** of the
-same auction house and faction count too: their things as they were when each last played
+what you make is sold at the auction house, and the route is the cheapest once it is; skill-up:
+nothing is listed, what you make goes to a vendor, and the route is the cheapest per skill point
+net of that), and whether your **other characters** of the same auction house and faction count
+too (they do unless switched off, since 1.6.13): their things as they were when each last played
 with the addon. Point at a row to see who has how many, and where. **Auctionator** gives the
 shopping list as an Auctionator import string to copy: what is left to buy, or everything
 from nothing. The skill slider plans a part of the route, from one end to the other, as the

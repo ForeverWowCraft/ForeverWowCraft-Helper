@@ -135,6 +135,7 @@ local function CheckBox(panel, y, label, note, get, set)
   box.note:SetText(note)
   box:SetScript("OnClick", function(self) set(self:GetChecked() and true or false); Scanner().Refresh() end)
   box.refresh = function(self) self:SetChecked(get()) end
+  box.get = get                              -- the switch as it stands (the tests read the shipped defaults by it)
   return box
 end
 
@@ -177,7 +178,7 @@ local function BuildOptions()
       function() return not Scanner().BarHidden() end, function(v) saved().hidden = not v end),
     CheckBox(page, Next(44), "The telemetry panel under the bar",
       "What the scan is doing, list by list. Only with the bar.",
-      function() return saved().log ~= false end, function(v) saved().log = v end),
+      function() return saved().log == true end, function(v) saved().log = v end),
     CheckBox(page, Next(54), "A sound when the auction house can be read again",
       "Wherever you are, every 15 minutes. Off by default without the bar: the scan then starts by itself anyway.",
       function() return Scanner().ReadyAlertEnabled() end, function(v) saved().ding = v; Scanner().ArmReadyAlert() end),
@@ -194,8 +195,8 @@ local function BuildOptions()
     CheckBox(page, Next(54), "Count other characters' bags and banks",
       "What your other characters of this auction house hold is taken off the /fwc window's list too. The "
       .. "'other characters' button in the window is the same switch.",
-      function() return saved().alts and true or false end,
-      function(v) saved().alts = v or nil; if ns.RefreshWindow then ns.RefreshWindow() end end),
+      function() return saved().alts ~= false end,
+      function(v) saved().alts = v; if ns.RefreshWindow then ns.RefreshWindow() end end),
     CheckBox(page, Next(76), "A reminder to reload, every 15 minutes",
       "A small box at the top of the screen with a Reload now button, when there is something to save "
       .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
@@ -241,6 +242,23 @@ local function BuildOptions()
     end
   end
   panel:SetScript("OnShow", function(self) self:refresh() end)
+  -- The page showed every box unticked after an update (the user, 7 Nov 2026): the frame is
+  -- made at load with no parent, so it counts as shown from the start and OnShow never fires
+  -- when the Settings window displays it. So: the Settings window's own call when the page
+  -- is displayed (OnRefresh), and while the page is in sight, the boxes are read again every
+  -- second (a /fwcs command typed meanwhile shows too). The settings themselves were never
+  -- lost: FWCS_DB.__ui is the account's saved file, which no update touches.
+  panel.OnRefresh = function(self) self:refresh() end
+  panel.OnCommit = function() end
+  panel.OnDefault = function(self)                 -- the Settings window's Defaults button: the shipped defaults again
+    local s = saved()
+    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "remind" }) do s[key] = nil end
+    self:refresh()
+    Scanner().Refresh()
+  end
+  if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(1, function() if panel:IsVisible() then panel:refresh() end end)
+  end
   if _G.Settings and _G.Settings.RegisterCanvasLayoutCategory and _G.Settings.RegisterAddOnCategory then
     local category = _G.Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     category.ID = panel.name
