@@ -145,6 +145,25 @@ local function CountMail()
     end
   end
   Place(3, counts, "mailSeen")
+  Char().mailed = nil                        -- the inbox seen: what was bought at the house is counted as it is, not as expected
+end
+
+-- How many of an item wait in the mail: counted in the inbox when a mailbox was last open, or
+-- bought at the auction house since (NoteMailed: the game delivers a purchase by mail), the
+-- larger. The Make button sends the character to the mailbox for them before buying more
+-- (the user, 7 Nov 2026).
+local function InMail(item)
+  local c = Char()
+  local seen = c.items[item] and c.items[item][3] or 0
+  local coming = c.mailed and c.mailed[item] or 0
+  return math.max(seen, coming)
+end
+
+local function NoteMailed(item, units)
+  local c = Char()
+  c.mailed = c.mailed or {}
+  c.mailed[item] = (c.mailed[item] or 0) + (units or 1)
+  c.mailedAt = time()
 end
 
 -- The character's own auctions still up (not the sold ones: those are money in the mail), once
@@ -261,4 +280,5 @@ opener:SetScript("OnEvent", function(_, event)
 end)
 
 ns.inv = { Spelt = Spelt, Char = Char, House = House, Tracked = Tracked, Count = Count, CountBags = CountBags, CountBank = CountBank,
-           CountMail = CountMail, NoteSkills = NoteSkills, Have = Have, PLACES = PLACES }
+           CountMail = CountMail, NoteSkills = NoteSkills, Have = Have, PLACES = PLACES,
+           InMail = InMail, NoteMailed = NoteMailed }

@@ -764,7 +764,7 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1604 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert "and 1658 that the addon came with" in lua.eval("printed[#printed - 1]")
     assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services.")
 
 
@@ -1027,6 +1027,18 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     assert lua.eval('(function() for _, e in ipairs(ForeverWowCraftMake.verdict.shopping) do if e.item == 2589 then return e.source .. ":" .. e.price end end end)()') == "vendor:45"
     lua.execute('ns.RouteFor("tailoring").buy[2589] = { 30, "ah" }; px = 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
+    # what waits in the mail comes first: the cloth seen in the inbox at a mailbox 50 yd south (noted as a place), the
+    # arrow goes there; the inbox seen empty, the shops again; bought at the house, it is on its way by mail (the user, 7 Nov 2026)
+    lua.execute('px, py = 0.50, 0.55; mail[1] = { { 2589, 72 } }; Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); '
+                'mail[1] = nil; px, py = 0.50, 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Collect 72 Linen Cloth from the mailbox" and lua.eval("ForeverWowCraftMake.verdict.note") == "72 Linen Cloth: mailbox"
+    assert tip()[-1] == "The arrow points at the nearest: Mailbox, 50 yd." and "1 more item to buy after the mailbox." in tip()
+    lua.execute('Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Buy from a vendor (1) and the auction house (1)"
+    lua.execute('ns.inv.NoteMailed(2589, 72); Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Collect 72 Linen Cloth from the mailbox"
+    lua.execute('Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Buy from a vendor (1) and the auction house (1)" and lua.eval("ForeverWowCraftMake.verdict.note").startswith("12 Coarse Thread: vendor")
     # put away by a right-click; ticking Keep arrow brings it back
     lua.execute('ForeverWowCraftArrow.scripts.OnMouseUp(ForeverWowCraftArrow, "RightButton")')
     assert arrow().shown is False

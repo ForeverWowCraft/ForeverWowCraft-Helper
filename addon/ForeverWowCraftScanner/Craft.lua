@@ -25,7 +25,7 @@ local Verdict, Bags, Shopping, api, NoteStations, Selected, N = V.Verdict, V.Bag
 local button, running          -- running = { to, line } while a click's crafting may be going
 local pointed                  -- the last { target, title, text } the arrow was set to, for the Keep arrow box
 
-local GLOWS = { Make = { 0.3, 0.95, 1 }, Buy = { 0.3, 1, 0.4 }, Learn = { 0.75, 0.55, 1 }, Needs = { 1, 0.55, 0.2 },   -- cyan, green, violet, orange
+local GLOWS = { Make = { 0.3, 0.95, 1 }, Buy = { 0.3, 1, 0.4 }, Collect = { 0.3, 1, 0.4 }, Learn = { 0.75, 0.55, 1 }, Needs = { 1, 0.55, 0.2 },   -- cyan, green, green, violet, orange
                 Short = { 1, 0.35, 0.35 }, ["Place"] = { 1, 0.55, 0.2 } }                                                   -- red: the gold is short; orange: a camp object to place
 local function ModeOf(v)
   local word = v and v.text and v.text:match("^(%a+)")
@@ -78,7 +78,7 @@ local function Point(v, by)
     else
       local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1]
       local how = v.place[1] == "station" and "open this panel at one" or v.place[1] == "trainer" and "open a trainer's window"
-        or v.place[1] == "vendor" and "open a merchant's window" or "open the auction house"
+        or v.place[1] == "vendor" and "open a merchant's window" or v.place[1] == "mailbox" and "open a mailbox" or "open the auction house"
       table.insert(v.tip, string.format("No %s seen yet: %s, and the arrow points there from then on.", what, how))
       -- nothing of the kind known: the arrow stays, a question mark for a point, and says so
       pointed = { title = "No " .. what .. " seen yet", note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn }
@@ -382,7 +382,8 @@ end
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_CLOSE",
                          "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY",
-                         "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "ITEM_DATA_LOAD_RESULT" }) do
+                         "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "ITEM_DATA_LOAD_RESULT",
+                         "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }) do
   pcall(frame.RegisterEvent, frame, event)
 end
 frame:SetScript("OnEvent", function(_, event, name)

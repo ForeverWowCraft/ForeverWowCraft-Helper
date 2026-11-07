@@ -2,7 +2,7 @@
 ## Title: ForeverWowCraft Plans
 ## Notes: What the helper on this PC fetched for ForeverWowCraft Scanner: the routes /fwc shows, the lists to scan, and when each auction house was last scanned. Written by the helper; nothing to set. Never on CurseForge: an update of the scanner there leaves this folder alone.
 ## Author: ForeverWowCraft
-## Version: 1.6.16
+## Version: 1.6.17
 ## Dependencies: ForeverWowCraftScanner
 ## IconTexture: Interface\AddOns\ForeverWowCraftScanner\icon
 

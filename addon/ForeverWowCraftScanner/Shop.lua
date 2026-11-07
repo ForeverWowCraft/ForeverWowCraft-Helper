@@ -368,6 +368,7 @@ events:SetScript("OnEvent", function(_, event, a1, a2)
   elseif event == "COMMODITY_PURCHASE_SUCCEEDED" or event == "AUCTION_HOUSE_PURCHASE_COMPLETED" then
     known[p.item] = nil                                  -- what is listed has changed
     bought[p.item] = true                                -- and this item is not bought again this visit
+    if ns.inv.NoteMailed then ns.inv.NoteMailed(p.item, p.units) end     -- it comes by mail: the arrow goes to the mailbox for it
     Reset()
   elseif event == "COMMODITY_PURCHASE_FAILED" then
     known[p.item] = nil

@@ -336,6 +336,30 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
   return { text = text, note = table.concat(parts, ", "), tip = tip, shopping = shopping, place = place, profession = profession }
 end
 
+-- What the step needs that waits in the mail (seen in the inbox, or bought at the auction
+-- house this visit, which the game delivers by mail): the mailbox first, the nearest one,
+-- before anything is bought again (the user, 7 Nov 2026). nil when nothing waits.
+local function MailVerdict(house, plan, nxt, step, tip, profession)
+  if not ns.inv.InMail then return nil end
+  local waiting, rest = {}, 0
+  for _, b in ipairs(nxt.buy) do
+    local n = ns.inv.InMail(b[1]) or 0
+    if n > 0 then table.insert(waiting, { item = b[1], units = math.min(n, b[2]) }) else rest = rest + 1 end
+  end
+  if #waiting == 0 then return nil end
+  local parts = {}
+  for i, w in ipairs(waiting) do
+    if i > 3 then table.insert(parts, string.format("+%d more", #waiting - 3)); break end
+    table.insert(parts, string.format("%d %s: mailbox", w.units, N(house, w.item)))
+  end
+  table.insert(tip, "In the mail (seen in the inbox, or bought at the auction house):")
+  for _, w in ipairs(waiting) do table.insert(tip, string.format("  %d %s", w.units, N(house, w.item))) end
+  if rest > 0 then table.insert(tip, string.format("%d more item%s to buy after the mailbox.", rest, rest == 1 and "" or "s")) end
+  local text = #waiting == 1 and string.format("Collect %d %s from the mailbox", waiting[1].units, N(house, waiting[1].item))
+    or string.format("Collect from the mailbox: %d items", #waiting)
+  return { text = text, note = table.concat(parts, ", "), tip = tip, place = { "mailbox", nil, nil, "Mailbox" }, profession = profession }
+end
+
 -- A recipe to learn and reagents to buy are two trips: the nearer one first. The house, when
 -- it is open, or nearer than the trainer, or on this map when the trainer is not; the trainer
 -- otherwise, and when there is nothing to buy or no seller known (running between the house
@@ -525,8 +549,8 @@ local function VerdictOf(given)
       return { text = string.format("Make %d %s", can, c.what), tip = tip, spell = c.spell, crafts = can, to = nxt.to, line = plan.skill_line, profession = profession }
     end
   end
-  -- nothing can be made from the bags: what to buy, where
-  if #nxt.buy > 0 then return BuyVerdict(house, plan, nxt, step, tip, profession) end
+  -- nothing can be made from the bags: what waits in the mail, then what to buy, where
+  if #nxt.buy > 0 then return MailVerdict(house, plan, nxt, step, tip, profession) or BuyVerdict(house, plan, nxt, step, tip, profession) end
   if unsaid then
     table.insert(tip, "Run the helper (fwch.py plans) for a newer route.")
     return { text = string.format("Make %d %s first", unsaid.crafts, unsaid.what), tip = tip, profession = profession }

@@ -583,8 +583,8 @@ function ns.PlacesCommand()
   local counts, seed = {}, 0
   for _, p in ipairs(Places()) do counts[p.kind] = (counts[p.kind] or 0) + 1 end
   for _ in ipairs(Seeded()) do seed = seed + 1 end
-  print(PREFIX .. string.format("places known: %d trainers, %d vendors, %d auctioneers, %d crafting stations seen, and %d that the addon came with.",
-    counts.trainer or 0, counts.vendor or 0, counts.auction or 0, counts.station or 0, seed))
+  print(PREFIX .. string.format("places known: %d trainers, %d vendors, %d auctioneers, %d crafting stations, %d mailboxes seen, and %d that the addon came with.",
+    counts.trainer or 0, counts.vendor or 0, counts.auction or 0, counts.station or 0, counts.mailbox or 0, seed))
   local windows, wares, taught, services = 0, 0, 0, 0
   for _, v in pairs(FWCS_DB.__vendors or {}) do windows = windows + 1; for _ in pairs(v.items or {}) do wares = wares + 1 end end
   for _, t in pairs(FWCS_DB.__trainers or {}) do taught = taught + 1; for _ in pairs(t.teaches or {}) do services = services + 1 end end
@@ -592,13 +592,14 @@ function ns.PlacesCommand()
 end
 
 local frame = CreateFrame("Frame")
-for _, event in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE", "AUCTION_HOUSE_SHOW" }) do
+for _, event in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE", "MERCHANT_SHOW", "MERCHANT_UPDATE", "AUCTION_HOUSE_SHOW", "MAIL_SHOW" }) do
   pcall(frame.RegisterEvent, frame, event)
 end
 frame:SetScript("OnEvent", function(_, event)
   if event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then pcall(NoteTrainer)
   elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then pcall(NoteVendor)
-  elseif event == "AUCTION_HOUSE_SHOW" then Note("auction", "", { name = Npc() }) end
+  elseif event == "AUCTION_HOUSE_SHOW" then Note("auction", "", { name = Npc() })
+  elseif event == "MAIL_SHOW" then Note("mailbox", "Mailbox") end           -- for the way back to the mail (since 1.6.17)
 end)
 
 ns.places = { Places = Places, All = All, Distance = Distance, Size = Size, MapName = MapName }
