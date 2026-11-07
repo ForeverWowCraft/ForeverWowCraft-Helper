@@ -269,9 +269,10 @@ local function NoteFullArrived()
   s.lastFull, s.lastFullRefused = time(), nil
 end
 
--- ReloadUI first: what /reload itself calls, so it is known to work on this client; the
--- newer C_UI.Reload where there is no other. A refusal (an error) is said, not swallowed (the
--- Reload now button did nothing once, 6 Nov 2026: with script errors off, nothing told why)
+-- ReloadUI first, the newer C_UI.Reload where there is no other, and an error said rather
+-- than swallowed. Forever's client lets no addon call either, even from a click (6 Nov 2026):
+-- there the buttons that reload are secure ones with a macro of their own, /reload (the bar's
+-- SAVE, ui.save; the reminder's Reload now), and this is the typed command's try
 local function DoReload()
   local ok, err = pcall(function()
     if ReloadUI then ReloadUI() elseif C_UI and C_UI.Reload then C_UI.Reload() else error("no reload function") end
@@ -340,6 +341,23 @@ ui:Hide()
 ui.bar = CreateFrame("StatusBar", nil, ui)
 ui.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
 ui.bar:SetMinMaxValues(0, 1)
+
+-- SAVE as a secure button over the whole bar, with a macro of its own, /reload: the game runs
+-- it for a click where it blocks an addon's own ReloadUI (Forever's client, 6 Nov 2026). Shown
+-- with the save mode, outside a fight: a protected frame is neither shown nor hidden in one,
+-- so the fight's end (PLAYER_REGEN_ENABLED, below) draws the bar again
+ui.save = CreateFrame("Button", "ForeverWowCraftScannerSave", ui, "SecureActionButtonTemplate")
+ui.save:SetAllPoints(ui)
+ui.save:SetFrameLevel(ui:GetFrameLevel() + 5)
+ui.save:SetAttribute("type", "macro")
+ui.save:SetAttribute("macrotext", "/reload")
+ui.save:RegisterForClicks("AnyDown", "AnyUp")
+ui.save:RegisterForDrag("LeftButton")
+ui.save:Hide()
+local function SaveButton(on)
+  if InCombatLockdown and InCombatLockdown() then return end
+  if on then ui.save:Show() else ui.save:Hide() end
+end
 
 local function Font(fs, size, flags)
   local path = fs:GetFont()
@@ -466,7 +484,7 @@ UpdateStatus = function()
   if BarHidden() then ui:Hide(); return end
 
   if state.running then
-    ui.mode = "progress"
+    ui.mode = "progress"; SaveButton(false)
     LayoutProgress(s.log ~= false)
     local finished = state.done + state.skipped
     local elapsed = state.startedAt and (GetTime() - state.startedAt) or 0
@@ -497,13 +515,14 @@ UpdateStatus = function()
     ui.text:SetFormattedText("%d recorded, %d skipped%s\nclick to write to disk", state.done, state.skipped,
       state.lastDuration and ("  in " .. FormatClock(state.lastDuration)) or "")
     ui:Show()
+    SaveButton(true)
 
   elseif state.ahOpen and #QueueNames() > 0 and Offered() then
     local names = QueueNames()
     if state.listIndex < 1 or state.listIndex > #names + 1 then state.listIndex = 1 end
     local isFull = state.listIndex == 1
     local cooldown = isFull and FullCooldownLeft() or 0
-    ui.mode = "scan"
+    ui.mode = "scan"; SaveButton(false)
     ui.disabled = cooldown > 0
     LayoutBox(SAVE_SIZE[1], SAVE_SIZE[2])
     ui.arrow:Show()
@@ -530,7 +549,7 @@ UpdateStatus = function()
     ui:Show()
 
   else
-    ui.mode = nil
+    ui.mode = nil; SaveButton(false)
     ui.arrow:Hide()
     ui:Hide()
   end
@@ -573,6 +592,13 @@ ui:SetScript("OnLeave", function()
   elseif ui.mode == "scan" and not ui.disabled then BarColor(COLORS.scan) end
   GameTooltip:Hide()
 end)
+-- the SAVE button over the bar is dragged, hovered and left as the bar is
+for _, name in ipairs({ "OnDragStart", "OnDragStop", "OnEnter", "OnLeave" }) do
+  ui.save:SetScript(name, function() local fn = ui:GetScript(name); if type(fn) == "function" then fn(ui) end end)
+end
+local regen = CreateFrame("Frame")
+regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+regen:SetScript("OnEvent", function() UpdateStatus() end)      -- the SAVE button, left as it was through the fight
 
 local function RestorePosition()
   local pos = Settings().pos
@@ -1224,7 +1250,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
   elseif cmd == "stop" then
     if state.running then Finish("stopped") else Print("not running") end
   elseif cmd == "save" then
-    DoReload()   -- a typed command is a hardware event, so the protected reload is allowed
+    DoReload()
+    Print("if nothing happens, /reload does it: the game lets no addon reload for you on this client")
   elseif cmd == "clear" then
     FWCS_DB[DatasetKey()] = {}
     Print("cleared the scan data of " .. DatasetName() .. " (takes effect on /reload)")

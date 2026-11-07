@@ -1104,8 +1104,9 @@ local function Wire()
   win.focus:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:AddLine("Skill-up focus")
-    GameTooltip:AddLine("Unticked, the route is for profit: what you make is sold, and the route is the cheapest once it is. Ticked, nothing is "
-      .. "counted as sold, so the route takes the cheapest reagents per skill point, with less to list afterwards.", 1, 1, 1, true)
+    GameTooltip:AddLine("Unticked, the route is for profit: what you make is sold at the auction house, and the route is the cheapest once it is. "
+      .. "Ticked, nothing is listed: what you make goes to a vendor, and the route is the cheapest per skill point net of that "
+      .. "(a dearer craft that a vendor pays well for can beat a cheaper one).", 1, 1, 1, true)
     GameTooltip:Show()
   end)
   win.focus:SetScript("OnLeave", GameTooltip_Hide)

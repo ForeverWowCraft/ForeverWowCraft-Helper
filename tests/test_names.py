@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-KNOWN = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__spec__", "__package__", "__loader__", "__builtins__", "__annotations__"}
+KNOWN = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__spec__", "__package__", "__loader__", "__builtins__", "__annotations__",
+                              "__conditional_annotations__", "__annotate__"}     # Python 3.14's, in modules with annotations (the Mac runs 3.14)
 
 
 def undefined_names(path: Path) -> list[str]:

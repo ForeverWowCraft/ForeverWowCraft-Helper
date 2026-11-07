@@ -43,6 +43,8 @@ local function Widget()
     if key == "IsShown" then return function(s) return s.shown end end
     if key == "SetText" or key == "SetFormattedText" then return function(s, t, ...) s.text = select("#", ...) > 0 and string.format(t, ...) or tostring(t) end end
     if key == "GetText" then return function(s) return s.text end end
+    if key == "SetAttribute" then return function(s, k, v) local a = rawget(s, "attributes") or {}; a[k] = v; s.attributes = a end end
+    if key == "GetAttribute" then return function(s, k) local a = rawget(s, "attributes"); return a and a[k] end end
     if key == "SetHeight" then return function(s, h) s.height = h end end
     if key == "GetHeight" then return function(s) return rawget(s, "height") or 400 end end
     if key == "CreateFontString" then return function(s) local f = Widget(); f.owner = s; table.insert(strings, f); return f end end
@@ -53,7 +55,7 @@ local function Widget()
     return function() end
   end })
 end
-function CreateFrame(_, name) local f = Widget(); if name then _G[name] = f end; table.insert(frames, f); return f end
+function CreateFrame(_, name, _, template) local f = Widget(); f.template = template or ""; if name then _G[name] = f end; table.insert(frames, f); return f end
 function Fire(event, ...)
   for _, f in ipairs(frames) do
     if f.events[event] and f.scripts.OnEvent then f.scripts.OnEvent(f, event, ...) end
@@ -1300,6 +1302,13 @@ def test_a_snapshot_already_answered_is_read_on_after_the_house_closes():
     assert lua.eval("ns.scanner.Running()") is True and said("closed while the snapshot is read (500 of 600 auctions): reading on")
     lua.execute("RunTimers()")
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("ns.scanner.Dirty()") is True
+    # SAVE: a secure button over the bar with a macro of its own, /reload, shown with the save mode (Forever's
+    # client lets no addon call ReloadUI, 6 Nov 2026); gone again when the bar is something else
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("bar"); ns.scanner.Refresh()')
+    assert lua.eval("printed[#printed]").endswith("the scanner's bar is shown (FULL / SCAN / SAVE)")
+    assert lua.eval('rawget(ForeverWowCraftScannerStatus, "mode")') == "save" and lua.eval("ForeverWowCraftScannerSave.shown") is True
+    assert "SecureActionButtonTemplate" in lua.eval("ForeverWowCraftScannerSave.template")
+    assert lua.eval("ForeverWowCraftScannerSave.attributes.macrotext") == "/reload" and lua.eval("ForeverWowCraftScannerSave.attributes.type") == "macro"
     assert said("the snapshot was read after the auction house closed: that works")
     assert said("snapshot finished") and not said("aborted")
     # the list gone with the window (the client cleared it): the reading stops and says so, nothing recorded
@@ -1325,6 +1334,19 @@ def test_a_snapshot_already_answered_is_read_on_after_the_house_closes():
     lua.execute('listed = 600; Fire("REPLICATE_ITEM_LIST_UPDATE"); RunTimers()')
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("printed[#printed]").find("snapshot finished") >= 0
     assert not said("aborted (auction house closed)")
+    # SAVE in a fight: the secure button is left as it is (a protected frame is neither shown nor hidden in
+    # combat), and set as the bar is when the fight ends
+    lua.execute("ns.scanner.Refresh()")
+    assert lua.eval('rawget(ForeverWowCraftScannerStatus, "mode")') == "save" and lua.eval("ForeverWowCraftScannerSave.shown") is True
+    lua.execute('''
+      InCombatLockdown = function() return true end
+      Fire("AUCTION_HOUSE_SHOW")
+      SlashCmdList.FOREVERWOWCRAFTSCANNER("full force")
+      table.remove(timers); table.remove(timers)
+    ''')
+    assert lua.eval("ns.scanner.Running()") is True and lua.eval("ForeverWowCraftScannerSave.shown") is True
+    lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
+    assert lua.eval("ForeverWowCraftScannerSave.shown") is False
 
 
 # ---- buying at the auction house (Shop.lua) ---------------------------------------------------
@@ -1506,7 +1528,7 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     lua.execute("time = function() return os.time() + ns.remind.Every + 1 end; ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is True
     assert lua.eval("ForeverWowCraftReload.why.text") == "the routes may have changed on the site."
-    assert lua.eval("ForeverWowCraftReloadNow.text") == "|cffff4040Reload now|r"
+    assert lua.eval("ForeverWowCraftReloadNow.text") == "Reload now"
     # a fight starts: the box goes, and is back as soon as it is over
     lua.execute("InCombatLockdown = function() return true end; ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is False
@@ -1522,12 +1544,19 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     assert lua.eval("ForeverWowCraftReload.shown") is False
     lua.execute("MerchantFrame:Hide(); ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is True
-    # Reload now reloads: by ReloadUI (what /reload calls) when the client has it, else C_UI.Reload; a refusal is said
-    lua.execute("reloaded = 0; C_UI = { Reload = function() reloaded = reloaded + 1 end }; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
-    assert lua.eval("reloaded") == 1 and lua.eval("ForeverWowCraftReload.shown") is False
-    lua.execute("ReloadUI = function() reloaded = reloaded + 10 end; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
+    # Reload now is a secure button with a macro of its own, /reload (the game lets no addon call ReloadUI on
+    # Forever's client, 6 Nov 2026): no OnClick of the addon's; the box goes with the click
+    assert "SecureActionButtonTemplate" in lua.eval("ForeverWowCraftReloadNow.template")
+    assert lua.eval("ForeverWowCraftReloadNow.attributes.type") == "macro" and lua.eval("ForeverWowCraftReloadNow.attributes.macrotext") == "/reload"
+    assert lua.eval("ForeverWowCraftReloadNow.scripts.OnClick") is None
+    lua.execute("ForeverWowCraftReloadNow.scripts.PostClick(ForeverWowCraftReloadNow)")
+    assert lua.eval("ForeverWowCraftReload.shown") is False
+    # the scanner's own try (the typed /fwcs save): ReloadUI when the client has it, else C_UI.Reload; a refusal is said
+    lua.execute("reloaded = 0; C_UI = { Reload = function() reloaded = reloaded + 1 end }; ns.scanner.Reload()")
+    assert lua.eval("reloaded") == 1
+    lua.execute("ReloadUI = function() reloaded = reloaded + 10 end; ns.scanner.Reload()")
     assert lua.eval("reloaded") == 11
-    lua.execute("ReloadUI = function() error('blocked') end; ForeverWowCraftReloadNow.scripts.OnClick(ForeverWowCraftReloadNow)")
+    lua.execute("ReloadUI = function() error('blocked') end; ns.scanner.Reload()")
     assert lua.eval("reloaded") == 11 and "the reload was refused" in lua.eval("printed[#printed]") and "/reload" in lua.eval("printed[#printed]")
     lua.execute("ReloadUI = nil")
     # nothing to say without the helper and nothing recorded: no box; something met: a reason

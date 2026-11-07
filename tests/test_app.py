@@ -442,6 +442,23 @@ def test_a_newer_helper_installs_by_itself_when_the_download_is_the_one_github_p
             appmod.__version__ = kept_version
         assert app2.tray.balloons == [("Updated", "Updated to ForeverWowCraft Helper 9.9.9 by itself (from " + __version__ + ")")]
         assert not (settings.STATE / "updates" / "updated.json").exists()
+        # a newer helper installed by hand over an update begun by itself that never finished: updated, not trouble;
+        # and downloads of this version or older are cleared, a newer one kept
+        updates = settings.STATE / "updates"
+        updates.mkdir(parents=True, exist_ok=True)
+        (updates / "updated.json").write_text(json.dumps({"from": "1.0.0", "to": "1.0.1"}), encoding="utf-8")
+        (updates / "failed.json").write_text("{}", encoding="utf-8")
+        (updates / "ForeverWowCraft-Helper-1.0.1.msi").write_bytes(b"old")
+        (updates / f"ForeverWowCraft-Helper-{__version__}.msi").write_bytes(b"this")
+        (updates / "ForeverWowCraft-Helper-99.0.0.msi").write_bytes(b"newer")
+        app6 = _app(QuietWin())
+        with contextlib.redirect_stdout(app6.log):
+            app6.after_update()
+        assert app6.tray.balloons == [("Updated", f"Updated to ForeverWowCraft Helper {__version__} (the 1.0.1 begun by itself is behind it)")]
+        assert app6.status.problem is None and not (updates / "failed.json").exists() and app6.failed() is None
+        assert not (updates / "ForeverWowCraft-Helper-1.0.1.msi").exists() and not (updates / f"ForeverWowCraft-Helper-{__version__}.msi").exists()
+        assert (updates / "ForeverWowCraft-Helper-99.0.0.msi").exists()
+        (updates / "ForeverWowCraft-Helper-99.0.0.msi").unlink()
         # the install failed (the old helper is back): trouble, and that version is not tried by itself again
         (settings.STATE / "updates" / "updated.json").write_text(json.dumps({"from": __version__, "to": "9.9.9"}), encoding="utf-8")
         app3 = _app(QuietWin())

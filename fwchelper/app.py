@@ -280,6 +280,10 @@ class App:
 
     def after_update(self) -> None:
         """At the start: what a quiet install begun by the helper before came to."""
+        current = update.version_tuple(__version__)
+        for old in self.updates_dir().glob(f"{settings.NAME}-Helper-*.*"):     # downloads of this version or older: no use now
+            if old.suffix in (".msi", ".dmg") and update.version_tuple(old.stem.rsplit("-", 1)[-1]) <= current:
+                old.unlink(missing_ok=True)
         mark = self.updates_dir() / "updated.json"
         if not mark.exists():
             return
@@ -289,8 +293,13 @@ class App:
             begun = {}
         mark.unlink(missing_ok=True)
         to = str(begun.get("to") or "") if isinstance(begun, dict) else ""
-        if to and update.version_tuple(to) == update.version_tuple(__version__):
+        if to and update.version_tuple(to) == current:
             print(f"updated to {settings.NAME} Helper {__version__} by itself" + (f" (from {begun.get('from')})" if begun.get("from") else ""))
+            (self.updates_dir() / "failed.json").unlink(missing_ok=True)
+        elif to and update.version_tuple(to) < current:
+            # a newer helper installed by hand over an update begun by itself that never finished:
+            # not trouble (1.6.10 over the 1.6.9 whose quiet install crashed, 6 Nov 2026)
+            print(f"updated to {settings.NAME} Helper {__version__} (the {to} begun by itself is behind it)")
             (self.updates_dir() / "failed.json").unlink(missing_ok=True)
         else:
             (self.updates_dir() / "failed.json").write_text(json.dumps({"to": to, "at": int(time.time())}), encoding="utf-8")

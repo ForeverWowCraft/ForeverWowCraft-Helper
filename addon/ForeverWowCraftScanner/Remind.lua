@@ -70,13 +70,17 @@ local function Build()
   box.why:SetWidth(220)
   box.why:SetJustifyH("LEFT")
   box.why:SetWordWrap(true)
-  box.now = ns.Button(box, 100, "|cffff4040Reload now|r", "ForeverWowCraftReloadNow")
+  -- a secure button with a macro of its own, /reload: the game lets no addon call ReloadUI
+  -- on Forever's client (the box showed and the button did nothing, two players, 6 Nov 2026),
+  -- but a macro run by a click of a secure button it reloads for. The box goes with the click
+  box.now = CreateFrame("Button", "ForeverWowCraftReloadNow", box, "SecureActionButtonTemplate, UIPanelButtonTemplate")
+  box.now:SetSize(100, 22)
+  box.now:SetText("Reload now")
   box.now:SetPoint("TOPRIGHT", -12, -12)
-  box.now:SetScript("OnClick", function()
-    box:Hide()
-    ns.Print("reloading")                      -- seen only when the reload does not come: the click landed
-    Scanner().Reload()
-  end)
+  box.now:SetAttribute("type", "macro")
+  box.now:SetAttribute("macrotext", "/reload")
+  box.now:RegisterForClicks("AnyDown", "AnyUp")
+  box.now:SetScript("PostClick", function() box:Hide() end)
   box.later = ns.Button(box, 56, "Later", "ForeverWowCraftReloadLater")
   box.later:SetPoint("TOPRIGHT", box.now, "BOTTOMRIGHT", 0, -2)
   box.later:SetScript("OnClick", function() box:Hide(); due = time() + LATER end)
