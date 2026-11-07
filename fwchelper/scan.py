@@ -310,6 +310,31 @@ def vendors(path: Path | None = None) -> dict[int, dict]:
     return out
 
 
+def trainers(path: Path | None = None) -> dict[int, dict]:
+    """The trainers the addon has seen (FWCS_DB.__trainers, since addon 1.6.12): {creature id:
+    {"name", "map", "x", "y", "t", "faction", "build", "skill", "teaches": {service name: the
+    skill it asks for}}}. Empty without the file or the table."""
+    if path is None:
+        found = find_saved_variables()
+        if not found:
+            return {}
+        path = found[0]
+    try:
+        data = luatable.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
+        return {}
+    db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    held = db.get("__trainers") if isinstance(db, dict) else None
+    out: dict[int, dict] = {}
+    for tid, t in (held.items() if isinstance(held, dict) else []):
+        if not (isinstance(tid, int) and isinstance(t, dict) and isinstance(t.get("teaches"), dict) and t.get("skill")):
+            continue
+        teaches = {str(n): int(level) for n, level in t["teaches"].items() if isinstance(n, str) and isinstance(level, (int, float))}
+        out[tid] = {"name": str(t.get("name") or ""), "map": int(t.get("map") or 0), "x": float(t.get("x") or 0), "y": float(t.get("y") or 0),
+                    "t": int(t.get("t") or 0), "faction": str(t.get("faction") or ""), "build": t.get("build"), "skill": str(t["skill"]), "teaches": teaches}
+    return out
+
+
 def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:
     """What a saved file holds: [(realm, faction, items, time of the newest scan)], the most
     recently scanned first."""

@@ -227,6 +227,36 @@ local function NoteTrainer()
   local best, n = nil, 0
   for profession, v in pairs(votes) do if v > n then best, n = profession, v end end
   if best then Note("trainer", best, { name = Npc(), teaches = teaches, upto = ranked > 0 and ranked or (upto > 0 and upto or nil) }) end
+  -- the trainer's whole list, by the creature's id, for the helper to send (nothing of the
+  -- character): each service and the skill it asks for. Forever keeps the skill a recipe is
+  -- taught at on the server, which the client's tables do not say, and the routes planned on
+  -- vanilla's levels were wrong by it (Embossed Leather Gloves, the user, 7 Nov 2026). The
+  -- union over visits: a service a filter hid this time stays from the last
+  local guid = UnitGUID and UnitGUID("npc")
+  local id = guid and tonumber(guid:match("^Creature%-%d+%-%d+%-%d+%-%d+%-(%d+)%-"))
+  local map, x, y = Here()
+  if id and map and GetTrainerServiceSkillReq then
+    local asks, counts, skillName = {}, {}, nil
+    for i = 1, GetNumTrainerServices() do
+      local name, _, category = GetTrainerServiceInfo(i)
+      local skill, level = GetTrainerServiceSkillReq(i)
+      if name and category ~= "header" and type(skill) == "string" and skill ~= "" and type(level) == "number" then
+        asks[name] = math.floor(level)
+        counts[skill] = (counts[skill] or 0) + 1
+      end
+    end
+    for s, c in pairs(counts) do if not skillName or c > counts[skillName] then skillName = s end end
+    if skillName then
+      ns.notedAt = time()
+      FWCS_DB.__trainers = FWCS_DB.__trainers or {}
+      local t = FWCS_DB.__trainers[id] or { teaches = {} }
+      local mine = UnitFactionGroup and UnitFactionGroup("player")
+      t.name, t.map, t.x, t.y, t.t, t.skill, t.faction = Npc() or "?", map, x, y, time(), skillName, (mine == "Alliance" or mine == "Horde") and mine or ""
+      if GetBuildInfo then local _, build = GetBuildInfo(); t.build = build end
+      for name, level in pairs(asks) do t.teaches[name] = level end
+      FWCS_DB.__trainers[id] = t
+    end
+  end
 end
 
 -- a merchant: which of the routes' items it sells

@@ -26,6 +26,22 @@ FWCS_DB = {
 			},
 		},
 	},
+	["__trainers"] = {
+		[3363] = {
+			["name"] = "Drakk Stonehand",
+			["map"] = 1453,
+			["x"] = 0.4,
+			["y"] = 0.7,
+			["t"] = 1790000100,
+			["faction"] = "Horde",
+			["build"] = "70790",
+			["skill"] = "Leatherworking",
+			["teaches"] = {
+				["Embossed Leather Gloves"] = 45,
+				["Journeyman Leatherworker"] = 50,
+			},
+		},
+	},
 }
 """
 
@@ -63,6 +79,18 @@ def test_the_vendors_met_are_read_and_make_a_document_the_pipe_takes():
     bad["vendors"]["3579"]["x"] = 7
     assert pipe.check_vendors(bad) == "vendor 3579: not on its map"
     assert pipe.mark_vendors(doc) == pipe.mark_vendors(dict(doc, helper="other"))         # the helper's version is not what changed
+    # the trainers met, in the same document (since 1.6.12): each service and the skill it asks for
+    met = scan.trainers(_saved())
+    assert list(met) == [3363] and met[3363]["skill"] == "Leatherworking" and met[3363]["teaches"] == {"Embossed Leather Gloves": 45, "Journeyman Leatherworker": 50}
+    both = pipe.vendors_document(seen, met)
+    assert pipe.check_vendors(both) is None and both["trainers"]["3363"]["teaches"]["Embossed Leather Gloves"] == 45 and doc["trainers"] == {}
+    assert pipe.check_vendors(pipe.vendors_document({}, met)) is None                     # trainers alone are a document
+    assert pipe.mark_vendors(both) != pipe.mark_vendors(doc)                              # a trainer seen is a change
+    bad = pipe.vendors_document(seen, met)
+    bad["trainers"]["3363"]["teaches"]["Embossed Leather Gloves"] = "45"
+    assert pipe.check_vendors(bad) == "trainer 3363: 'Embossed Leather Gloves' is not a service"
+    bad["trainers"]["3363"]["skill"] = ""
+    assert pipe.check_vendors(bad) == "trainer 3363: no skill"
 
 
 def test_the_sightings_are_sent_when_they_changed():
@@ -75,6 +103,8 @@ def test_the_sightings_are_sent_when_they_changed():
         f.write_text(SAVED.replace('["n"] = 1,', '["n"] = 0,'), encoding="utf-8")        # a ware sold out: changed
         assert cli.send_vendors_once(p, f) is True and len(p.sent) == 2
         assert json.loads((settings.STATE / "sent.json").read_text(encoding="utf-8"))["__vendors"] == pipe.mark_vendors(p.sent[-1])
+        f.write_text(SAVED.replace('["__vendors"]', '["__was"]'), encoding="utf-8")       # trainers met, no vendor: sent all the same
+        assert cli.send_vendors_once(p, f) is True and p.sent[-1]["vendors"] == {} and "3363" in p.sent[-1]["trainers"]
         f.write_text("FWCS_DB = {}", encoding="utf-8")
         assert cli.send_vendors_once(p, f) is False                                         # nothing met: nothing sent
     finally:

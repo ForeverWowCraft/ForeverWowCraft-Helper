@@ -811,6 +811,15 @@ def test_places_are_noted_as_the_character_meets_them():
     thread, sword = v["items"][THREAD], v["items"][25]
     assert (thread.price, thread.stack, thread.n, thread.usable) == (10, 1, -1, True) and thread.cost is None
     assert (sword.price, sword.n, sword.usable) == (500, 2, False) and dict(sword.cost) == {250000: 45}
+    # a trainer's window the same way (since 1.6.12): each service and the skill it asks for, Forever's own learn level
+    lua.execute('px = 0.51; GetTrainerServiceSkillReq = function(i) return skillreq[i], ({ 50, 1, 15 })[i] end; Fire("TRAINER_SHOW"); '
+                'GetTrainerServiceSkillReq = function(i) return skillreq[i] end')
+    t = lua.eval("FWCS_DB.__trainers[3579]")
+    assert t.name == "Thrallson" and t.skill == "Tailoring" and t.map == 1453 and t.faction == "Horde" and t.build == "70790" and t.t > 0
+    assert dict(t.teaches) == {"Journeyman Tailor": 50, "White Linen Shirt": 1, "Brown Linen Vest": 15}
+    lua.execute('services = { "Brown Linen Vest" }; GetTrainerServiceSkillReq = function(i) return skillreq[i], 20 end; Fire("TRAINER_SHOW"); '
+                'GetTrainerServiceSkillReq = function(i) return skillreq[i] end; services = { "Journeyman Tailor", "White Linen Shirt", "Brown Linen Vest" }')
+    assert dict(lua.eval("FWCS_DB.__trainers[3579].teaches")) == {"Journeyman Tailor": 50, "White Linen Shirt": 1, "Brown Linen Vest": 20}   # the union; the newest skill
     lua.execute('GetMerchantItemInfo, GetMerchantItemCostInfo, GetMerchantItemCostItem, UnitGUID, GetBuildInfo = nil, nil, nil, nil, nil')
     assert len(places()) == 2                                                              # the place list is as before
     # the auctioneer, in another part of town

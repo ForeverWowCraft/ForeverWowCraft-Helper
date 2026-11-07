@@ -141,23 +141,45 @@ def scan_from_document(doc: dict, source: Path | None = None) -> ScanData:
                     connected=[str(g) for g in group] if isinstance(group, list) else [])
 
 
-def vendors_document(vendors: dict[int, dict]) -> dict:
+def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None = None) -> dict:
     """The vendors a helper's player has met, for the pipe (POST /v1/vendors): {"format",
     "helper", "vendors": {creature id: {name, map, x, y, t, faction, build, items: {item id:
-    {price, stack, n, usable, t, cost?}}}}}. Nothing of the player: the vendor's name and where
-    it stood, its wares and their prices, when it was seen."""
+    {price, stack, n, usable, t, cost?}}}}, "trainers": {creature id: {name, map, x, y, t,
+    faction, build, skill, teaches: {service: the skill it asks for}}}} (the trainers since
+    helper 1.6.12). Nothing of the player: the vendor's name and where it stood, its wares and
+    their prices, the trainer's and what it teaches at which skill, when each was seen."""
     return {"format": VENDORS_FORMAT, "helper": __version__,
-            "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()}}
+            "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()},
+            "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()}}
 
 
 def check_vendors(doc) -> str | None:
     """Why this is not a fwc-vendors/1 document, or None when it is one."""
     if not isinstance(doc, dict) or doc.get("format") != VENDORS_FORMAT:
         return f"not a {VENDORS_FORMAT} document"
-    if not isinstance(doc.get("vendors"), dict) or not doc["vendors"]:
+    trainers = doc.get("trainers", {})
+    if not isinstance(trainers, dict):
+        return "trainers is not a table"
+    if not isinstance(doc.get("vendors"), dict) or not (doc["vendors"] or trainers):
         return "no vendors"
     if len(doc["vendors"]) > 2000:
         return "too many vendors"
+    if len(trainers) > 500:
+        return "too many trainers"
+    for tid, t in trainers.items():
+        if not str(tid).isdigit() or not isinstance(t, dict) or not isinstance(t.get("name"), str) or len(t["name"]) > 80:
+            return f"trainer {tid!r} is not a trainer"
+        if not (isinstance(t.get("map"), int) and isinstance(t.get("t"), int) and t.get("faction", "") in FACTIONS + ("",)):
+            return f"trainer {tid}: no map, time or faction"
+        if not all(isinstance(t.get(k), (int, float)) and 0 <= t[k] <= 1 for k in ("x", "y")):
+            return f"trainer {tid}: not on its map"
+        if not isinstance(t.get("skill"), str) or not t["skill"] or len(t["skill"]) > 40:
+            return f"trainer {tid}: no skill"
+        if not isinstance(t.get("teaches"), dict) or len(t["teaches"]) > 400:
+            return f"trainer {tid}: no services, or too many"
+        for name, level in t["teaches"].items():
+            if not isinstance(name, str) or len(name) > 80 or not isinstance(level, int) or level < 0:
+                return f"trainer {tid}: {str(name)[:40]!r} is not a service"
     for vid, v in doc["vendors"].items():
         if not str(vid).isdigit() or not isinstance(v, dict) or not isinstance(v.get("name"), str) or len(v["name"]) > 80:
             return f"vendor {vid!r} is not a vendor"
@@ -175,7 +197,7 @@ def check_vendors(doc) -> str | None:
 
 def mark_vendors(doc: dict) -> str:
     """What the sightings say, less the helper's version: "already sent" goes by it."""
-    return hashlib.sha256(json.dumps(doc["vendors"], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(json.dumps([doc["vendors"], doc.get("trainers", {})], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
 
 
 def lists_document(queue: dict[str, list[tuple[int, str]]]) -> dict:

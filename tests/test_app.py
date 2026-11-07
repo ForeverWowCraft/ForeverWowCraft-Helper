@@ -505,6 +505,7 @@ def test_a_chore_that_fails_is_said_and_the_watch_goes_on():
     2026). Any failure of a tick's chore is a log line now, and the tick's other chores run."""
     from fwchelper import update
     kept = update.latest, update.download
+    back = _fresh_pc()                       # a state folder of the test's own: the first run of this test wrote into the PC's helper.log (7 Nov 2026)
 
     class BrokenWin(FakeWin):
         def quiet_update(self, installer, log):
@@ -531,6 +532,7 @@ def test_a_chore_that_fails_is_said_and_the_watch_goes_on():
         assert app.asks == {} and not app.stop.is_set()
     finally:
         update.latest, update.download = kept
+        back()
 
 
 if __name__ == "__main__":
