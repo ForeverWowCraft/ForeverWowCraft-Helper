@@ -224,10 +224,18 @@ end
 
 local function N(house, item) return (ns.ItemName(item, house.items and house.items[item])) end
 
+-- Whether a vendor sells the item: the route buys it from one (row[2]), or one sells it dearer
+-- than the house did (row[3], since 7 Nov 2026). In game the vendor is the place to get it
+-- either way: a sure, one-stop trip (a player sent to the house and a vendor for a dye came
+-- back from the vendor with no need of the house, 7 Nov 2026); the house is said to be cheaper
+local function VendorSells(plan, item)
+  local row = plan.buy and plan.buy[item]
+  return row ~= nil and (row[2] == "vendor" or type(row[3]) == "number")
+end
+
 -- where the route buys an item: { kind, what, item, title } for ns.NearestPlace
 local function Seller(plan, item)
-  local row = plan.buy and plan.buy[item]
-  if row and row[2] == "vendor" then return { "vendor", nil, item, "Vendor" } end
+  if VendorSells(plan, item) then return { "vendor", nil, item, "Vendor" } end
   return { "auction", nil, nil, "Auctioneer" }
 end
 
@@ -238,11 +246,14 @@ local function ShoppingOf(plan, nxt, tolearn)
   for _, b in ipairs(nxt.buy) do
     local row = plan.buy and plan.buy[b[1]]
     local have = ns.inv.Count(b[1]) or 0
-    table.insert(out, { item = b[1], units = b[2] + have, have = have, source = row and row[2] == "vendor" and "vendor" or "ah", price = row and row[1] or nil })
+    local vendor = VendorSells(plan, b[1])
+    -- price: what one costs where it is got; `cheaper`: the house's price when the route found it lower there
+    local price = row and ((vendor and type(row[3]) == "number") and row[3] or row[1]) or nil
+    local cheaper = (row and vendor and type(row[3]) == "number" and row[1] < row[3]) and row[1] or nil
+    table.insert(out, { item = b[1], units = b[2] + have, have = have, source = vendor and "vendor" or "ah", price = price, cheaper = cheaper })
   end
   if tolearn and tolearn.spell == nxt.spell and (ns.inv.Count(tolearn.item) or 0) == 0 then
-    local row = plan.buy and plan.buy[tolearn.item]
-    table.insert(out, 1, { item = tolearn.item, units = 1, have = 0, source = row and row[2] == "vendor" and "vendor" or "ah", price = tolearn.cost, recipe = true })
+    table.insert(out, 1, { item = tolearn.item, units = 1, have = 0, source = VendorSells(plan, tolearn.item) and "vendor" or "ah", price = tolearn.cost, recipe = true })
   end
   return out
 end
@@ -288,19 +299,41 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
   shopping.title = ns.RecipeName(step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. ", needs"
   local ah, vendor = {}, {}
   for _, e in ipairs(shopping) do table.insert(e.source == "vendor" and vendor or ah, e) end
+  -- the vendor first: the sure trip (what it sells never runs out; the house may have sold out)
   local text
-  if #ah == 1 and #vendor == 0 then text = string.format("Buy %d %s at the auction house", ah[1].units - ah[1].have, N(house, ah[1].item))
-  elseif #ah > 0 and #vendor == 0 then text = string.format("Buy at the auction house: %d items", #ah)
-  elseif #ah == 0 and #vendor == 1 then text = string.format("Buy %d %s from a vendor", vendor[1].units - vendor[1].have, N(house, vendor[1].item))
-  elseif #ah == 0 then text = string.format("Buy from a vendor: %d items", #vendor)
-  else text = string.format("Buy at the auction house (%d) and a vendor (%d)", #ah, #vendor) end
+  if #vendor == 1 and #ah == 0 then text = string.format("Buy %d %s from a vendor", vendor[1].units - vendor[1].have, N(house, vendor[1].item))
+  elseif #vendor > 0 and #ah == 0 then text = string.format("Buy from a vendor: %d items", #vendor)
+  elseif #ah == 1 and #vendor == 0 then text = string.format("Buy %d %s at the auction house", ah[1].units - ah[1].have, N(house, ah[1].item))
+  elseif #vendor == 0 then text = string.format("Buy at the auction house: %d items", #ah)
+  else text = string.format("Buy from a vendor (%d) and the auction house (%d)", #vendor, #ah) end
   table.insert(tip, "Needs:")
   for _, e in ipairs(shopping) do
     table.insert(tip, string.format("  %d %s (have %d)%s, %s", e.units - e.have, N(house, e.item), e.have,
-      e.price and (", about " .. ns.Money(e.price * (e.units - e.have))) or "", e.source == "vendor" and "from a vendor" or "at the auction house"))
+      e.price and (", about " .. ns.Money(e.price * (e.units - e.have))) or "",
+      e.source == "vendor" and ("from a vendor" .. (e.cheaper and string.format(" (the auction house had it for %s each)", ns.Money(e.cheaper)) or ""))
+        or "at the auction house"))
   end
   table.insert(tip, "Click: the shopping list.")
-  return { text = text, tip = tip, shopping = shopping, place = #ah > 0 and Seller(plan, ah[1].item) or Seller(plan, vendor[1].item), profession = profession }
+  -- the note under the arrow: each item and where it is got, the vendor's first (the user, 7 Nov 2026)
+  local parts, ordered = {}, {}
+  for _, e in ipairs(vendor) do table.insert(ordered, e) end
+  for _, e in ipairs(ah) do table.insert(ordered, e) end
+  for i, e in ipairs(ordered) do
+    if i > 3 then table.insert(parts, string.format("+%d more", #ordered - 3)); break end
+    table.insert(parts, string.format("%d %s: %s", e.units - e.have, N(house, e.item), e.source == "vendor" and "vendor" or "AH"))
+  end
+  -- the arrow: the nearest of the sources, a vendor seen or seeded selling a vendor item or the
+  -- auctioneer; a vendor item nobody was seen selling leaves the house to point at
+  local best, bestD, bestHere
+  local function consider(place)
+    local p, d, here = ns.NearestPlace(place[1], place[2], place[3])
+    if not p then return end
+    if not best or (here and not bestHere) or ((here or false) == (bestHere or false) and d and (not bestD or d < bestD)) then best, bestD, bestHere = place, d, here end
+  end
+  for _, e in ipairs(vendor) do consider(Seller(plan, e.item)) end
+  if #ah > 0 then consider({ "auction", nil, nil, "Auctioneer" }) end
+  local place = best or (#vendor > 0 and Seller(plan, vendor[1].item)) or Seller(plan, ah[1].item)
+  return { text = text, note = table.concat(parts, ", "), tip = tip, shopping = shopping, place = place, profession = profession }
 end
 
 -- A recipe to learn and reagents to buy are two trips: the nearer one first. The house, when

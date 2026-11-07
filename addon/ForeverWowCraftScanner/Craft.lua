@@ -64,24 +64,25 @@ end
 -- the arrow set from a verdict: at the nearest of what it needs, with the way in its tooltip;
 -- `by` says who set it ("panel" | "headless"), for Headless to know which it may clear
 local function Point(v, by)
+  local note = v.note or v.text                  -- a buy verdict's note lists the items and their sources
   if v.place then
     local p, d, here = ns.NearestPlace(v.place[1], v.place[2], v.place[3], v.place[5])
     if p then
       local title = v.place[4]
       if p.name and (p.kind == "vendor" or p.kind == "trainer") then title = title .. ": " .. p.name end
       v.target, v.title = p, title
-      pointed = { target = p, title = title, note = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn, rank = v.rank }
+      pointed = { target = p, title = title, note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn, rank = v.rank }
       table.insert(v.tip, here and (d and string.format("The arrow points at the nearest: %s, %d yd.", title, math.floor(d + 0.5)) or "The arrow points at the nearest: " .. title .. ".")
         or string.format("The nearest seen is in %s: %s%s.", ns.places.MapName(p.map), title, d and string.format(", about %d yd as the crow flies", math.floor(d + 0.5)) or ""))
-      ns.SetArrow(p, title, false, v.text, pointed.profession)
+      ns.SetArrow(p, title, false, note, pointed.profession)
     else
       local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1]
       local how = v.place[1] == "station" and "open this panel at one" or v.place[1] == "trainer" and "open a trainer's window"
         or v.place[1] == "vendor" and "open a merchant's window" or "open the auction house"
       table.insert(v.tip, string.format("No %s seen yet: %s, and the arrow points there from then on.", what, how))
       -- nothing of the kind known: the arrow stays, a question mark for a point, and says so
-      pointed = { title = "No " .. what .. " seen yet", note = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn }
-      ns.SetArrow(nil, pointed.title, false, v.text, pointed.profession)
+      pointed = { title = "No " .. what .. " seen yet", note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn }
+      ns.SetArrow(nil, pointed.title, false, note, pointed.profession)
     end
   elseif v.show or v.text:match("^Needs ") then     -- a tool to buy, or needs of no place: the arrow says the words
     pointed = { title = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil }
@@ -381,12 +382,16 @@ end
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_CLOSE",
                          "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY",
-                         "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE" }) do
+                         "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "ITEM_DATA_LOAD_RESULT" }) do
   pcall(frame.RegisterEvent, frame, event)
 end
 frame:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" then
     if name == "Blizzard_Professions" or name == "Blizzard_TradeSkillUI" then Place() end
+    return
+  end
+  if event == "ITEM_DATA_LOAD_RESULT" then                 -- an item's name came from the client: the arrow's note names it as the game does
+    if pointed then if PanelShown() then Refresh() else Headless() end end
     return
   end
   if event == "PLAYER_ENTERING_WORLD" then                 -- a login or a reload: the arrow back as it was, then moved on

@@ -21,7 +21,7 @@ The site has, beside each auction house's pages, one document for the addon:
                         "buy": [item, ...], "craft": [item, ...],
                         "learn": [recipe item, copper]}, ...],
              "made": {"<item>": [units a craft, [[item, units a craft], ...], spell], ...},
-             "buy": {"<item>": [copper a unit, "ah" | "vendor"], ...},
+             "buy": {"<item>": [copper a unit, "ah" | "vendor", a vendor's price when one sells it too (since 7 Nov 2026)], ...},
              "camp": [[item, the skill it is first needed at, "Tanning Rack"], ...],
              "sell": {"<item>": copper a unit, ...}, "disenchant": [item, ...]}},
          "also": {"<profession>-<variant>+<companion>": {... the same, "companions": ["<companion>"]}, ...},
@@ -141,7 +141,8 @@ def check_plans(doc) -> str | None:
                     and _pairs(how[1], "") is None and (len(how) == 2 or isinstance(how[2], int))):
                 return f"plan {key!r}: made[{item}] is not [units, [[item, units], ...], spell]"
         for item, row in (plan.get("buy") or {}).items():
-            if not (str(item).isdigit() and isinstance(row, list) and len(row) == 2 and isinstance(row[0], (int, float))):
+            if not (str(item).isdigit() and isinstance(row, list) and len(row) in (2, 3) and isinstance(row[0], (int, float))
+                    and (len(row) == 2 or isinstance(row[2], (int, float)))):
                 return f"plan {key!r}: buy[{item}] is not [copper, source]"
         for item, each in (plan.get("sell") or {}).items():
             if not (str(item).isdigit() and isinstance(each, (int, float))):

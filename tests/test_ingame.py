@@ -655,12 +655,12 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     lua.execute('C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = skill, maxSkillLevel = 150 } end; skill = 44; Fire("SKILL_LINES_CHANGED")')
     # at skill 44, the shirts: the bags hold nothing, so the first thing is to buy: the cloth at
     # the house, the thread and the dye from a vendor; the click opens the list
-    assert text() == "Buy at the auction house (1) and a vendor (2)" and mode() == "Buy" and lua.eval("ForeverWowCraftMake.glow.shown") is True
+    assert text() == "Buy from a vendor (2) and the auction house (1)" and mode() == "Buy" and lua.eval("ForeverWowCraftMake.glow.shown") is True
     tip = [re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]
     assert "  14 Linen Cloth (have 0), about 4s 20c, at the auction house" in tip and "  7 Coarse Thread (have 0), about 70c, from a vendor" in tip
     click()                                            # the click: the words in chat, and the list
     assert crafted() == [] and lua.eval("ForeverWowCraftShop.shown") is True
-    assert lua.eval("printed[#printed]").startswith("|cfff2b51dForeverWowCraft|r: Buy at the auction house (1) and a vendor (2). ")
+    assert lua.eval("printed[#printed]").startswith("|cfff2b51dForeverWowCraft|r: Buy from a vendor (2) and the auction house (1). ")
     assert lua.eval("ForeverWowCraftShop.title.text") == "White Linen Shirt, skill 44 to 51, needs"
     assert [lua.eval(f"ForeverWowCraftShop.rows[{i}].name.text") for i in (1, 2, 3)] == ["Linen Cloth", "Coarse Thread", "Bleach"]
     assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 14, have 0" and lua.eval("ForeverWowCraftShop.rows[2].status.text") == "vendor"
@@ -678,7 +678,7 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     click()
     assert lua.eval("ForeverWowCraftShop.shown") is True and strip(lua.eval("printed[#printed]")).startswith("ForeverWowCraft: Short 2s 65c: farm gold or farm 14 Linen Cloth. Click: the shopping list.")
     lua.execute('ForeverWowCraftShop:Hide(); money = 1000000; Fire("PLAYER_MONEY")')
-    assert text() == "Buy at the auction house (1) and a vendor (2)" and mode() == "Buy"
+    assert text() == "Buy from a vendor (2) and the auction house (1)" and mode() == "Buy"
     # with some bolts already, the bolts still short of the step's 7 come first (5 more), not
     # the shirt the bags could make one of: branches before the root
     lua.execute('bags[0] = { { 2589, 14 }, { 2996, 2 }, { 2320, 7 }, { 2324, 7 } }; Fire("BAG_UPDATE_DELAYED")')
@@ -1002,21 +1002,36 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     assert text() == "Needs Forge" and tip()[-1].startswith("No forge seen yet")
     # something to buy from a vendor: the one seen selling it; from the auction house: the auctioneer
     lua.execute('bags[0] = {}; reqs[2385] = {}; Fire("BAG_UPDATE_DELAYED")')
-    assert text() == "Buy at the auction house (1) and a vendor (1)" and tip()[-1].startswith("No auctioneer seen yet")
+    assert text() == "Buy from a vendor (1) and the auction house (1)" and tip()[-1].startswith("No vendor seen yet")   # the vendor first: the sure trip
+    assert lua.eval("ForeverWowCraftMake.verdict.note") == "12 Coarse Thread: vendor, 72 Linen Cloth: AH"              # the note under the arrow lists the items and their sources
     lua.execute('px, py = 0.50, 0.40; Fire("AUCTION_HOUSE_SHOW"); px, py = 0.50, 0.50; Fire("BAG_UPDATE_DELAYED")')
     # a recipe to learn and reagents to buy: the nearer trip first, the other a note under the
     # arrow. The auctioneer 100 yd north, the trainer 300 yd south: buy first; by the trainer: learn first
     lua.execute('Fire("AUCTION_HOUSE_CLOSED"); learned[2385] = false; Fire("TRADE_SKILL_LIST_UPDATE")')     # the house closed: distances decide
     assert text().startswith("Buy") and lua.eval("ForeverWowCraftMake.verdict.aside.text") == "Then learn Brown Linen Vest at the trainer"
     lua.execute('px, py = 0.50, 0.78; Fire("TRADE_SKILL_LIST_UPDATE")')
-    assert text() == "Learn Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.aside.text") == "Then buy at the auction house (1) and a vendor (1)"
+    assert text() == "Learn Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.aside.text") == "Then buy from a vendor (1) and the auction house (1)"
     lua.execute('px, py = 0.50, 0.50; learned[2385] = true; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
+    # two sources: the arrow goes to the nearer. A vendor selling the thread seen 200 yd east: the auctioneer (100 yd) still;
+    # from 50 yd of the vendor, the vendor (the user, 7 Nov 2026)
+    lua.execute('px = 0.70; wares = { 2320 }; Fire("MERCHANT_SHOW"); px = 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
+    lua.execute('px = 0.65; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert tip()[-1].startswith("The arrow points at the nearest: Vendor: Thrallson, 50 yd")
+    # an item the route priced at the house that a vendor sells too (a third number in the plan's buy row): the vendor's,
+    # one trip, and the tip says the house had it cheaper (a player sent to both for a dye the vendor had, 7 Nov 2026)
+    lua.execute('ns.RouteFor("tailoring").buy[2589] = { 30, "ah", 45 }; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Buy from a vendor: 2 items" and "72 Linen Cloth: vendor" in lua.eval("ForeverWowCraftMake.verdict.note")
+    assert any(re.sub(r"\|c[0-9a-f]{8}|\|r", "", line).endswith("from a vendor (the auction house had it for 30c each)") for line in tip())
+    assert lua.eval('(function() for _, e in ipairs(ForeverWowCraftMake.verdict.shopping) do if e.item == 2589 then return e.source .. ":" .. e.price end end end)()') == "vendor:45"
+    lua.execute('ns.RouteFor("tailoring").buy[2589] = { 30, "ah" }; px = 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
     # put away by a right-click; ticking Keep arrow brings it back
     lua.execute('ForeverWowCraftArrow.scripts.OnMouseUp(ForeverWowCraftArrow, "RightButton")')
     assert arrow().shown is False
     lua.execute('ForeverWowCraftKeepArrow.scripts.OnClick(ForeverWowCraftKeepArrow)')
-    assert arrow().shown is True and arrow().text.text.endswith("(Buy at the auction house (1) and a vendor (1))")
+    assert arrow().shown is True and arrow().text.text.endswith("(12 Coarse Thread: vendor, 72 Linen Cloth: AH)")
     # the overview page, no profession open: the tab says so and the arrow stays
     lua.execute('local was = C_TradeSkillUI.GetBaseProfessionInfo; C_TradeSkillUI.GetBaseProfessionInfo = function() return nil end; '
                 'Fire("BAG_UPDATE_DELAYED"); C_TradeSkillUI.GetBaseProfessionInfo = was')
@@ -1035,7 +1050,7 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     lua.execute('Fire("TRADE_SKILL_CLOSE")')
     assert arrow().shown is True
     lua.execute('ns.ClearArrow(); Fire("PLAYER_ENTERING_WORLD"); RunTimers()')
-    assert arrow().shown is True and arrow().text.text.startswith("Tailoring\nAuctioneer\n100 yd\n(Buy")
+    assert arrow().shown is True and arrow().text.text.startswith("Tailoring\nAuctioneer\n100 yd\n(12 Coarse Thread: vendor")
     # the skill list empty, as in the first moments of a login: nothing is read into it, the arrow stays
     lua.execute('GetNumSkillLines = function() return 0 end; Fire("SKILL_LINES_CHANGED"); RunTimers()')
     assert arrow().shown is True and lua.eval("ns.inv.Char().making") == "tailoring"
@@ -1045,10 +1060,10 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     lua.execute('GetSkillLineInfo = function() return "Professions", true end; Fire("SKILL_LINES_CHANGED")')
     assert arrow().shown is False and lua.eval("ns.inv.Char().making") is None
     lua.execute('GetSkillLineInfo = function(i) if i == 1 then return "Professions", true end return "Tailoring", false, false, skill end; Fire("SKILL_LINES_CHANGED")')
-    assert arrow().shown is True and arrow().text.text.startswith("Tailoring\nAuctioneer\n100 yd\n(Buy")
+    assert arrow().shown is True and arrow().text.text.startswith("Tailoring\nAuctioneer\n100 yd\n(12 Coarse Thread: vendor")
     # at the auctioneer: no line for the way
     lua.execute('px, py = 0.50, 0.40; ForeverWowCraftArrow.scripts.OnUpdate(ForeverWowCraftArrow, 1)')
-    assert arrow().text.text.startswith("Tailoring\nAuctioneer\n(Buy")
+    assert arrow().text.text.startswith("Tailoring\nAuctioneer\n(12 Coarse Thread: vendor")
     lua.execute('px, py = 0.50, 0.50; ForeverWowCraftArrow.scripts.OnUpdate(ForeverWowCraftArrow, 1)')
     # unticked with the window closed: the arrow goes, and a reload leaves it be
     lua.execute('ForeverWowCraftKeepArrow.GetChecked = function() return false end; ForeverWowCraftKeepArrow.scripts.OnClick(ForeverWowCraftKeepArrow)')

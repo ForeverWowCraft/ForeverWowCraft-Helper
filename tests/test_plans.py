@@ -32,7 +32,7 @@ def document(house="stonespine--horde", realm="Stonespine", faction="Horde", gen
                     {"from": 51, "to": 60, "recipe": "Brown Linen Vest", "spell": 2385, "crafts": 12,
                      "uses": [[bolt, 3], [thread, 1]], "makes": [vest, 1], "per": [1.333] * 9, "buy": [thread, cloth], "craft": [bolt]}],
                 "made": {str(bolt): [1, [[cloth, 2]], 2963]},
-                "buy": {str(cloth): [30, "ah"], str(thread): [10, "vendor"], str(dye): [25, "vendor"]},
+                "buy": {str(cloth): [30, "ah"], str(thread): [10, "vendor"], str(dye): [25, "vendor"]},     # a third number: a vendor's price beside a cheaper house
                 "sell": {str(shirt): 40.5, str(vest): 120}, "disenchant": []}
     enchanter = dict(tailoring, companions=["enchanting"], sell={str(shirt): 60, str(vest): 120}, disenchant=[shirt], sold=2400)
     enchanting = {"profession": "enchanting", "skill_line": 333, "variant": "trainer", "start": 1, "target": 60,
@@ -104,6 +104,11 @@ def _saved() -> Path:
 
 def test_the_document_is_checked():
     assert plans.check_plans(document()) is None
+    three = document()                                                     # a vendor's price beside the house's (7 Nov 2026)
+    three["plans"]["tailoring-trainer"]["buy"]["2589"] = [30, "ah", 45]
+    assert plans.check_plans(three) is None
+    three["plans"]["tailoring-trainer"]["buy"]["2589"] = [30, "ah", "45"]
+    assert "buy[2589]" in plans.check_plans(three)
     assert plans.check_plans({"format": "fwc-scan/1"}) == "not a fwc-plans/1 document"
     bad = document()
     bad["plans"]["tailoring-trainer"]["steps"][0]["per"] = [1, 1]                # not one for each skill point
