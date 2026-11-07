@@ -11,6 +11,94 @@ local function Button(parent, width, text, name)
 end
 ns.Button = Button
 
+-- A reload the client allows. ReloadUI is C_UI.Reload, a protected function: called from the
+-- addon's own code (a click on an ordinary button, a slash command) it is refused, "the client
+-- refused UNKNOWN() from the addon (ADDON_ACTION_BLOCKED)" (WoW Forever 1.60, 7 Nov 2026).
+-- What /reload typed does, a secure button with the macro "/reload" does: the game runs it, not
+-- the addon. So over a button that reloads lies an invisible secure one that takes the click.
+--
+-- ns.ReloadOver(target, wanted, after, moves): over `target` while it is shown and wanted() is
+-- true; after(), when given, is called after the click; with `moves`, a drag moves `target` as
+-- a drag on it would (its OnDragStart and OnDragStop). A secure frame can be made, shown,
+-- hidden and moved only out of combat: so it is made and placed out of combat only, and goes
+-- the moment a fight starts; the button below it is clicked then, and says /reload does it.
+local wishes, catchers = {}, {}
+
+local function Make(w)
+  local target = w.target
+  local name = target.GetName and target:GetName()
+  local c = CreateFrame("Button", name and (name .. "Secure") or nil, UIParent, "SecureActionButtonTemplate")
+  c:RegisterForClicks("AnyUp")
+  c:SetAttribute("useOnKeyDown", false)             -- the click acts on release, as the button below did
+  c:SetAttribute("type", "macro")
+  c:SetAttribute("macrotext", "/reload")
+  c.target, c.wanted = target, w.wanted
+  -- the button below looks as if it is the one pointed at
+  c:SetScript("OnEnter", function()
+    if target.LockHighlight then target:LockHighlight() end
+    local f = target:GetScript("OnEnter"); if f then f(target) end
+  end)
+  c:SetScript("OnLeave", function()
+    if target.UnlockHighlight then target:UnlockHighlight() end
+    local f = target:GetScript("OnLeave"); if f then f(target) end
+  end)
+  c:SetScript("PostClick", function() if w.after then w.after() end end)
+  if w.moves then
+    c:RegisterForDrag("LeftButton")
+    c:SetScript("OnDragStart", function() local f = target:GetScript("OnDragStart"); if f then f(target) end end)
+    c:SetScript("OnDragStop", function() local f = target:GetScript("OnDragStop"); if f then f(target) end end)
+  end
+  c:Hide()
+  table.insert(catchers, c)
+  return c
+end
+
+local function Place(c)
+  local t = c.target
+  local show = t:IsVisible() and c.wanted() and t:GetLeft() ~= nil
+  if not show then if c:IsShown() then c:Hide() end return end
+  local s = t:GetEffectiveScale() / UIParent:GetEffectiveScale()
+  local left, bottom, width, height = t:GetLeft() * s, t:GetBottom() * s, t:GetWidth() * s, t:GetHeight() * s
+  if c.left ~= left or c.bottom ~= bottom or c.width ~= width or c.height ~= height then
+    c.left, c.bottom, c.width, c.height = left, bottom, width, height
+    c:ClearAllPoints()
+    c:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+    c:SetSize(width, height)
+  end
+  c:SetFrameStrata(t:GetFrameStrata())
+  c:SetFrameLevel(t:GetFrameLevel() + 10)
+  if not c:IsShown() then c:Show() end
+end
+
+local function InFight() return InCombatLockdown and InCombatLockdown() end
+
+-- out of combat: made what is wished for, and every one placed (or hidden)
+local function PlaceAll()
+  if InFight() then return end
+  while #wishes > 0 do Make(table.remove(wishes, 1)) end
+  for _, c in ipairs(catchers) do Place(c) end
+end
+
+local placer = CreateFrame("Frame")
+local since = 0
+placer:SetScript("OnUpdate", function(_, elapsed)
+  since = since + (elapsed or 0)
+  if since < 0.1 then return end
+  since = 0
+  PlaceAll()
+end)
+placer:RegisterEvent("PLAYER_REGEN_DISABLED")       -- comes just before the lockdown: still allowed
+placer:SetScript("OnEvent", function()
+  for _, c in ipairs(catchers) do c:Hide() end
+end)
+
+local function ReloadOver(target, wanted, after, moves)
+  table.insert(wishes, { target = target, wanted = wanted, after = after, moves = moves })
+  PlaceAll()
+end
+ns.ReloadOver = ReloadOver
+ns.reloadCatchers = catchers
+
 -- A slider with two ends, which the game does not have: a track, a thumb at each end dragged
 -- along it, the part between them filled. Values are whole skill points; the ends keep a
 -- point apart. r.OnChanged(from, upto) is called when the mouse moves an end; r:Set does not.

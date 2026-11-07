@@ -272,11 +272,20 @@ end
 -- ReloadUI first: what /reload itself calls, so it is known to work on this client; the
 -- newer C_UI.Reload where there is no other. A refusal (an error) is said, not swallowed (the
 -- Reload now button did nothing once, 6 Nov 2026: with script errors off, nothing told why)
+--
+-- A refusal is not always an error: where ReloadUI is protected (WoW Forever, 7 Nov 2026) the
+-- client blocks it (ADDON_ACTION_BLOCKED) and the code goes on. So the reload that has not come
+-- a moment later is said too. The buttons that save do not come here: a secure button over
+-- them (ns.ReloadOver, Widgets.lua) runs /reload as the game's own; this is what is left for
+-- /fwcs save and a click in a fight, when that button cannot be shown.
 local function DoReload()
   local ok, err = pcall(function()
     if ReloadUI then ReloadUI() elseif C_UI and C_UI.Reload then C_UI.Reload() else error("no reload function") end
   end)
-  if not ok then Print("the reload was refused: " .. tostring(err) .. ". /reload, typed, does the same.") end
+  if not ok then Print("the reload was refused: " .. tostring(err) .. ". /reload, typed, does the same.")
+  elseif C_Timer and C_Timer.After then
+    C_Timer.After(1, function() Print("the client did not reload. /reload, typed, does it.") end)
+  end
 end
 
 -- ================================================================ state

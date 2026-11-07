@@ -98,10 +98,18 @@ Button = function()
   end)
   button:SetScript("OnEnter", Tip)
   button:SetScript("OnLeave", GameTooltip_Hide)
+  -- Save Prices reloads: the client takes that only from a secure button (Widgets.lua)
+  ns.ReloadOver(button, function() return Scanner().Dirty() end)
   return button
 end
 
 ns.OnScannerChanged = Draw
+
+-- the scanner's own bar says SAVE when there is something to save, and a click on it reloads:
+-- the same secure button over it (a drag on it still moves the bar)
+if ForeverWowCraftScannerStatus then
+  ns.ReloadOver(ForeverWowCraftScannerStatus, function() return ForeverWowCraftScannerStatus.mode == "save" end, nil, true)
+end
 
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("AUCTION_HOUSE_SHOW")
