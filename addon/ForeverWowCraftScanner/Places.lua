@@ -373,7 +373,7 @@ function ns.NearestPlace(kind, what, item, upto)
 end
 
 -- ================================================================ the arrow
-local arrow, target, dismissed        -- target = { map, x, y, title, note, profession } or { none = true, ... }; dismissed: by a right-click, until the target changes
+local arrow, target, dismissed        -- target = { map, x, y, title, note, profession } or { none = true, ... }; dismissed: by a right-click, until ns.ArrowBack
 local ARROW, QUESTION, HAMMER = "Interface\\Minimap\\MinimapArrow", "Interface\\Icons\\INV_Misc_QuestionMark", "Interface\\Icons\\INV_Hammer_20"
 
 -- the profession served, the title (less the profession's name when it starts with it: "Tailoring
@@ -485,7 +485,7 @@ local function Build()
   arrow:SetScript("OnEnter", function()
     GameTooltip:SetOwner(arrow, "ANCHOR_RIGHT")
     GameTooltip:AddLine("ForeverWowCraft: the way there")
-    GameTooltip:AddLine("Drag to move (it stays there). Click to open or fold the note under it. Right-click to put away (the Make button brings it back). /fwcs arrow off turns it off, /fwcs arrow reset puts it back at the top.", 1, 1, 1, true)
+    GameTooltip:AddLine("Drag to move (it stays there). Click to open or fold the note under it. Right-click to put away: it is back when you open a vendor, a trainer, an auctioneer, a mailbox or the profession window, or click Make. /fwcs arrow off turns it off, /fwcs arrow reset puts it back at the top.", 1, 1, 1, true)
     GameTooltip:Show()
   end)
   arrow:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -528,9 +528,26 @@ function ns.SetArrow(place, title, again, note, profession, symbol)
   else
     target = { none = true, title = title, note = note, profession = profession, symbol = symbol }   -- nothing to point at: the words, under a question mark or a hammer
   end
-  dismissed = false
+  if again then dismissed = false end
+  if dismissed then                            -- put away by a right-click: the target is kept, nothing is shown until ns.ArrowBack
+    if arrow then arrow:Hide() end             -- (a loot that moved the step brought it back before: a player who put it away did
+    return                                     -- not want it on every drop, 7 Nov 2026)
+  end
   if tomtom and TomTom and TomTom.RemoveWaypoint then pcall(TomTom.RemoveWaypoint, TomTom, tomtom); tomtom = nil end
   if place and ViaTomTom(place, title) then return end
+  if not arrow then Build() end
+  arrow:Show()
+  Update()
+end
+
+-- The arrow put away by a right-click, back where it would point: when a merchant's, a
+-- trainer's, an auctioneer's or a mailbox's window opens, or the profession window (the
+-- player is at the business the arrow serves); the Make button and Keep arrow bring it back
+-- too (SetArrow with `again`). A loot or a bag change does not.
+function ns.ArrowBack()
+  if not dismissed or not target then return end
+  dismissed = false
+  if not target.none and target.place and ViaTomTom(target.place, target.title) then return end
   if not arrow then Build() end
   arrow:Show()
   Update()
@@ -575,7 +592,7 @@ function ns.ArrowCommand(arg)
     local where = target.none and nil or (map and map ~= target.map) and ("in " .. MapName(target.map)) or d and string.format("%d yd", math.floor(d + 0.5)) or nil
     print(PREFIX .. (target.none and "the arrow shows: " or "the arrow points at ") .. target.title .. (where and (", " .. where) or "")
       .. (tomtom and " (as a TomTom waypoint)" or "")
-      .. (dismissed and " (put away by a right-click: the Make button brings it back)" or "")
+      .. (dismissed and " (put away by a right-click: a vendor, a trainer, an auctioneer, a mailbox or the profession window opened brings it back)" or "")
       .. ". /fwcs arrow off turns it off.")
   end
 end
@@ -596,6 +613,7 @@ for _, event in ipairs({ "TRAINER_SHOW", "TRAINER_UPDATE", "MERCHANT_SHOW", "MER
   pcall(frame.RegisterEvent, frame, event)
 end
 frame:SetScript("OnEvent", function(_, event)
+  if event ~= "TRAINER_UPDATE" and event ~= "MERCHANT_UPDATE" then ns.ArrowBack() end     -- a window of the arrow's business opened
   if event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then pcall(NoteTrainer)
   elseif event == "MERCHANT_SHOW" or event == "MERCHANT_UPDATE" then pcall(NoteVendor)
   elseif event == "AUCTION_HOUSE_SHOW" then Note("auction", "", { name = Npc() })

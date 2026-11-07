@@ -1039,8 +1039,15 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     assert text() == "Collect 72 Linen Cloth from the mailbox"
     lua.execute('Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); Fire("TRADE_SKILL_LIST_UPDATE")')
     assert text() == "Buy from a vendor (1) and the auction house (1)" and lua.eval("ForeverWowCraftMake.verdict.note").startswith("12 Coarse Thread: vendor")
-    # put away by a right-click; ticking Keep arrow brings it back
+    # put away by a right-click: a loot that moves the step does not bring it back (the user, 7 Nov 2026); the profession
+    # window opened does, pointing at the step as it is now; so does ticking Keep arrow
     lua.execute('ForeverWowCraftArrow.scripts.OnMouseUp(ForeverWowCraftArrow, "RightButton")')
+    assert arrow().shown is False
+    lua.execute('bags[0] = { { 2320, 12 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Buy 72 Linen Cloth at the auction house" and arrow().shown is False
+    lua.execute('Fire("TRADE_SKILL_SHOW")')
+    assert arrow().shown is True and arrow().text.text.endswith("(72 Linen Cloth: AH)")
+    lua.execute('bags[0] = {}; Fire("BAG_UPDATE_DELAYED"); ForeverWowCraftArrow.scripts.OnMouseUp(ForeverWowCraftArrow, "RightButton")')
     assert arrow().shown is False
     lua.execute('ForeverWowCraftKeepArrow.scripts.OnClick(ForeverWowCraftKeepArrow)')
     assert arrow().shown is True and arrow().text.text.endswith("(12 Coarse Thread: vendor, 72 Linen Cloth: AH)")

@@ -323,7 +323,7 @@ local function Place()
   button:SetScript("OnLeave", function() if GameTooltip:GetOwner() == button then GameTooltip:Hide() end end)
   button:SetScript("OnShow", Refresh)
   if win.HookScript then                        -- the window's own showing and hiding, the surest word
-    win:HookScript("OnShow", function() panelOpen = true; Refresh() end)
+    win:HookScript("OnShow", function() panelOpen = true; ns.ArrowBack(); Refresh() end)
     win:HookScript("OnHide", function()
       panelOpen, running = false, nil
       if ns.Settings().arrowKeep == false then pointed = nil; Remember(); ns.ClearArrow() else Headless() end
@@ -400,7 +400,7 @@ frame:SetScript("OnEvent", function(_, event, name)
     if C_Timer and C_Timer.After then C_Timer.After(2, back) else back() end
     return
   end
-  if event == "TRADE_SKILL_SHOW" then panelOpen = true end
+  if event == "TRADE_SKILL_SHOW" then panelOpen = true; ns.ArrowBack() end     -- the profession window: the arrow put away comes back
   if event == "TRADE_SKILL_CLOSE" then                     -- fired for the overview tile too, with the window open
     running, panelOpen = nil, false
     if PanelShown() then Overview()
