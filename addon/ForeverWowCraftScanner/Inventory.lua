@@ -238,6 +238,17 @@ local function SkillOf(plan)
   end
 end
 
+-- whether the client's skill list can be read now: for the first moments of a login it is
+-- empty, and an empty list says nothing (tailoring was taken for unlearned at a relog, and
+-- the arrow went to cooking, 12 Oct 2026)
+local function SkillsReadable()
+  if GetProfessions then
+    local found = { GetProfessions() }
+    for i = 1, 6 do if found[i] then return true end end
+  end
+  return (GetNumSkillLines and GetNumSkillLines() or 0) > 1
+end
+
 -- each profession's skill, and its cap (75 for an apprentice: the next rank is the trainer's)
 local function NoteSkills()
   local house, c = House(), Char()
@@ -280,5 +291,5 @@ opener:SetScript("OnEvent", function(_, event)
 end)
 
 ns.inv = { Spelt = Spelt, Char = Char, House = House, Tracked = Tracked, Count = Count, CountBags = CountBags, CountBank = CountBank,
-           CountMail = CountMail, NoteSkills = NoteSkills, Have = Have, PLACES = PLACES,
+           CountMail = CountMail, NoteSkills = NoteSkills, SkillsReadable = SkillsReadable, Have = Have, PLACES = PLACES,
            InMail = InMail, NoteMailed = NoteMailed }

@@ -83,9 +83,10 @@ carries its saved scans over.
 **On a Mac:** download `ForeverWowCraft-Helper-<version>.dmg`, open it, and drag
 **ForeverWowCraft Helper** into Applications. Python is inside the application: nothing else to
 install. The application is not signed yet (the project's business signs it once it has its
-Apple Developer membership), so the first time, macOS says it cannot check it for malware:
-System Settings > Privacy & Security, scroll down, **Open Anyway**. Then it is an icon in the
-menu bar, at the top right, with the same menu: **Start at login** puts a launch agent in your
+Apple Developer membership), so the first time, macOS says the app was not opened, or that it
+cannot check it for malware: click **Done** (not Move to Trash), then System Settings > Privacy &
+Security, scroll down, **Open Anyway**; once for each new copy, an update's disk image too. Then it
+is an icon in the menu bar, at the top right, never in the Dock, with the same menu: **Start at login** puts a launch agent in your
 Library (System Settings > General > Login Items lists it under "Allow in the Background"). It
 looks for the game in `/Applications/World of Warcraft`; **Choose the game folder...** in the
 menu is for anywhere else. What the helper keeps is in `~/Library/Application Support/ForeverWowCraft/Helper`:
@@ -265,7 +266,7 @@ fetches python.org's embeddable Python and WiX 3.14, checks both against their h
 copy of `pythonw.exe` the helper's name and icon, and builds). `installer/helper.wxs` says what
 the installer does: a per-user install, a Start Menu entry, the Run entry that starts the app
 at logon, "Start the helper now" at the end, and the running app closed before an upgrade or a
-removal. A release (a `v<version>` tag) builds it on a Windows runner and puts it on the
+removal. A release (a `v<version>` tag, a draft until the installer is on it) builds it on a Windows runner and puts it on the
 GitHub release beside the zips.
 
 `python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac: the

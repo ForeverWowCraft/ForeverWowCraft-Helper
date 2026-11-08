@@ -127,16 +127,7 @@ end
 -- 12 Oct 2026: the arrow kept engineering's step until a tile was clicked): the character's
 -- skills say it is gone, so it is forgotten, and the arrow set for it goes. The pass without
 -- the window then serves the next the character has; with the window open, the next tile clicked
--- whether the client's skill list can be read now: for the first moments of a login it is
--- empty, and an empty list says nothing (tailoring was taken for unlearned at a relog, and
--- the arrow went to cooking, 12 Oct 2026)
-local function SkillsReadable()
-  if GetProfessions then
-    local found = { GetProfessions() }
-    for i = 1, 6 do if found[i] then return true end end
-  end
-  return (GetNumSkillLines and GetNumSkillLines() or 0) > 1
-end
+local SkillsReadable = ns.inv.SkillsReadable     -- whether the client's skill list can be read now (Inventory.lua)
 local function Unlearned()
   local c = Char()
   ns.inv.NoteSkills()

@@ -57,21 +57,35 @@ end
 local api = {}
 
 -- the profession the panel shows: { id = skill line, name, rank }, or nil with no panel
+-- whether the window shows recipes that are not this character's: another player's profession
+-- linked in chat, a guild's recipes, a vendor crafting
+local function Linked()
+  for _, f in ipairs({ C_TradeSkillUI and C_TradeSkillUI.IsTradeSkillLinked, C_TradeSkillUI and C_TradeSkillUI.IsTradeSkillGuild,
+                       C_TradeSkillUI and C_TradeSkillUI.IsNPCCrafting, IsTradeSkillLinked, IsTradeSkillGuild }) do
+    local ok, yes = pcall(f)
+    if ok and yes == true then return true end
+  end
+  return nil
+end
+
 function api.Open()
+  local open
   if C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo then
     local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
     if ok and type(info) == "table" and (info.professionID or info.profession) then
-      return { id = info.professionID or info.profession, name = info.professionName or info.parentProfessionName, rank = info.skillLevel, max = info.maxSkillLevel }
+      open = { id = info.professionID or info.profession, name = info.professionName or info.parentProfessionName, rank = info.skillLevel, max = info.maxSkillLevel }
     end
   end
-  if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillLine then
+  if not open and C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillLine then
     local ok, id, name, rank, max = pcall(C_TradeSkillUI.GetTradeSkillLine)
-    if ok and id and id ~= 0 then return { id = id, name = name, rank = rank, max = max } end
+    if ok and id and id ~= 0 then open = { id = id, name = name, rank = rank, max = max } end
   end
-  if GetTradeSkillLine then
+  if not open and GetTradeSkillLine then
     local name, rank, max = GetTradeSkillLine()
-    if name and name ~= "" then return { name = name, rank = rank, max = max } end
+    if name and name ~= "" then open = { name = name, rank = rank, max = max } end
   end
+  if open then open.linked = Linked() end
+  return open
 end
 
 -- whether the character knows the recipe; nil when the client cannot say
@@ -272,7 +286,7 @@ local function Shopping()
   local c = Char()
   ns.inv.NoteSkills()                          -- what the character has goes by its skills, or by the panel open on it
   local open = api.Open()
-  local function has(plan) return c.skills[plan.skill_line] or (open and open.id == plan.skill_line and open.rank) or nil end
+  local function has(plan) return c.skills[plan.skill_line] or (open and not open.linked and open.id == plan.skill_line and open.rank) or nil end
   local making = c.making and ns.RouteFor(c.making)
   local profession = (making and has(making)) and c.making or (ns.OwnProfession and ns.OwnProfession())
   local plan = profession and ns.RouteFor(profession)
@@ -398,6 +412,17 @@ local function VerdictOf(given)
   local plan = profession and ns.RouteFor(profession)
   if not plan then
     return { text = "No route for this profession", tip = { "The site has no route for the profession this panel shows." }, idle = true }
+  end
+  -- a window on recipes that are not this character's: another player's profession linked in
+  -- chat, a guild's, or a profession the character does not have. Nothing is made, bought or
+  -- trained for it: the route follows the character's own professions only (a player was sent
+  -- to train enchanting, which he did not have, 8 Nov 2026)
+  if not given then
+    ns.inv.NoteSkills()
+    if open.linked or (ns.inv.SkillsReadable() and not Char().skills[plan.skill_line]) then
+      return { text = "Not one of your professions", idle = true,
+               tip = { string.format("This window shows %s recipes that are not this character's: another player's, or a profession it does not have. The route, the arrow and the shopping list follow your own professions.", ns.Title(profession)) } }
+    end
   end
   if not given and Char().making ~= profession then      -- the profession opened in the book: the list's and the arrow's
     Char().making = profession

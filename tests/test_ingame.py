@@ -1541,14 +1541,24 @@ def test_the_shopping_list_buys_at_the_auction_house_a_click_and_a_confirm_each(
     assert shop("title.text") == "Brown Linen Vest, skill 51 to 60, needs"
     lua.execute('skill = 44; Fire("BAG_UPDATE_DELAYED")')
     assert shop("title.text") == "White Linen Shirt, skill 44 to 51, needs"
-    # another profession opened in the professions book while the house is open: the list is
-    # that one's, at once; and the first one's again when the book goes back to it
+    # a window on a profession this character does not have (another player's enchanting, linked in chat): the Make
+    # button says so, nothing follows it, the list stays tailoring's (a player was sent to train enchanting, 8 Nov 2026)
     lua.execute('''
       C_TradeSkillUI = { GetBaseProfessionInfo = function() return { professionID = 333, professionName = "Enchanting", skillLevel = 1 } end,
                          GetRecipeInfo = function() return { learned = true } end, GetRecipeRequirements = function() return {} end }
       ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
       Fire("ADDON_LOADED", "Blizzard_Professions"); Fire("TRADE_SKILL_SHOW")
     ''')
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Not one of your professions" and lua.eval("ns.inv.Char().making") != "enchanting"
+    assert shop("title.text") == "White Linen Shirt, skill 44 to 51, needs"
+    # the character has enchanting too, and another player's enchanting is linked: still not followed
+    lua.execute('GetNumSkillLines = function() return 3 end; GetSkillLineInfo = function(i) if i == 1 then return "Professions", true '
+                'elseif i == 2 then return "Tailoring", false, false, skill end return "Enchanting", false, false, 1 end; '
+                'C_TradeSkillUI.IsTradeSkillLinked = function() return true, "Someone" end; Fire("TRADE_SKILL_SHOW")')
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Not one of your professions" and shop("title.text") == "White Linen Shirt, skill 44 to 51, needs"
+    # the character's own enchanting opened in the professions book while the house is open: the list is
+    # that one's, at once; and the first one's again when the book goes back to it
+    lua.execute('C_TradeSkillUI.IsTradeSkillLinked = function() return false end; Fire("TRADE_SKILL_SHOW")')
     assert shop("title.text") == "Enchant Bracer - Minor Health, skill 1 to 60, needs" and shop("rows[1].name.text") == "Strange Dust"
     lua.execute('C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = 44 } end; Fire("TRADE_SKILL_SHOW")')
     assert shop("title.text") == "White Linen Shirt, skill 44 to 51, needs"
