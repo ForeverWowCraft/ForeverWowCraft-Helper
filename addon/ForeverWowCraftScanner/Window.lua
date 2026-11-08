@@ -134,7 +134,7 @@ pcall(purse.RegisterEvent, purse, "PLAYER_MONEY")
 purse:SetScript("OnEvent", function() if not Char().budget.copper then RedrawSoon() end end)
 
 local function Budget()
-  local b = Char().budget
+  local b = Char().budget or {}
   return b.copper or (GetMoney and GetMoney()) or 0, b.copper == nil
 end
 
@@ -149,6 +149,16 @@ local function Reach(plan, from, have, upto, budget)
     if ns.Tailor(plan, from, have, mid).spent <= budget then lo = mid else hi = mid end
   end
   return lo
+end
+
+-- The skill the gold reaches from `from` with `have` in hand, when the window's "only as far as
+-- the gold goes" box is ticked; nil when it is not. The Make button and the shopping list cut
+-- the step there too, so that the list asks for what the gold buys and no more (the user,
+-- 7 Nov 2026: 56 venom sacs for 50s asked of a 20s cap).
+function ns.BudgetReach(plan, from, have)
+  local b = Char().budget
+  if not RANGE or not (b and b.on) then return nil end
+  return Reach(plan, from, have, plan.target, (Budget()))
 end
 
 -- ================================================================ the window

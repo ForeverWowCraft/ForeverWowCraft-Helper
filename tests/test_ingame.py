@@ -664,6 +664,16 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     assert lua.eval("ForeverWowCraftShop.title.text") == "White Linen Shirt, skill 44 to 51, needs"
     assert [lua.eval(f"ForeverWowCraftShop.rows[{i}].name.text") for i in (1, 2, 3)] == ["Linen Cloth", "Coarse Thread", "Bleach"]
     assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 14, have 0" and lua.eval("ForeverWowCraftShop.rows[2].status.text") == "vendor"
+    # the /fwc window's "only as far as the gold goes", 2s typed: the step is cut where the gold ends (two points, 1s 90c), and the
+    # Make button, its tip and the shopping list ask for that much and no more (the user, 7 Nov 2026)
+    lua.execute('ns.inv.Char().budget = { on = true, copper = 200 }; Fire("BAG_UPDATE_DELAYED"); RunTimers()')
+    tip = [re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]
+    assert "Only as far as the gold goes (the box in the /fwc window): this step is cut at skill 46." in tip
+    assert "  4 Linen Cloth (have 0), about 1s 20c, at the auction house" in tip and "  2 Coarse Thread (have 0), about 20c, from a vendor" in tip
+    assert lua.eval("ForeverWowCraftMake.verdict.shopping.title") == "White Linen Shirt, skill 44 to 46 (as far as the gold goes), needs"
+    assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 4, have 0" and lua.eval("ForeverWowCraftShop.title.text").endswith("(as far as the gold goes), needs")
+    lua.execute('ns.inv.Char().budget = {}; Fire("BAG_UPDATE_DELAYED"); RunTimers()')
+    assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 14, have 0"
     lua.execute("ForeverWowCraftShop:Hide()")
     # the purse short of what the step buys (6s 65c): the words say by how much and the two ways
     # out, the cloth farmed instead of bought, not the vendor's thread and dye; no arrow to a

@@ -21,15 +21,19 @@ local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
 --   make = { {item, units, crafts, spell, uses}, ... }   what the step makes on the way (spell
 --                                             nil when the document does not say how) };
 -- nil when the route is done at `skill`.
-function ns.NextCraft(plan, skill, have)
+function ns.NextCraft(plan, skill, have, upto)
   local step, left
   for _, s in ipairs(plan.steps or {}) do
     left = ns.CraftsLeft(s, skill)
     if left > 0 then step = s; break end
   end
   if not step then return nil end
-  local walk = ns.Tailor(plan, skill, have, step.to)
-  local out = { step = step, spell = step.spell, crafts = left, from = math.max(skill, step.from), to = step.to,
+  -- `upto` (the skill the gold reaches, ns.BudgetReach) cuts the step: a point at least
+  local from = math.max(skill, step.from)
+  local to = math.min(step.to, math.max(upto or step.to, from + 1))
+  if to < step.to then left = ns.CraftsLeft(step, skill, to) end
+  local walk = ns.Tailor(plan, skill, have, to)
+  local out = { step = step, spell = step.spell, crafts = left, from = from, to = to, capped = to < step.to or nil,
                 uses = step.uses, buy = {}, make = {} }
   for item, units in pairs(walk.buy) do table.insert(out.buy, { item, units }) end
   table.sort(out.buy, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
@@ -275,14 +279,15 @@ local function Shopping()
   if not plan then return {} end
   local skill = has(plan)
   if not skill then return {} end             -- a profession the character does not have: nothing to buy for it
-  local nxt = skill < plan.target and ns.NextCraft(plan, skill, Bags(plan))
+  local bags = Bags(plan)
+  local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
   if not nxt then return {} end
   local out = ShoppingOf(plan, nxt, c.tolearn)
   local t = c.tool
   if type(t) == "table" and t.item and (ns.inv.Count(t.item) or 0) == 0 then        -- the tool the step lacks, first
     table.insert(out, 1, { item = t.item, units = 1, have = 0, source = t.source or "ah", price = t.price })
   end
-  out.title = ns.RecipeName(nxt.step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. ", needs"
+  out.title = ns.RecipeName(nxt.step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. (nxt.capped and " (as far as the gold goes)" or "") .. ", needs"
   return out
 end
 
@@ -296,7 +301,7 @@ local RANK_EARLY = 25                      -- the next rank is taught from this 
 -- the verdict when nothing can be made from the bags: what to buy, where, the list on a click
 local function BuyVerdict(house, plan, nxt, step, tip, profession)
   local shopping = ShoppingOf(plan, nxt)
-  shopping.title = ns.RecipeName(step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. ", needs"
+  shopping.title = ns.RecipeName(step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. (nxt.capped and " (as far as the gold goes)" or "") .. ", needs"
   local ah, vendor = {}, {}
   for _, e in ipairs(shopping) do table.insert(e.source == "vendor" and vendor or ah, e) end
   -- the vendor first: the sure trip (what it sells never runs out; the house may have sold out)
@@ -400,10 +405,12 @@ local function VerdictOf(given)
   end
   local skill = open.rank or Char().skills[plan.skill_line] or plan.start
   local tip = { string.format("%s route, skill %d.", ns.Title(profession), skill) }
-  local nxt = skill < plan.target and ns.NextCraft(plan, skill, Bags(plan))
+  local bags = Bags(plan)
+  local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
   if not nxt then
     return { text = string.format("Route done at skill %d", skill), tip = { tip[1], string.format("The route ends at %d.", plan.target) } }
   end
+  if nxt.capped then table.insert(tip, string.format("Only as far as the gold goes (the box in the /fwc window): this step is cut at skill %d.", nxt.to)) end
   -- the next rank (Journeyman at 75, Expert at 150, Artisan at 225) can be trained from 25
   -- below the cap. From there it is a note under the arrow, the craft path going on; from one
   -- below the cap it comes before anything else: the next point would reach the cap, where
