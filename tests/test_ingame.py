@@ -538,23 +538,23 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 10
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 11
     assert lua.eval("registered_panel == ns.options")
     # every setting is on the page (the user, 6 Nov 2026): the switches, by their getters and setters
     lua.execute("ns.options:refresh()")
-    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 11)]
+    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 12)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
-    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "A reminder to reload, every 15 minutes"
+    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level" and labels[10] == "A reminder to reload, every 15 minutes"
     # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
-    # (ready sound off), arrow, arrow kept, shopping list, other characters, reminder
+    # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), reminder
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 11)] == [True, True, False, False, False, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 12)] == [True, True, False, False, False, True, True, True, True, True, True]
     # the Settings window's own hooks: OnRefresh reads the boxes again (OnShow never fired for a frame made at load,
     # and every box showed unticked after an update, 7 Nov 2026); OnDefault puts the shipped defaults back
-    lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false }; ns.options:OnRefresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10)] == [False, True, False, False]
+    lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false, levelRoutes = false }; ns.options:OnRefresh()")
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10, 11)] == [False, True, False, False, False]
     lua.execute("ns.options:OnDefault()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 11)] == [True, True, False, False, False, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 12)] == [True, True, False, False, False, True, True, True, True, True, True]
     assert lua.eval("FWCS_DB.__ui.auto") is None and lua.eval("FWCS_DB.__ui.alts") is None
     lua.execute("local b = ns.options.boxes[9]; b.GetChecked = function() return true end; b.scripts.OnClick(b)")
     assert lua.eval("FWCS_DB.__ui.alts") is True
@@ -927,7 +927,7 @@ def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
       Fire("BAG_UPDATE_DELAYED")
     ''')
     assert text() == "Needs level 45 for Brown Linen Vest" and lua.eval("ForeverWowCraftMake.mode") == "Needs" and lua.eval("ForeverWowCraftMake.verdict.shopping") is None
-    assert any("asks for character level 45, and this character is 30" in line for line in tip())
+    assert any("Brown Linen Vest asks for level 45" in line for line in tip())
     assert lua.eval("FWCS_DB.__recipes[6000].l") == 45
     # at 45 the recipe is to buy again; without the client's word the route's own number (learn[3]) decides
     lua.execute('UnitLevel = function() return 45 end; Fire("BAG_UPDATE_DELAYED")')
@@ -1285,15 +1285,17 @@ def test_a_snapshot_awaited_when_the_house_closes_is_let_go_when_it_opens_again(
     # closed before the server answered, opened again: the wait is let go at once, the cooldown
     # shown from the ask (not two minutes of "Scanning..." first), no second ask by itself
     lua.execute('Fire("AUCTION_HOUSE_CLOSED"); Fire("AUCTION_HOUSE_SHOW"); RunTimers()')
-    assert "the snapshot awaited was lost with the window" in lua.eval("printed[#printed]") and "shift-click the button to try sooner" in lua.eval("printed[#printed]")
+    assert "the snapshot awaited was lost with the window" in lua.eval("printed[#printed]") and "shift" not in lua.eval("printed[#printed]").lower()
     assert lua.eval("replicated") == 1 and lua.eval("ns.scanner.Running()") is False
     assert abs(lua.eval("FWCS_DB.__ui.lastFullRefused") - lua.eval("time()")) <= 1
     assert re.match(r"\|cff808080Prices in 1[45]:\d\d\|r$", lua.eval("ForeverWowCraftAHButton.text"))
     # the first ask's timers fire later: they belong to the ask let go, and change nothing
     lua.execute("RunTimers()")
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("replicated") == 1
-    # a shift-click tries sooner, for whoever wants to see whether the server answers
+    # a shift-click past the cooldown is no more (the user, 8 Nov 2026); the command, for a test, still tries sooner
     lua.execute("shift = true; ForeverWowCraftAHButton.scripts.OnClick(ForeverWowCraftAHButton)")
+    assert lua.eval("replicated") == 1 and lua.eval("ns.scanner.Running()") is False
+    lua.execute('shift = false; SlashCmdList.FOREVERWOWCRAFTSCANNER("full force")')
     assert lua.eval("replicated") == 2 and lua.eval("ns.scanner.Running()") is True
     lua.execute('Fire("AUCTION_HOUSE_CLOSED")')
 
@@ -1412,7 +1414,7 @@ def test_a_snapshot_already_answered_is_read_on_after_the_house_closes():
     assert lua.eval("ns.scanner.Running()") is True and lua.eval("ns.scanner.Dirty()") is False
     # the house closes with 500 of the 600 read: the reading goes on, and ends with the record
     lua.execute('Fire("AUCTION_HOUSE_CLOSED")')
-    assert lua.eval("ns.scanner.Running()") is True and said("closed while the snapshot is read (500 of 600 auctions): reading on")
+    assert lua.eval("ns.scanner.Running()") is True and not said("closed while the snapshot is read")       # nothing in chat for it (8 Nov 2026)
     lua.execute("RunTimers()")
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("ns.scanner.Dirty()") is True
     # SAVE: a secure button over the bar with a macro of its own, /reload, shown with the save mode (Forever's
@@ -1443,7 +1445,7 @@ def test_a_snapshot_already_answered_is_read_on_after_the_house_closes():
       table.remove(timers); table.remove(timers)
       Fire("AUCTION_HOUSE_CLOSED")
     ''')
-    assert lua.eval("ns.scanner.Running()") is True and said("closed while the snapshot is awaited")
+    assert lua.eval("ns.scanner.Running()") is True and not said("closed while the snapshot is awaited")
     lua.execute('listed = 600; Fire("REPLICATE_ITEM_LIST_UPDATE"); RunTimers()')
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("printed[#printed]").find("snapshot finished") >= 0
     assert not said("aborted (auction house closed)")
@@ -1650,7 +1652,7 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     # due, the helper runs (the routes may be newer): the box, with why; a sound once
     lua.execute("time = function() return os.time() + ns.remind.Every + 1 end; ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is True
-    assert lua.eval("ForeverWowCraftReload.why.text") == "The helper has fetched routes from the site since; a reload loads them."
+    assert lua.eval("ForeverWowCraftReload.why.text") == "Reloading the UI allows for addons to update the client with new data."
     assert lua.eval("ForeverWowCraftReloadNow.text") == "Reload now"
     # a fight starts: the box goes, and is back as soon as it is over
     lua.execute("InCombatLockdown = function() return true end; ns.remind.Check()")
@@ -1687,7 +1689,7 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     assert lua.eval("ForeverWowCraftReload.shown") is False
     assert list(lua.eval("ns.remind.Reasons()").values()) == []
     lua.execute("ns.notedAt = time(); time = function() return os.time() + 6 * ns.remind.Every end; ns.remind.Check()")
-    assert lua.eval("ForeverWowCraftReload.why.text") == "What the addon noted since the last reload reaches the helper then." and lua.eval("ForeverWowCraftReload.shown") is True
+    assert lua.eval("ForeverWowCraftReload.why.text") == "Reloading the UI allows for addons to update the client with new data." and lua.eval("ForeverWowCraftReload.shown") is True
     assert lua.eval("ForeverWowCraftReload.title.text").endswith("reload to update addon data")
     assert "vendor" not in lua.eval("ForeverWowCraftReload.why.text") and "place" not in lua.eval("ForeverWowCraftReload.why.text")
     # off, by the box's own button: no more; on again by the command; the options page has the switch
@@ -1710,3 +1712,52 @@ def test_the_window_says_which_camp_object_the_route_makes():
     lua.execute("ns.ToggleWindow()")
     text = lua.eval("ForeverWowCraftWindow.notice.text") if lua.eval("ForeverWowCraftWindow.notice") is not None else lua.globals().AllText()
     assert "At your camp:" in text and "makes Tanning Rack once, from skill 44" in text
+
+
+def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_says_so():
+    """The site's planner keeps the two next-best recipes of each stretch (step.alt). A step whose
+    scroll asks for a character level the character lacks is swapped for the first that fits:
+    the Make button makes it, the tooltip says for which, the /fwc window lists it "instead of";
+    none fitting, the stretch is blocked and both say so. The box "Routes for my level" turns it
+    off (8 Nov 2026: a player below 45 sent for Recipe: Elixir of Intellect)."""
+    doc = document()
+    shirt = doc["plans"]["tailoring-trainer"]["steps"][1]
+    shirt["learn"] = [6000, 500, 45]                                          # Pattern: White Linen Shirt asks for level 45
+    shirt["alt"] = [{"recipe": "Simple Linen Boots", "spell": 2386, "uses": [[2996, 2], [2320, 1]], "makes": [2577, 1], "per": [1] * 10,
+                     "crafts": 10, "at": [1, 45, 55, 65], "cpp": 300, "buy": [2320], "craft": [2996], "learn": [6001, 300, 50]},
+                    {"recipe": "Linen Belt", "spell": 3915, "uses": [[2996, 1], [2320, 1]], "makes": [4309, 1], "per": [1] * 10,
+                     "crafts": 10, "at": [1, 45, 55, 65], "cpp": 400, "buy": [2320], "craft": [2996]}]
+    doc["items"].update({"6000": "Pattern: White Linen Shirt", "6001": "Pattern: Simple Linen Boots", "2577": "Simple Linen Boots", "4309": "Linen Belt"})
+    lua = _game(doc)
+    lua.execute('''
+      learned = { [2963] = true, [2386] = true, [3915] = true }
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function() return {} end, CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      UnitLevel = function() return 30 end
+      skill = 44; bags[0] = { { 2996, 40 }, { 2320, 20 } }; money = 100000
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    text = lambda: strip(lua.eval("ForeverWowCraftMake.verdict.text"))  # noqa: E731
+    tips = lambda: [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]  # noqa: E731
+    # level 30: the shirt (45) and the boots (50) are out of reach, the belt stands in
+    assert text() == "Make 7 Linen Belt" and any("Linen Belt stands in for White Linen Shirt, which asks for character level 45: about 4s 00c a skill point." in t for t in tips())
+    lua.execute("ns.ToggleWindow()")
+    assert "Linen Belt  |cff808080instead of White Linen Shirt|r" in lua.globals().AllText() and "no recipe at your level" not in lua.globals().AllText()
+    # the belt too asks for more than the character has: nothing fits, and both say so
+    lua.execute('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[2].alt[2].level = 40; Fire("BAG_UPDATE_DELAYED"); ns.RefreshWindow()')
+    assert text() == "Needs a higher level for skill 44 to 51" and lua.eval("ForeverWowCraftMake.mode") == "Needs"
+    assert any("No recipe of the route fits at character level 30 for skill 44 to 51: White Linen Shirt asks for level 45, and so do the 2 next best." in t for t in tips())
+    assert "no recipe at your level for skill 44 - 51: White Linen Shirt asks for level 45" in lua.globals().AllText()
+    # a level gained: the belt again; at 45 the shirt itself, to buy
+    lua.execute('UnitLevel = function() return 40 end; Fire("PLAYER_LEVEL_UP")')
+    assert text() == "Make 7 Linen Belt"
+    lua.execute('UnitLevel = function() return 45 end; Fire("PLAYER_LEVEL_UP")')
+    assert text() == "Buy the recipe for White Linen Shirt first"
+    # the box off: the route as planned, whatever the level
+    lua.execute('UnitLevel = function() return 30 end; FWCS_DB.__ui.levelRoutes = false; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Needs level 45 for White Linen Shirt"

@@ -25,9 +25,9 @@ local function Tip(self)
   elseif sc.Running() then
     GameTooltip:AddLine("Recording the auction house's prices. Keep the auction house open; it takes a moment.", 1, 1, 1, true)
   elseif sc.CooldownLeft() > 0 then
-    GameTooltip:AddLine(string.format("The auction house can be read once every 15 minutes%s. Next in %s%s.%s",
+    GameTooltip:AddLine(string.format("The auction house can be read once every 15 minutes%s. Next in %s%s.",
       sc.AutoScanEnabled() and ", by itself when it is open" or "", sc.Clock(sc.CooldownLeft()),
-      sc.CooldownKnown() and "" or " at the latest", sc.CooldownKnown() and "" or " Shift-click tries now."), 1, 1, 1, true)
+      sc.CooldownKnown() and "" or " at the latest"), 1, 1, 1, true)
   else
     GameTooltip:AddLine("Click to record the auction house's prices. Only AH pricing information is sent to "
       .. "foreverwowcraft.com. Thanks for helping the community by running and saving a scan!", 1, 1, 1, true)
@@ -94,7 +94,7 @@ Button = function()
   button:SetScript("OnClick", function()
     local sc = Scanner()
     if sc.Dirty() then sc.Reload()
-    elseif not sc.Running() and (sc.CooldownLeft() <= 0 or IsShiftKeyDown and IsShiftKeyDown()) then sc.StartSnapshot(IsShiftKeyDown and IsShiftKeyDown() or false) end
+    elseif not sc.Running() and sc.CooldownLeft() <= 0 then sc.StartSnapshot(false) end       -- no shift-click past the cooldown (the user, 8 Nov 2026)
   end)
   button:SetScript("OnEnter", Tip)
   button:SetScript("OnLeave", GameTooltip_Hide)
@@ -197,6 +197,11 @@ local function BuildOptions()
       .. "'other characters' button in the window is the same switch.",
       function() return saved().alts ~= false end,
       function(v) saved().alts = v; if ns.RefreshWindow then ns.RefreshWindow() end end),
+    CheckBox(page, Next(54), "Routes for my level",
+      "A recipe whose scroll asks for a higher character level than yours is swapped for the next best recipe of that "
+      .. "stretch, as the site does when you type your level. Where none fits, the Make button and the /fwc window say so.",
+      function() return saved().levelRoutes ~= false end,
+      function(v) saved().levelRoutes = v; if ns.RefreshWindow then ns.RefreshWindow() end; if ns.RoutePicked then ns.RoutePicked() end end),
     CheckBox(page, Next(76), "A reminder to reload, every 15 minutes",
       "A small box at the top of the screen with a Reload now button, when there is something to save "
       .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
@@ -252,7 +257,7 @@ local function BuildOptions()
   panel.OnCommit = function() end
   panel.OnDefault = function(self)                 -- the Settings window's Defaults button: the shipped defaults again
     local s = saved()
-    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "remind" }) do s[key] = nil end
+    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "remind" }) do s[key] = nil end
     self:refresh()
     Scanner().Refresh()
   end

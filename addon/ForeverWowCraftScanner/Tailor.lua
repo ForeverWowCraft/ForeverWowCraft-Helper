@@ -37,7 +37,7 @@ function ns.Tailor(plan, skill, have, upto)
   upto = math.min(upto or plan.target, plan.target)
   local own, stock, known = {}, {}, {}     -- what is left of `have`; made and not used yet; item -> how an earlier step makes it
   for item, units in pairs(have or {}) do own[item] = units end
-  local out = { from = skill, to = upto, steps = {}, buy = {}, make = {}, how = {}, used = {}, sell = {}, learn = {},
+  local out = { from = skill, to = upto, steps = {}, buy = {}, make = {}, how = {}, used = {}, sell = {}, learn = {}, blocked = {},
                 spent = 0, sold = 0, crafts = 0, unpriced = 0 }
 
   local function Get(item, need, step, depth)
@@ -71,7 +71,10 @@ function ns.Tailor(plan, skill, have, upto)
   end
 
   for _, step in ipairs(plan.steps) do
-    local crafts = ns.CraftsLeft(step, skill, upto)
+    local crafts = step.blocked and 0 or ns.CraftsLeft(step, skill, upto)
+    if step.blocked and skill < step.to and step.from < upto then              -- nothing fits at the character's level (ns.Effective)
+      table.insert(out.blocked, { from = math.max(skill, step.from), to = math.min(upto, step.to), step = step })
+    end
     if crafts > 0 then
       if step.learn and skill <= step.from then
         local owned = (own[step.learn[1]] or 0) > 0
@@ -96,5 +99,66 @@ function ns.Tailor(plan, skill, have, upto)
       out.sold = out.sold + units * ((plan.sell and plan.sell[item]) or 0)
     end
   end
+  return out
+end
+
+-- ================================================================ the route at the character's level
+-- A step whose recipe the character cannot learn yet (its scroll asks for a character level: the
+-- client's word, else the route's) is swapped for the first of the step's next-best recipes
+-- (step.alt, the site's planner: the two cheapest other recipes for that stretch) that fits and
+-- is not grey before the stretch starts; none fitting, the step is blocked and says so. The plan
+-- comes back with its steps resolved and the rest shared, the same table while nothing changed
+-- (a player below 45 was sent for Recipe: Elixir of Intellect, 8 Nov 2026). The box "Routes for
+-- my level" in Interface > AddOns turns it off.
+local cache = setmetatable({}, { __mode = "k" })
+local function Asks(rec)
+  local learn = rec.learn
+  local live = learn and ns.NoteRecipeLevel and ns.NoteRecipeLevel(learn[1])
+  return live or (learn and learn[3]) or rec.level
+end
+local function Fits(rec, from, mine)
+  local need = Asks(rec)
+  if need and need > mine then return false, need end
+  if rec.at and rec.at[4] and rec.at[4] <= from then return false end        -- grey before the stretch: no point from it
+  return true, need
+end
+function ns.Effective(plan)
+  if not plan or not plan.steps then return plan end
+  if ns.Settings and ns.Settings().levelRoutes == false then return plan end
+  local mine = UnitLevel and UnitLevel("player")
+  if not mine then return plan end
+  local steps, sig, changed = {}, tostring(mine), false
+  for _, step in ipairs(plan.steps) do
+    local ok, need = Fits(step, step.from, mine)
+    if ok then
+      table.insert(steps, step)
+    else
+      local picked
+      for _, alt in ipairs(step.alt or {}) do
+        if Fits(alt, step.from, mine) then picked = alt; break end
+      end
+      local out = {}
+      for k, v in pairs(step) do out[k] = v end
+      if picked then
+        for k, v in pairs(picked) do out[k] = v end
+        out.instead, out.asks = step.recipe, need
+      else
+        out.blocked, out.asks = true, need
+      end
+      out.alt, out.others = nil, #(step.alt or {})
+      table.insert(steps, out)
+      sig = sig .. "|" .. step.from .. ":" .. tostring(picked and picked.spell or "x")
+      changed = true
+    end
+  end
+  local hit = cache[plan]
+  if hit and hit.sig == sig then return hit.plan end
+  local out = plan
+  if changed then
+    out = {}
+    for k, v in pairs(plan) do out[k] = v end
+    out.steps, out.source = steps, plan
+  end
+  cache[plan] = { sig = sig, plan = out }
   return out
 end

@@ -250,7 +250,7 @@ end
 -- arrived on this client (account-wide, wall-clock, so it holds across characters and logins).
 -- A request nothing came of means a cooldown is running that this client did not see start
 -- (another PC, or before the addon was installed): lastFullRefused holds it, and the button
--- stays off until 15 minutes after it at the latest. Shift-click tries sooner.
+-- stays off until 15 minutes after it at the latest (no shift-click past it since 1.6.23: the user).
 local function FullCooldownLeft()
   local s = Settings()
   local since = math.max(s.lastFull or 0, s.lastFullRefused or 0)
@@ -561,7 +561,7 @@ ui:SetScript("OnMouseUp", function(self, button)
       DoReload()
     elseif ui.mode == "scan" and button == "LeftButton" then
       if state.listIndex == 1 then
-        if not ui.disabled or IsShiftKeyDown() then StartSnapshot(IsShiftKeyDown()) end
+        if not ui.disabled then StartSnapshot(false) end
       else
         StartScan(QueueNames()[state.listIndex - 1])
       end
@@ -1008,7 +1008,7 @@ StartSnapshot = function(force)
   if next(wanted) == nil then Print("no queued lists (run fwch.py lists, then /reload)"); return end
   local left = FullCooldownLeft()
   if left > 0 and not force then
-    Print(string.format("full snapshot is on its 15-minute cooldown for another %s (shift-click FULL or '/fwcs full force' to try anyway)", FormatClock(left)))
+    Print(string.format("full snapshot is on its 15-minute cooldown for another %s", FormatClock(left)))
     return
   end
   Begin("snapshot", CountKeys(wanted))
@@ -1094,11 +1094,11 @@ StartSnapshot = function(force)
         -- looks the same. Either way the button rests, since the server may have started one.
         Print(string.format("no auction list arrived in %d s, and the auction house was closed while it was awaited: a closed "
           .. "house gets no answer, as far as is known. Next time keep the house open until \"snapshot finished\". FULL stays "
-          .. "off for up to 15 minutes in case the server started its cooldown; shift-click it to try sooner.", FULL_TIMEOUT))
+          .. "off for up to 15 minutes in case the server started its cooldown.", FULL_TIMEOUT))
       else
         Print(string.format("no auction list arrived in %d s: the snapshot is on its 15-minute cooldown, started by something this "
           .. "client did not see (another PC, or before the addon was installed). FULL stays off for up to 15 minutes; "
-          .. "shift-click it to try sooner. Use a per-list SCAN meanwhile.", FULL_TIMEOUT))
+          .. "Use a per-list SCAN meanwhile.", FULL_TIMEOUT))
       end
       Finish("failed (no data)")
     end
@@ -1122,13 +1122,15 @@ local function Drop(reason)
   UpdateStatus()
 end
 
+-- (said in the bar's log, not in chat: a player who closes the house while the snapshot is
+-- awaited has nothing to do about it, and the words in chat were noise; the user, 8 Nov 2026)
 local function SnapshotHouseClosed()
   state.readAway = true
   if state.reading then
-    Print(string.format("the auction house closed while the snapshot is read (%s of %s auctions): reading on",
+    Log(string.format("the auction house closed while the snapshot is read (%s of %s auctions): reading on",
       FormatLargeNumber(state.readAt or 0), FormatLargeNumber(state.readTotal or 0)))
   else
-    Print("the auction house closed while the snapshot is awaited: it is read if the server still answers; if nothing comes, FULL waits the cooldown")
+    Log("the auction house closed while the snapshot is awaited: it is read if the server still answers; if nothing comes, FULL waits the cooldown")
   end
 end
 
@@ -1164,11 +1166,11 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
       -- and waiting the 120 s out kept the button at "Scanning..." on the reopened house (6 Nov
       -- 2026). Let go at once, and the server's cooldown taken to run from the ask: whether it
       -- does is not known (the user, 6 Nov 2026: the first ask most likely starts it), and a
-      -- shift-click on the button, or /fwcs full force, tries sooner for whoever wants to see
+      -- /fwcs full force tries sooner, for a test (the shift-click that did went in 1.6.23)
       Settings().lastFullRefused = state.askedAt or time()
       ArmReadyAlert()
       Drop(string.format("the snapshot awaited was lost with the window: a closed house gets no answer, and the cooldown runs from the ask. "
-        .. "Prices in %s at the latest; shift-click the button to try sooner.", FormatClock(FullCooldownLeft())))
+        .. "Prices in %s at the latest.", FormatClock(FullCooldownLeft())))
     end
     if state.ahOpen then
       local was = Faction()
@@ -1229,7 +1231,7 @@ ns.scanner = {
   Open = function() return state.ahOpen end,
   CooldownLeft = FullCooldownLeft, CooldownKnown = FullCooldownKnown, Clock = FormatClock,
   HasLists = function() return #QueueNames() > 0 end,
-  StartSnapshot = function(force) StartSnapshot(force == true) end,       -- force: a shift-click, past the cooldown
+  StartSnapshot = function(force) StartSnapshot(force == true) end,       -- force: past the cooldown (/fwcs full force, a test's)
   Reload = DoReload,
   ResetBar = function() Settings().pos = nil; RestorePosition() end,
   BarHidden = BarHidden, AutoScanEnabled = AutoScanEnabled, AlertEnabled = AlertEnabled, ReadyAlertEnabled = ReadyAlertEnabled,

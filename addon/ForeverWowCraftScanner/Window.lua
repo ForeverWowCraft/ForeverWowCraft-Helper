@@ -624,6 +624,8 @@ end
 
 -- the route of a profession: the variant picked, or the first it has; with its companion where
 -- that changes it. Returns the plan, the companion, and whether the plan counts it
+local function Effective(plan) return ns.Effective and ns.Effective(plan) or plan end     -- the route at the character's level (Tailor.lua)
+
 local function RouteOf(house, by, profession)
   local s = ns.Settings()
   local variants = by[profession or ""] or {}
@@ -635,7 +637,7 @@ local function RouteOf(house, by, profession)
   end
   local also = profession and Companion(profession, by)
   local with = WithCompanion(house, plan, also)
-  return with or plan, also, with ~= nil
+  return Effective(with or plan), also, with ~= nil
 end
 
 -- the plan to show: { plan, by, names, also = companion or nil, applied = whether the plan counts it }
@@ -813,7 +815,10 @@ local function Fill(house, chosen)
 
   if #mine.steps > 0 then Head("Route", "", "", "Crafts", "Skill") end
   for _, s in ipairs(mine.steps) do
-    Line(RecipeName(s.step), "", "", s.crafts, s.from .. " - " .. s.to, s.step.makes and s.step.makes[1])
+    Line(RecipeName(s.step) .. (s.step.instead and ("  |cff808080instead of " .. s.step.instead .. "|r") or ""), "", "", s.crafts, s.from .. " - " .. s.to, s.step.makes and s.step.makes[1])
+  end
+  for _, b in ipairs(mine.blocked or {}) do                 -- nothing fits at the character's level (ns.Effective)
+    Line(string.format("|cffff6060no recipe at your level for skill %d - %d: %s asks for level %s|r", b.from, b.to, RecipeName(b.step), tostring(b.step.asks or "?")))
   end
   for _, gap in ipairs(plan.gaps or {}) do
     if gap[2] > from and gap[1] < upto then Line(string.format("|cffff6060no recipe with a price for skill %d - %d|r", math.max(from, gap[1]), gap[2])) end

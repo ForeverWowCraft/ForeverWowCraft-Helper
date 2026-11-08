@@ -54,7 +54,7 @@ end
 
 local function Build()
   box = CreateFrame("Frame", "ForeverWowCraftReload", UIParent, "BackdropTemplate")
-  box:SetSize(400, 64)
+  box:SetSize(560, 64)
   box:SetPoint("TOP", UIParent, "TOP", 0, -140)
   box:SetFrameStrata("DIALOG")
   if box.SetBackdrop then
@@ -64,13 +64,13 @@ local function Build()
   box:EnableMouse(true)
   box.title = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   box.title:SetPoint("TOPLEFT", 14, -12)
-  box.title:SetWidth(252)                    -- short of the buttons: the title ran under them (the user, 7 Nov 2026)
+  box.title:SetWidth(412)                    -- short of the buttons: the title ran under them (the user, 7 Nov 2026); wide enough for its words (8 Nov)
   box.title:SetJustifyH("LEFT")
   box.title:SetWordWrap(false)
   box.title:SetText("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: reload to update addon data")
   box.why = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   box.why:SetPoint("TOPLEFT", box.title, "BOTTOMLEFT", 0, -4)
-  box.why:SetWidth(252)
+  box.why:SetWidth(412)
   box.why:SetJustifyH("LEFT")
   box.why:SetWordWrap(true)
   box.why:SetTextColor(0.78, 0.78, 0.78)      -- not the template's white: the words say what the reload does, softly (the user, 8 Nov 2026)
@@ -106,7 +106,7 @@ end
 
 local function Show(reasons)
   if not box then Build() end
-  box.why:SetText(table.concat(reasons, ". ") .. ".")
+  box.why:SetText("Reloading the UI allows for addons to update the client with new data.")     -- the reasons decide when, not what is said (the user, 8 Nov 2026)
   if not box:IsShown() then
     box:Show()
     if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPEN then PlaySound(SOUNDKIT.IG_MAINMENU_OPEN, "Master") end

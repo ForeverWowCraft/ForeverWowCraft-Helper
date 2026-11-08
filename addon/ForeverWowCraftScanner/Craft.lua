@@ -373,7 +373,7 @@ end
 
 local frame = CreateFrame("Frame")
 for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_CLOSE",
-                         "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY",
+                         "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY", "PLAYER_LEVEL_UP",
                          "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "ITEM_DATA_LOAD_RESULT",
                          "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }) do
   pcall(frame.RegisterEvent, frame, event)

@@ -24,10 +24,13 @@ local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
 function ns.NextCraft(plan, skill, have, upto)
   local step, left
   for _, s in ipairs(plan.steps or {}) do
-    left = ns.CraftsLeft(s, skill)
+    left = s.blocked and ((s.to > skill) and 1 or 0) or ns.CraftsLeft(s, skill)
     if left > 0 then step = s; break end
   end
   if not step then return nil end
+  if step.blocked then                   -- nothing of the stretch fits at the character's level (ns.Effective)
+    return { blocked = true, step = step, from = math.max(skill, step.from), to = step.to, asks = step.asks }
+  end
   -- `upto` (the skill the gold reaches, ns.BudgetReach) cuts the step: a point at least
   local from = math.max(skill, step.from)
   local to = math.min(step.to, math.max(upto or step.to, from + 1))
@@ -295,7 +298,7 @@ local function Shopping()
   if not skill then return {} end             -- a profession the character does not have: nothing to buy for it
   local bags = Bags(plan)
   local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
-  if not nxt then return {} end
+  if not nxt or nxt.blocked then return {} end
   local out = ShoppingOf(plan, nxt, c.tolearn)
   local t = c.tool
   if type(t) == "table" and t.item and (ns.inv.Count(t.item) or 0) == 0 then        -- the tool the step lacks, first
@@ -452,6 +455,19 @@ local function VerdictOf(given)
   local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
   if not nxt then
     return { text = string.format("Route done at skill %d", skill), tip = { tip[1], string.format("The route ends at %d.", plan.target) } }
+  end
+  if nxt.blocked then                    -- no recipe of the stretch can be learned at the character's level (ns.Effective)
+    local mine = UnitLevel and UnitLevel("player") or 0
+    table.insert(tip, string.format("No recipe of the route fits at character level %d for skill %d to %d: %s asks for level %s%s. Level up, or learn one later; the route goes on after this stretch.",
+      mine, nxt.from, nxt.to, ns.RecipeName(nxt.step), tostring(nxt.asks or "?"),
+      (nxt.step.others or 0) > 0 and string.format(", and so %s the %d next best", nxt.step.others > 1 and "do" or "does", nxt.step.others) or ""))
+    local text = (nxt.step.others or 0) > 0 and string.format("Needs a higher level for skill %d to %d", nxt.from, nxt.to)
+      or string.format("Needs level %s for %s", tostring(nxt.asks or "?"), ns.RecipeName(nxt.step))       -- no next best to fall back on: the recipe's own words
+    return { text = text, tip = tip, profession = profession, show = true }
+  end
+  if nxt.step.instead then               -- the next best stands in for a recipe the character cannot learn yet
+    table.insert(tip, string.format("%s stands in for %s, which asks for character level %d: about %s a skill point.",
+      ns.RecipeName(nxt.step), nxt.step.instead, nxt.step.asks or 0, ns.Money(nxt.step.cpp or 0)))
   end
   if nxt.capped then table.insert(tip, string.format("Only as far as the gold goes (the box in the /fwc window): this step is cut at skill %d.", nxt.to)) end
   -- the next rank (Journeyman at 75, Expert at 150, Artisan at 225) can be trained from 25
