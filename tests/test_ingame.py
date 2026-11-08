@@ -778,6 +778,9 @@ def test_the_seed_knows_the_vanilla_world():
     # by Stormwind's tailoring shop: its artisan trainer, a few yards off, with the seed's map size
     p, d, here = lua.eval('ns.NearestPlace("trainer", "tailoring", nil, 200)')
     assert p.name == "Georgio Bolero" and p.seed is True and d < 20 and here is True
+    # the trainer of the rank asked for, not the nearest that teaches further: Forever's trainers teach their own band
+    # (a tailor of 120 sent to the artisan's found nothing, 8 Nov 2026): 120 is Sellandus's, 60 Lawrence Schneider's, 160 Georgio's
+    assert [lua.eval(f'(ns.NearestPlace("trainer", "tailoring", nil, {n}))').name for n in (60, 120, 160)] == ["Lawrence Schneider", "Sellandus", "Georgio Bolero"]
     # a trainer that teaches further than any in the city is sought elsewhere
     found = lua.eval('ns.NearestPlace("trainer", "tailoring", nil, 290)')
     assert found is None or found[0].name != "Georgio Bolero"
@@ -1183,9 +1186,10 @@ def test_a_trainer_that_says_how_far_it_teaches_comes_first_for_a_rank():
     # ask for (a specialist's recipes at 240 are not a rank); the seed knows the names
     lua.execute('services = { "Brown Linen Vest", "Expert Tailoring" }; skillreq = { "Tailoring", "Tailoring" }; '
                 'GetTrainerServiceSkillReq = function(i) return skillreq[i], 240 end; Fire("TRAINER_SHOW")')
-    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 100))').upto == 225
+    # (asked past 200: the far one no longer fits, and the near one says 225; asked 100, the far one's lower reach comes first since 1.6.24)
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 201))').upto == 225 and lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 100))').upto == 200
     lua.execute('services = { "Expertenschneiderei" }; skillreq = { "Tailoring" }; Fire("TRAINER_SHOW")')
-    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 100))').upto == 225
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 201))').upto == 225
 
 
 # ---- what the list and the arrow serve: a profession the character has --------------------------------

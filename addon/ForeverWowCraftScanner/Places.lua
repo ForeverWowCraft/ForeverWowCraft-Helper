@@ -340,6 +340,15 @@ end
 function ns.NearestPlace(kind, what, item, upto)
   local map, x, y = Here()
   local mine = Mine()
+  -- Asked how far: the trainer of that rank before one that teaches further, then the nearer.
+  -- Forever's trainers teach their own rank's band (Stormwind: Lawrence Schneider to 75,
+  -- Sellandus to 150, Georgio Bolero to 225): a tailor of 120 sent to the artisan's found
+  -- nothing to learn there (8 Nov 2026)
+  local function Better(p, d, bp, bd)
+    if not bp then return true end
+    if upto ~= nil and (p.upto or 0) ~= (bp.upto or 0) then return (p.upto or 0) < (bp.upto or 0) end
+    return Nearer(d, p, bd, bp)
+  end
   -- asked how far (a rank to train): a trainer that says it teaches that far comes first, on
   -- this map or another (the nearest through the world: Far); one that does not say (noted
   -- before the addon kept that, 11 Oct 2026: it led to the apprentice trainer) is a last
@@ -353,14 +362,14 @@ function ns.NearestPlace(kind, what, item, upto)
         if map and p.map == map then
           local d = Distance(map, p.x, p.y, x, y) or (math.abs(p.x - x) + math.abs(p.y - y)) * 100000
           if fits then
-            if not best or d < bestD then best, bestD = p, d end
+            if Better(p, d, best, bestD) then best, bestD = p, d end
           elseif not maybe or d < maybeD then
             maybe, maybeD = p, d
           end
         else
           local d = map and Far(map, x, y, p.map, p.x, p.y) or nil
           if fits then
-            if Nearer(d, p, otherD, other) then other, otherD = p, d end
+            if Better(p, d, other, otherD) then other, otherD = p, d end
           elseif Nearer(d, p, maybeOtherD, maybeOther) then
             maybeOther, maybeOtherD = p, d
           end

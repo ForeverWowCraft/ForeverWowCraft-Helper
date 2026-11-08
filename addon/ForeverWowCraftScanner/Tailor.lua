@@ -70,13 +70,15 @@ function ns.Tailor(plan, skill, have, upto)
     out.buy[item] = (out.buy[item] or 0) + need
   end
 
+  local recipes = {}                      -- the recipes to buy, once each: a bought recipe's every stretch carries it
   for _, step in ipairs(plan.steps) do
     local crafts = step.blocked and 0 or ns.CraftsLeft(step, skill, upto)
     if step.blocked and skill < step.to and step.from < upto then              -- nothing fits at the character's level (ns.Effective)
       table.insert(out.blocked, { from = math.max(skill, step.from), to = math.min(upto, step.to), step = step })
     end
     if crafts > 0 then
-      if step.learn and skill <= step.from then
+      if step.learn and skill <= step.from and not recipes[step.learn[1]] then
+        recipes[step.learn[1]] = true
         local owned = (own[step.learn[1]] or 0) > 0
         table.insert(out.learn, { item = step.learn[1], cost = step.learn[2], owned = owned })
         if not owned then out.spent = out.spent + step.learn[2] end
