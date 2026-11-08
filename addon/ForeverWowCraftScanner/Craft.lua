@@ -55,7 +55,7 @@ local function Aside(v)
     elseif here then detail = a.place[4] .. who
     else detail = string.format("%s%s, in %s", a.place[4], who, ns.places.MapName(p.map)) end
   else
-    detail = "no " .. a.place[4]:lower() .. " seen yet that teaches it"
+    detail = a.place[1] == "trainer" and ("no " .. a.place[4]:lower() .. " seen yet that teaches it") or ("no " .. a.place[4]:lower() .. " known yet")
   end
   if a.cap then detail = string.format("%s (from skill %d; the cap is %d)", detail, a.from, a.cap) end
   return { text = a.text, detail = detail }
@@ -69,16 +69,17 @@ local function Point(v, by)
     local p, d, here = ns.NearestPlace(v.place[1], v.place[2], v.place[3], v.place[5])
     if p then
       local title = v.place[4]
-      if p.name and (p.kind == "vendor" or p.kind == "trainer") then title = title .. ": " .. p.name end
+      if p.name and (p.kind == "vendor" or p.kind == "trainer" or p.kind == "quest") then title = title .. ": " .. p.name end
       v.target, v.title = p, title
       pointed = { target = p, title = title, note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn, rank = v.rank }
       table.insert(v.tip, here and (d and string.format("The arrow points at the nearest: %s, %d yd.", title, math.floor(d + 0.5)) or "The arrow points at the nearest: " .. title .. ".")
         or string.format("The nearest seen is in %s: %s%s.", ns.places.MapName(p.map), title, d and string.format(", about %d yd as the crow flies", math.floor(d + 0.5)) or ""))
       ns.SetArrow(p, title, false, note, pointed.profession)
     else
-      local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1]
+      local what = v.place[1] == "station" and v.place[2]:lower() or v.place[1] == "auction" and "auctioneer" or v.place[1] == "quest" and "quest giver" or v.place[1]
       local how = v.place[1] == "station" and "open this panel at one" or v.place[1] == "trainer" and "open a trainer's window"
-        or v.place[1] == "vendor" and "open a merchant's window" or v.place[1] == "mailbox" and "open a mailbox" or "open the auction house"
+        or v.place[1] == "vendor" and "open a merchant's window" or v.place[1] == "mailbox" and "open a mailbox"
+        or v.place[1] == "quest" and "the tooltip says who gives it and where" or "open the auction house"
       table.insert(v.tip, string.format("No %s seen yet: %s, and the arrow points there from then on.", what, how))
       -- nothing of the kind known: the arrow stays, a question mark for a point, and says so
       pointed = { title = "No " .. what .. " seen yet", note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, learn = v.learn }

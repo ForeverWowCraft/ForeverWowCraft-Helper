@@ -141,16 +141,19 @@ def scan_from_document(doc: dict, source: Path | None = None) -> ScanData:
                     connected=[str(g) for g in group] if isinstance(group, list) else [])
 
 
-def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None = None) -> dict:
+def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None = None, recipes: dict[int, dict] | None = None) -> dict:
     """The vendors a helper's player has met, for the pipe (POST /v1/vendors): {"format",
     "helper", "vendors": {creature id: {name, map, x, y, t, faction, build, items: {item id:
     {price, stack, n, usable, t, cost?}}}}, "trainers": {creature id: {name, map, x, y, t,
     faction, build, skill, teaches: {service: the skill it asks for}}}} (the trainers since
-    helper 1.6.12). Nothing of the player: the vendor's name and where it stood, its wares and
-    their prices, the trainer's and what it teaches at which skill, when each was seen."""
+    helper 1.6.12), "recipes": {recipe item id: {level: the character level the scroll asks
+    for, t}} (since 1.6.22: a hotfix the public tables lack). Nothing of the player: the
+    vendor's name and where it stood, its wares and their prices, the trainer's and what it
+    teaches at which skill, what a scroll asks for, when each was seen."""
     return {"format": VENDORS_FORMAT, "helper": __version__,
             "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()},
-            "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()}}
+            "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()},
+            "recipes": {str(k): {"level": int(r["level"]), "t": int(r.get("t") or 0)} for k, r in (recipes or {}).items()}}
 
 
 def check_vendors(doc) -> str | None:
@@ -160,12 +163,21 @@ def check_vendors(doc) -> str | None:
     trainers = doc.get("trainers", {})
     if not isinstance(trainers, dict):
         return "trainers is not a table"
-    if not isinstance(doc.get("vendors"), dict) or not (doc["vendors"] or trainers):
+    recipes = doc.get("recipes", {})
+    if not isinstance(recipes, dict):
+        return "recipes is not a table"
+    if not isinstance(doc.get("vendors"), dict) or not (doc["vendors"] or trainers or recipes):
         return "no vendors"
     if len(doc["vendors"]) > 2000:
         return "too many vendors"
     if len(trainers) > 500:
         return "too many trainers"
+    if len(recipes) > 3000:
+        return "too many recipes"
+    for iid, row in recipes.items():
+        if not (isinstance(iid, str) and iid.isdigit()) or not isinstance(row, dict) or not isinstance(row.get("level"), int) \
+                or not 1 <= row["level"] <= 100 or not isinstance(row.get("t"), int):
+            return f"recipe {str(iid)[:20]!r}: not a level"
     for tid, t in trainers.items():
         if not (isinstance(tid, str) and 0 < len(tid) <= 80) or not isinstance(t, dict) or not isinstance(t.get("name"), str) or len(t["name"]) > 80:
             return f"trainer {tid!r} is not a trainer"
@@ -197,7 +209,7 @@ def check_vendors(doc) -> str | None:
 
 def mark_vendors(doc: dict) -> str:
     """What the sightings say, less the helper's version: "already sent" goes by it."""
-    return hashlib.sha256(json.dumps([doc["vendors"], doc.get("trainers", {})], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(json.dumps([doc["vendors"], doc.get("trainers", {}), doc.get("recipes", {})], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
 
 
 def lists_document(queue: dict[str, list[tuple[int, str]]]) -> dict:

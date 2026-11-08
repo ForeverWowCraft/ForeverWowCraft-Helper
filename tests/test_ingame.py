@@ -726,6 +726,26 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     # a panel showing a profession the site has no route for
     lua.execute('C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 164, skillLevel = 1 } end; Fire("TRADE_SKILL_SHOW")')
     assert text() == "No route for this profession"
+    # cooking at the Expert cap: no trainer teaches it, the Expert Cookbook does (a player at 150 first aid was told no trainer
+    # was known, 8 Nov 2026): the words name the book, the arrow leads to a seller the seed knows; at the Artisan cap, the quest
+    lua.execute('''
+      local cook = FWCS_PLANS["stonespine--horde"].plans["cooking-trainer"]
+      cook.target, cook.steps[1].to, cook.steps[1].crafts, cook.steps[1].per = 300, 300, 299, {}
+      for i = 1, 299 do cook.steps[1].per[i] = 1 end                  -- one recipe to 300, for the caps on the way
+      GetNumSkillLines = function() return 3 end                      -- the character cooks too
+      GetSkillLineInfo = function(i) if i == 1 then return "Professions", true elseif i == 2 then return "Tailoring", false, false, skill end return "Cooking", false, false, 150, 0, 0, 150 end
+      C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 185, professionName = "Cooking", skillLevel = 150, maxSkillLevel = 150 } end
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    tips = lambda: list(lua.eval("ForeverWowCraftMake.verdict.tip").values())  # noqa: E731
+    assert text() == "Buy Expert Cookbook first" and lua.eval("ForeverWowCraftMake.mode") == "Buy"
+    assert any("No trainer teaches Expert Cooking: it is the book Expert Cookbook, sold by Shandrina" in line for line in tips())
+    assert lua.eval("ForeverWowCraftMake.verdict.place[1]") == "vendor" and lua.eval("ForeverWowCraftMake.verdict.place[3]") == 16072
+    assert lua.eval("ForeverWowCraftMake.verdict.target.name") in ("Shandrina", "Wulan")
+    lua.execute('C_TradeSkillUI.GetBaseProfessionInfo = function() return { professionID = 185, professionName = "Cooking", skillLevel = 224, maxSkillLevel = 225 } end; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Learn Artisan Cooking by the quest Clamlette Surprise first" and lua.eval("ForeverWowCraftMake.mode") == "Learn"
+    assert lua.eval("ForeverWowCraftMake.verdict.place[1]") == "quest" and lua.eval("ForeverWowCraftMake.verdict.target.name") == "Dirge Quikcleave"
+    assert any("the quest Clamlette Surprise gives it, from Dirge Quikcleave in Gadgetzan" in line for line in tips())
 
 
 # ---- places and the arrow (Places.lua) --------------------------------------------------------
@@ -774,8 +794,8 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1658 that the addon came with" in lua.eval("printed[#printed - 1]")
-    assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services.")
+    assert "and 1662 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services; 0 recipe scroll(s) with the level each asks for.")
 
 
 def test_the_arrow_points_across_maps_on_one_continent():
@@ -896,6 +916,26 @@ def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
     lua.execute('money = 600; Fire("PLAYER_MONEY")')
     assert text() == "Buy the recipe for Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "vendor"   # not "Learn": a pattern, not a trainer's
     assert any("a pattern sold or dropped, not a trainer's" in line for line in tip()) and lua.eval("ForeverWowCraftMake.mode") == "Buy"
+    # the scroll asks for a character level the character lacks (the client's word, a hotfix the tables lack; a player
+    # below 45 sent for Recipe: Elixir of Intellect, 8 Nov 2026): the button says so, sends nobody to buy it, and the
+    # level seen is kept for the helper
+    lua.execute('''
+      UnitLevel = function() return 30 end
+      GetItemInfoInstant = function(id) if id == 6000 then return 6000, "Recipe", "Tailoring", "", 134939, 9, 2 end end
+      local was = C_Item.GetItemInfo
+      C_Item.GetItemInfo = function(id) if id == 6000 then return "Pattern: Brown Linen Vest", "", 1, 1, 45 end return was(id) end
+      Fire("BAG_UPDATE_DELAYED")
+    ''')
+    assert text() == "Needs level 45 for Brown Linen Vest" and lua.eval("ForeverWowCraftMake.mode") == "Needs" and lua.eval("ForeverWowCraftMake.verdict.shopping") is None
+    assert any("asks for character level 45, and this character is 30" in line for line in tip())
+    assert lua.eval("FWCS_DB.__recipes[6000].l") == 45
+    # at 45 the recipe is to buy again; without the client's word the route's own number (learn[3]) decides
+    lua.execute('UnitLevel = function() return 45 end; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Buy the recipe for Brown Linen Vest first"
+    lua.execute('GetItemInfoInstant = nil; FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].learn = { 6000, 500, 50 }; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Needs level 50 for Brown Linen Vest"
+    lua.execute('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].learn = { 6000, 500 }; UnitLevel = nil; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Buy the recipe for Brown Linen Vest first"
 
 
 def test_the_make_button_points_the_arrow_at_what_it_needs():
@@ -1610,7 +1650,7 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     # due, the helper runs (the routes may be newer): the box, with why; a sound once
     lua.execute("time = function() return os.time() + ns.remind.Every + 1 end; ns.remind.Check()")
     assert lua.eval("ForeverWowCraftReload.shown") is True
-    assert lua.eval("ForeverWowCraftReload.why.text") == "the routes may have changed on the site."
+    assert lua.eval("ForeverWowCraftReload.why.text") == "The helper has fetched routes from the site since; a reload loads them."
     assert lua.eval("ForeverWowCraftReloadNow.text") == "Reload now"
     # a fight starts: the box goes, and is back as soon as it is over
     lua.execute("InCombatLockdown = function() return true end; ns.remind.Check()")
@@ -1647,7 +1687,8 @@ def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     assert lua.eval("ForeverWowCraftReload.shown") is False
     assert list(lua.eval("ns.remind.Reasons()").values()) == []
     lua.execute("ns.notedAt = time(); time = function() return os.time() + 6 * ns.remind.Every end; ns.remind.Check()")
-    assert lua.eval("ForeverWowCraftReload.why.text") == "something noted, not yet saved." and lua.eval("ForeverWowCraftReload.shown") is True
+    assert lua.eval("ForeverWowCraftReload.why.text") == "What the addon noted since the last reload reaches the helper then." and lua.eval("ForeverWowCraftReload.shown") is True
+    assert lua.eval("ForeverWowCraftReload.title.text").endswith("reload to update addon data")
     assert "vendor" not in lua.eval("ForeverWowCraftReload.why.text") and "place" not in lua.eval("ForeverWowCraftReload.why.text")
     # off, by the box's own button: no more; on again by the command; the options page has the switch
     lua.execute("ForeverWowCraftReloadOff.scripts.OnClick(ForeverWowCraftReloadOff)")

@@ -26,6 +26,11 @@ FWCS_DB = {
 			},
 		},
 	},
+	["__recipes"] = {
+		[250389] = { ["l"] = 45, ["t"] = 1790000200 },
+		[7288] = { ["l"] = 1, ["t"] = 1790000200 },
+		["bad"] = { ["l"] = 45, ["t"] = 1790000200 },
+	},
 	["__trainers"] = {
 		[3363] = {
 			["name"] = "Drakk Stonehand",
@@ -94,6 +99,18 @@ def test_the_vendors_met_are_read_and_make_a_document_the_pipe_takes():
     assert pipe.check_vendors(bad) == "trainer 3363: 'Embossed Leather Gloves' is not a service"
     bad["trainers"]["3363"]["skill"] = ""
     assert pipe.check_vendors(bad) == "trainer 3363: no skill"
+    # the recipe scrolls looked at, with the character level each asks for (since 1.6.22: a hotfix the tables lack)
+    asked = scan.recipes(_saved())
+    assert asked == {250389: {"level": 45, "t": 1790000200}, 7288: {"level": 1, "t": 1790000200}}
+    full = pipe.vendors_document(seen, met, asked)
+    assert pipe.check_vendors(full) is None and full["recipes"] == {"250389": {"level": 45, "t": 1790000200}, "7288": {"level": 1, "t": 1790000200}}
+    assert pipe.check_vendors(pipe.vendors_document({}, {}, asked)) is None               # the scrolls alone are a document
+    assert pipe.mark_vendors(full) != pipe.mark_vendors(both) and both["recipes"] == {}
+    bad = pipe.vendors_document(seen, met, asked)
+    bad["recipes"]["250389"]["level"] = "45"
+    assert pipe.check_vendors(bad) == "recipe '250389': not a level"
+    bad["recipes"] = {"x": {"level": 45, "t": 1}}
+    assert pipe.check_vendors(bad) == "recipe 'x': not a level"
 
 
 def test_the_sightings_are_sent_when_they_changed():

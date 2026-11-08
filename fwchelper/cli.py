@@ -265,15 +265,17 @@ def wait_text(seconds: float) -> str:
 
 
 def send_vendors_once(p, path: Path | None = None) -> bool:
-    """Send the vendors and trainers the addon has seen (scan.vendors, scan.trainers), when
-    they changed since they were last sent: one document, the union of every sighting, kept
-    at the pipe per helper. Returns whether anything was sent."""
+    """Send the vendors and trainers the addon has seen (scan.vendors, scan.trainers) and the
+    levels the recipe scrolls asked for (scan.recipes), when they changed since they were last
+    sent: one document, the union of every sighting, kept at the pipe per helper. Returns
+    whether anything was sent."""
     file = path or (scan.find_saved_variables() or [None])[0]
     seen = scan.vendors(file) if file and file.suffix == ".lua" else {}
     met = scan.trainers(file) if file and file.suffix == ".lua" else {}
-    if not seen and not met:
+    asked = scan.recipes(file) if file and file.suffix == ".lua" else {}
+    if not seen and not met and not asked:
         return False
-    doc = pipemod.vendors_document(seen, met)
+    doc = pipemod.vendors_document(seen, met, asked)
     mark = pipemod.mark_vendors(doc)
     sent = json.loads(_sent_file().read_text(encoding="utf-8")) if _sent_file().exists() else {}
     if sent.get("__vendors") == mark:
@@ -284,6 +286,7 @@ def send_vendors_once(p, path: Path | None = None) -> bool:
     _sent_file().write_text(json.dumps(sent), encoding="utf-8")
     print(f"vendors sent: {len(doc['vendors'])} seen, {sum(len(v['items']) for v in doc['vendors'].values())} wares"
           + (f"; {len(met)} trainer(s), {sum(len(t['teaches']) for t in met.values())} services" if met else "")
+          + (f"; {len(asked)} recipe scroll(s) with the level each asks for" if asked else "")
           + ("" if answer.get("new", True) else " (the pipe had them)"))
     return True
 

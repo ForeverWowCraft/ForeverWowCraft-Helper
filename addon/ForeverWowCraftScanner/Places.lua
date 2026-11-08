@@ -130,7 +130,8 @@ local function Seeded()
   seeded, seededFrom = {}, rows
   for _, r in ipairs(rows) do
     local p = { map = r[1], x = r[2], y = r[3], kind = r[4], what = r[5], name = r[6], seed = true }
-    if type(r[7]) == "number" then p.upto = r[7] elseif type(r[7]) == "table" then p.sells = r[7] end
+    if type(r[7]) == "number" then p.upto = r[7] elseif type(r[7]) == "table" then p.sells = r[7]
+    elseif type(r[7]) == "string" then p.faction = r[7] end          -- a quest giver's faction
     table.insert(seeded, p)
   end
   return seeded
@@ -330,6 +331,7 @@ local function Mine()
   if f == "Alliance" or f == "Horde" then return f end
 end
 local function Reachable(p, mine)
+  if p.faction and mine and p.faction ~= mine then return false end     -- a quest giver of the other faction
   if not p.seed or not mine then return true end
   local side = FWCS_SEED and FWCS_SEED.sides and FWCS_SEED.sides[p.map]
   return side == nil or side == mine
@@ -605,7 +607,9 @@ function ns.PlacesCommand()
   local windows, wares, taught, services = 0, 0, 0, 0
   for _, v in pairs(FWCS_DB.__vendors or {}) do windows = windows + 1; for _ in pairs(v.items or {}) do wares = wares + 1 end end
   for _, t in pairs(FWCS_DB.__trainers or {}) do taught = taught + 1; for _ in pairs(t.teaches or {}) do services = services + 1 end end
-  print(PREFIX .. string.format("kept for the helper: %d merchant window(s), %d wares; %d trainer window(s), %d services.", windows, wares, taught, services))
+  local scrolls = 0
+  for _ in pairs(FWCS_DB.__recipes or {}) do scrolls = scrolls + 1 end
+  print(PREFIX .. string.format("kept for the helper: %d merchant window(s), %d wares; %d trainer window(s), %d services; %d recipe scroll(s) with the level each asks for.", windows, wares, taught, services, scrolls))
 end
 
 local frame = CreateFrame("Frame")

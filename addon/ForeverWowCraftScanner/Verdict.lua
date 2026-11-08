@@ -307,6 +307,24 @@ end
 
 -- the rank a cap ends, by the cap: what the trainer teaches next
 local RANKS = { [75] = "Journeyman", [150] = "Expert", [225] = "Artisan" }
+-- The ranks no trainer teaches, on Forever as in vanilla (wow-professions.com/forever, 8 Nov
+-- 2026; a player at 150 first aid was told no trainer was known): Expert First Aid and Expert
+-- Cooking are books two vendors sell (one a faction), Artisan First Aid and Artisan Cooking a
+-- quest at a doctor or a cook. The seed has the sellers and the quest givers (places.py).
+local RANKUPS = {
+  ["first-aid"] = {
+    [150] = { book = 16112, name = "Expert First Aid - Under Wraps", needs = 125,
+              where = "Deneb Walker in Stromgarde Keep, Arathi Highlands (Alliance) or Balai Lok'Wein in Brackenwall Village, Dustwallow Marsh (Horde), for 1g" },
+    [225] = { quest = "Triage", needs = 225, level = 35,
+              where = "Doctor Gustaf VanHowzen in Theramore Isle, Dustwallow Marsh (Alliance) or Doctor Gregory Victor in Hammerfall, Arathi Highlands (Horde)" },
+  },
+  cooking = {
+    [150] = { book = 16072, name = "Expert Cookbook", needs = 125,
+              where = "Shandrina at Mystral Lake, Ashenvale (Alliance) or Wulan in Shadowprey Village, Desolace (Horde), for 1g" },
+    [225] = { quest = "Clamlette Surprise", needs = 225, level = 35,
+              where = "Dirge Quikcleave in Gadgetzan, Tanaris (both factions)" },
+  },
+}
 local RANK_EARLY = 25                      -- the next rank is taught from this far below the cap
 
 -- What the button does now: { text, tip = { lines }, spell, crafts, to, line }; spell nil
@@ -444,14 +462,25 @@ local function VerdictOf(given)
   if cap and cap > 0 and cap < plan.target and skill >= cap - RANK_EARLY then
     local what = RANKS[cap] and (RANKS[cap] .. " " .. ns.Title(profession)) or ("the next rank of " .. ns.Title(profession))
     local place = { "trainer", profession, nil, ns.Title(profession) .. " trainer", cap + 1 }
+    local act, got = "Train " .. what, "trained"
+    local up = RANKUPS[profession] and RANKUPS[profession][cap]
+    if up and up.book then
+      act, got = "Buy " .. up.name, "learned from its book"
+      place = { "vendor", nil, up.book, "Seller of " .. up.name }
+      table.insert(tip, string.format("No trainer teaches %s: it is the book %s, sold by %s. The book asks for skill %d.", what, up.name, up.where, up.needs))
+    elseif up and up.quest then
+      act, got = "Learn " .. what .. " by the quest " .. up.quest, "earned by its quest"
+      place = { "quest", profession, nil, up.quest }
+      table.insert(tip, string.format("No trainer teaches %s: the quest %s gives it, from %s. It asks for skill %d and character level %d.", what, up.quest, up.where, up.needs, up.level))
+    end
     if skill >= cap - 1 then
       table.insert(tip, skill >= cap
-        and string.format("Skill %d is the cap: no craft gives a point until %s is trained.", skill, what)
-        or string.format("Skill %d: the next point reaches the cap. Train %s first.", skill, what))
-      return { text = "Train " .. what .. " first", tip = tip, profession = profession, rank = cap, place = place }
+        and string.format("Skill %d is the cap: no craft gives a point until %s is %s.", skill, what, got)
+        or string.format("Skill %d: the next point reaches the cap. %s first.", skill, act))
+      return { text = act .. " first", tip = tip, profession = profession, rank = cap, place = place }
     end
-    asideOf = { text = "Train " .. what, place = place, from = cap - RANK_EARLY, cap = cap }
-    table.insert(tip, string.format("%s can be trained from skill %d (the cap is %d): see the arrow's note.", what, cap - RANK_EARLY, cap))
+    asideOf = { text = act, place = place, from = cap - RANK_EARLY, cap = cap }
+    table.insert(tip, string.format("%s can be %s from skill %d (the cap is %d): see the arrow's note.", what, got, cap - RANK_EARLY, cap))
   end
   local step = nxt.step
   table.insert(tip, string.format("Step: %s, skill %d to %d, about %d crafts.", ns.RecipeName(step), nxt.from, nxt.to, nxt.crafts))
@@ -465,6 +494,16 @@ local function VerdictOf(given)
       local v = BuyVerdict(house, plan, nxt, step, tip, profession)
       asideOf = { text = "Then learn " .. ns.RecipeName(step) .. " at the trainer", place = trainer }
       return v
+    end
+    -- the scroll asks for a character level (the client's word first, the route's data else): short
+    -- of it the recipe cannot be learned, and the button says so instead of sending the player to
+    -- buy it (a player below 45 sent for Recipe: Elixir of Intellect, 8 Nov 2026)
+    local need = learn and ((ns.NoteRecipeLevel and ns.NoteRecipeLevel(learn[1])) or learn[3])
+    local mine = UnitLevel and UnitLevel("player")
+    if need and mine and need > mine then
+      table.insert(tip, string.format("%s asks for character level %d, and this character is %d: the recipe cannot be learned yet. The route for your level, on the site, leaves it out.", N(house, learn[1]), need, mine))
+      Char().tolearn = nil
+      return { text = string.format("Needs level %d for %s", need, ns.RecipeName(step)), tip = tip, profession = profession, show = true }
     end
     table.insert(tip, learn and string.format("The route buys the recipe, %s, for %s: a pattern sold or dropped, not a trainer's.", N(house, learn[1]), ns.Money(learn[2]))
       or "The trainer teaches it.")

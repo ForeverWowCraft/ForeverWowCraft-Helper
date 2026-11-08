@@ -622,9 +622,32 @@ local function LogProgress()
     state.skipped, state.deferrals, state.pages, FormatLargeNumber(state.listings)))
 end
 
+-- The character level a recipe scroll asks for, as this client shows it (a hotfix the public
+-- tables lack: Recipe: Elixir of Intellect asks for 45, 8 Nov 2026), kept in FWCS_DB.__recipes
+-- for the helper to send with the vendors met; nothing of the player in it. Looked at for
+-- every recipe item the scan meets, and for the recipe a route buys (Verdict.lua). Returns
+-- the level when the client has the item's data, else nil.
+function ns.NoteRecipeLevel(itemID)
+  if type(itemID) ~= "number" then return nil end
+  local instant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+  if not instant then return nil end
+  local ok, _, _, _, _, _, classID = pcall(instant, itemID)
+  if not ok or classID ~= 9 then return nil end                -- 9: a recipe
+  local info = C_Item and C_Item.GetItemInfo or GetItemInfo
+  if not info then return nil end
+  local ok2, _, _, _, _, minLevel = pcall(info, itemID)
+  if not ok2 or type(minLevel) ~= "number" then return nil end
+  local level = math.max(1, math.floor(minLevel))
+  FWCS_DB.__recipes = FWCS_DB.__recipes or {}
+  local row = FWCS_DB.__recipes[itemID]
+  if not row or row.l ~= level then FWCS_DB.__recipes[itemID] = { l = level, t = time() } end
+  return level
+end
+
 -- entry = { itemID, name, isCommodity?, assumedEmpty?, full?, attempts? }
 local function Record(entry, listings, complete, reason)
   dirty = true
+  ns.NoteRecipeLevel(entry.itemID)
   local total = 0
   for _, row in ipairs(listings) do total = total + row[2] end
   if complete then

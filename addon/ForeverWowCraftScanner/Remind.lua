@@ -30,11 +30,11 @@ local function Reasons()
   local out = {}
   local sc = Scanner()
   -- prices named; the rest of what the addon notes is not spelt out (the user, 6 Nov 2026)
-  if sc and sc.Dirty() then table.insert(out, "prices recorded, not yet saved")
-  elseif (ns.notedAt or 0) > loadedAt then table.insert(out, "something noted, not yet saved") end
+  if sc and sc.Dirty() then table.insert(out, "The prices you recorded reach the helper and the site at a reload")
+  elseif (ns.notedAt or 0) > loadedAt then table.insert(out, "What the addon noted since the last reload reaches the helper then") end
   -- the helper runs (it writes the routes as the site has them; a reload loads them): the routes
   -- may be newer than those on show
-  if FWCS_PLANS_WRITTEN then table.insert(out, "the routes may have changed on the site") end
+  if FWCS_PLANS_WRITTEN then table.insert(out, "The helper has fetched routes from the site since; a reload loads them") end
   return out
 end
 
@@ -67,12 +67,13 @@ local function Build()
   box.title:SetWidth(252)                    -- short of the buttons: the title ran under them (the user, 7 Nov 2026)
   box.title:SetJustifyH("LEFT")
   box.title:SetWordWrap(false)
-  box.title:SetText("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: reload to save")
+  box.title:SetText("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: reload to update addon data")
   box.why = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   box.why:SetPoint("TOPLEFT", box.title, "BOTTOMLEFT", 0, -4)
   box.why:SetWidth(252)
   box.why:SetJustifyH("LEFT")
   box.why:SetWordWrap(true)
+  box.why:SetTextColor(0.78, 0.78, 0.78)      -- not the template's white: the words say what the reload does, softly (the user, 8 Nov 2026)
   -- a secure button with a macro of its own, /reload: the game lets no addon call ReloadUI
   -- on Forever's client (the box showed and the button did nothing, two players, 6 Nov 2026),
   -- but a macro run by a click of a secure button it reloads for. The box goes with the click
@@ -105,7 +106,7 @@ end
 
 local function Show(reasons)
   if not box then Build() end
-  box.why:SetText(table.concat(reasons, "; ") .. ".")
+  box.why:SetText(table.concat(reasons, ". ") .. ".")
   if not box:IsShown() then
     box:Show()
     if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPEN then PlaySound(SOUNDKIT.IG_MAINMENU_OPEN, "Master") end

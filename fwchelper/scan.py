@@ -335,6 +335,29 @@ def trainers(path: Path | None = None) -> dict[int, dict]:
     return out
 
 
+def recipes(path: Path | None = None) -> dict[int, dict]:
+    """The recipe scrolls the addon looked at (FWCS_DB.__recipes, since addon 1.6.22): {item id:
+    {"level": the character level the scroll asks for, as the client showed it, "t"}}. A hotfix
+    the public tables lack (Recipe: Elixir of Intellect asks for 45, 8 Nov 2026). Empty without
+    the file or the table."""
+    if path is None:
+        found = find_saved_variables()
+        if not found:
+            return {}
+        path = found[0]
+    try:
+        data = luatable.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
+        return {}
+    db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    held = db.get("__recipes") if isinstance(db, dict) else None
+    out: dict[int, dict] = {}
+    for iid, row in (held.items() if isinstance(held, dict) else []):
+        if isinstance(iid, int) and isinstance(row, dict) and isinstance(row.get("l"), (int, float)) and 1 <= row["l"] <= 100:
+            out[iid] = {"level": int(row["l"]), "t": int(row.get("t") or 0)}
+    return out
+
+
 def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:
     """What a saved file holds: [(realm, faction, items, time of the newest scan)], the most
     recently scanned first."""

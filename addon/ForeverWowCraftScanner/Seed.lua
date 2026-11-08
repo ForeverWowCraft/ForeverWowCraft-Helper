@@ -1,14 +1,15 @@
 -- Where things are, to seed the addon's arrow (Places.lua reads it; foreverwowcraft/places.py
 -- writes it). DATA GENERATED FROM THE VMaNGOS WORLD DATABASE, github.com/vmangos/core,
 -- licensed under the GNU General Public License v2.0: this file is distributed under that
--- licence, as data, apart from the addon's own code (MIT). VMaNGOS database snapshot: db-sqlite-4641790.zip from https://github.com/vmangos/core/releases/download/db_latest/db-sqlite-4641790.zip; release Development Database Snapshot (2026-09-28), GPL-2.0
+-- licence, as data, apart from the addon's own code (MIT). VMaNGOS database snapshot: db-sqlite-4641790.zip from https://github.com/vmangos/core/releases/download/db_latest/db-sqlite-4641790.zip; release Development Database Snapshot (2026-09-28), GPL-2.0; and 0 vendor(s) and 1 trainer(s) of Forever met by players and shared through the pipe (0 new place(s))
 -- A row: { ui map, x, y (fractions of the map), kind, what, name, extra }; extra is how far
--- a trainer's rank training reaches (0: a specialist, recipes only), or the items a vendor sells.
+-- a trainer's rank training reaches (0: a specialist, recipes only), the items a vendor sells,
+-- or the faction a quest giver serves (kind quest: the rank quests of first aid and cooking).
 -- ranks: the rank training services by name, in every language, and the skill each reaches.
 -- world: the world rectangle a map covers (x grows north, y west), to measure between maps.
 FWCS_SEED = {
-  source = "VMaNGOS database snapshot: db-sqlite-4641790.zip from https://github.com/vmangos/core/releases/download/db_latest/db-sqlite-4641790.zip; release Development Database Snapshot (2026-09-28), GPL-2.0",
-  generated = 1794092654,
+  source = "VMaNGOS database snapshot: db-sqlite-4641790.zip from https://github.com/vmangos/core/releases/download/db_latest/db-sqlite-4641790.zip; release Development Database Snapshot (2026-09-28), GPL-2.0; and 0 vendor(s) and 1 trainer(s) of Forever met by players and shared through the pipe (0 new place(s))",
+  generated = 1794176468,
   sizes = {
     [1411] = { 5287, 3525 },
     [1412] = { 6154, 4102 },
@@ -641,6 +642,7 @@ FWCS_SEED = {
     { 1416, 0.8595, 0.7996, "vendor", "Zan Shivsproket", "Zan Shivsproket", { 7742 } },
     { 1416, 0.5357, 0.987, "vendor", "Zixil", "Zixil", { 5772, 6377, 7362, 7561 } },
     { 1417, 0.7386, 0.3311, "mailbox", "Mailbox" },
+    { 1417, 0.7341, 0.3689, "quest", "first-aid", "Doctor Gregory Victor", "Horde" },
     { 1417, 0.457, 0.9317, "station", "Anvil" },
     { 1417, 0.4675, 0.4679, "station", "Anvil" },
     { 1417, 0.7261, 0.3334, "station", "Anvil" },
@@ -1475,6 +1477,7 @@ FWCS_SEED = {
     { 1442, 0.4761, 0.6159, "vendor", "Jeeda", "Jeeda", { 6055 } },
     { 1442, 0.4539, 0.5933, "vendor", "Kulwia", "Kulwia", { 11039, 11101 } },
     { 1442, 0.7274, 0.049, "vendor", "Lardan", "Lardan", { 5973 } },
+    { 1442, 0.9009, 0.2526, "vendor", "Shandrina", "Shandrina", { 16072 } },
     { 1442, 0.9071, 0.2473, "vendor", "Ulthaan", "Ulthaan", { 3734, 5489 } },
     { 1442, 0.5822, 0.5174, "vendor", "Veenix", "Veenix", { 7561 } },
     { 1443, 0.2479, 0.6876, "mailbox", "Mailbox" },
@@ -1520,7 +1523,7 @@ FWCS_SEED = {
     { 1443, 0.5559, 0.565, "vendor", "Muuran", "Muuran", { 10858 } },
     { 1443, 0.4049, 0.7934, "vendor", "Super-Seller 680", "Super-Seller 680", { 3734, 4609, 12227, 12229, 12233, 12239 } },
     { 1443, 0.603, 0.3819, "vendor", "Vendor-Tron 1000", "Vendor-Tron 1000", { 3735, 5489, 12228, 12231, 12232, 12240 } },
-    { 1443, 0.2617, 0.6965, "vendor", "Wulan", "Wulan", { 6369, 17062, 21099, 21219 } },
+    { 1443, 0.2617, 0.6965, "vendor", "Wulan", "Wulan", { 6369, 16072, 17062, 21099, 21219 } },
     { 1444, 0.3126, 0.438, "mailbox", "Mailbox" },
     { 1444, 0.7488, 0.44, "mailbox", "Mailbox" },
     { 1444, 0.3054, 0.4474, "station", "Cooking Fire" },
@@ -1584,6 +1587,7 @@ FWCS_SEED = {
     { 1444, 0.4481, 0.4342, "vendor", "Zorbin Fandazzle", "Zorbin Fandazzle", { 19027 } },
     { 1445, 0.1847, 0.0909, "mailbox", "Mailbox" },
     { 1445, 0.6596, 0.4529, "mailbox", "Mailbox" },
+    { 1445, 0.6776, 0.4897, "quest", "first-aid", "Doctor Gustaf VanHowzen", "Alliance" },
     { 1445, 0.1828, 0.0727, "station", "Anvil" },
     { 1445, 0.6456, 0.5037, "station", "Anvil" },
     { 1445, 0.0125, 0.2398, "station", "Cooking Fire" },
@@ -1623,6 +1627,7 @@ FWCS_SEED = {
     { 1445, 0.1834, 0.1037, "vendor", "Yonada", "Yonada", { 5772, 6274 } },
     { 1446, 0.5196, 0.2965, "auction", "", "Auctioneer Beardo" },
     { 1446, 0.5233, 0.2781, "mailbox", "Mailbox" },
+    { 1446, 0.5263, 0.2811, "quest", "cooking", "Dirge Quikcleave" },
     { 1446, 0.5138, 0.2874, "station", "Anvil" },
     { 1446, 0.6533, 0.3288, "station", "Anvil" },
     { 1446, 0.368, 0.7705, "station", "Cooking Fire" },
