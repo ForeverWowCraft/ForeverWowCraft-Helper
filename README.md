@@ -86,7 +86,8 @@ install. The application is not signed yet (the project's business signs it once
 Apple Developer membership), so the first time, macOS says the app was not opened, or that it
 cannot check it for malware: click **Done** (not Move to Trash), then System Settings > Privacy &
 Security, scroll down, **Open Anyway**; once for each new copy, an update's disk image too. Then it
-is an icon in the menu bar, at the top right, never in the Dock, with the same menu: **Start at login** puts a launch agent in your
+is an icon in the menu bar, at the top right, never in the Dock. No icon (behind the notch, or crowded out)? Open the helper
+again from Applications: its menu appears at the mouse. The menu is the same: **Start at login** puts a launch agent in your
 Library (System Settings > General > Login Items lists it under "Allow in the Background"). It
 looks for the game in `/Applications/World of Warcraft`; **Choose the game folder...** in the
 menu is for anywhere else. What the helper keeps is in `~/Library/Application Support/ForeverWowCraft/Helper`:
@@ -147,14 +148,17 @@ they come in a moment, English until then, and the Auctionator box says when som
 The window's own words stay English.
 
 The routes come from the site: the helper fetches those of your characters' auction houses
-(every minute while the helper runs, or `python fwch.py plans`) and writes them into the
+(every ten minutes while the helper runs, at once from the menu's "Fetch routes now", or `python fwch.py plans`) and writes them into the
 addon, which reads them at the next `/reload` or login (saving prices reloads too). The first
 time, the helper does not know your characters yet: log in once, `/reload`, and the routes are
 there after the next. An auction house nobody has saved has no routes; saving it (below) makes them.
+How often the helper looks is what the site tells it (in `houses.json`, since 1.7.2), so it can
+be changed for everyone at once without a new helper; ten minutes for the routes and half an hour
+for the scan times until it says otherwise.
 
 One scan of an auction house in ten minutes is all the site needs, however many play there, so
 the pipe takes one and refuses the rest as not needed; the helper sends none it would refuse
-("not needed: ... was scanned by someone 4 min ago"), and every five minutes writes into the
+("not needed: ... was scanned by someone 4 min ago"), and every half hour writes into the
 addon (`Fresh.lua`) when each house was last scanned, so that the addon records nothing while
 a scan is not needed.
 
@@ -272,10 +276,11 @@ GitHub release beside the zips.
 `python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac (one application for Apple silicon and Intel alike, a Python for each inside; an Apple silicon Mac asked for Rosetta before 1.7.0): the
 application bundle (`ForeverWowCraft Helper.app`: the helper's files, a standalone Python from
 python-build-standalone fetched and checked against its hash, PyObjC installed into it for the
-menu bar, the icon, and a launcher script; `LSUIElement`, so no Dock icon) and a disk image
+menu bar, the icon, and a launcher, `installer/launcher.c`, compiled for both processors, that runs Python in its
+own process, so that macOS knows the process as the application; `LSUIElement`, so no Dock icon) and a disk image
 with a link to Applications beside it. A release builds it on the project's own Mac, a
-self-hosted runner, and puts it on the release too. The application is unsigned until the
-project's business has an Apple Developer membership (`docs/signing.md` in the core).
+self-hosted runner, and puts it on the release too. The application is signed ad hoc (no
+certificate) until the project's business has an Apple Developer membership (`docs/signing.md` in the core).
 
 `test_ingame.py` runs the addon's Lua against a stand-in for the game, and needs a Lua for
 that: `pip install lupa`. Without it, it says so and passes.

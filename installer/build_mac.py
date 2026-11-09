@@ -5,7 +5,7 @@ carries it, ForeverWowCraft-Helper-<version>.dmg.
     python3 installer/build_mac.py --out DIR       where the .dmg goes (default: dist/ beside the helper, or the
                                                    core's dist/ when the helper sits in the core's checkout)
     python3 installer/build_mac.py --stage-only    lay the application out, make no disk image
-    python3 installer/build_mac.py --no-python     lay it out without Python (a test of the layout)
+    python3 installer/build_mac.py --no-python     lay it out without Python (a test of the layout: no launcher, no signature)
 
 What goes in: the helper's files (fwch.py, fwchelper/, addon/, README.md, LICENSE; not the
 tests, not this folder, nothing the helper writes; build.py says which) under
@@ -15,18 +15,27 @@ wherever they are put, checked against their hashes like the Windows build's; th
 IDLE and Tk are left out, 30 MB that nothing here uses), with PyObjC installed into both for
 the menu bar (universal wheels: installed once with the Python that runs here, copied to the
 other; installer/build.py's embed.py fetches; the Windows helper is standard library alone, the
-Mac's menu bar is not), the icon as an .icns, and Contents/MacOS/ForeverWowCraft Helper, a
-script that starts the Python for this Mac's processor on fwch.py app (installer/helper.icns is
-the icon, made from fwchelper/helper.ico by installer/icons.py). Two Pythons so that an Apple
+Mac's menu bar is not), the icon as an .icns, and Contents/MacOS/ForeverWowCraft Helper, the
+launcher: installer/launcher.c compiled here with clang for both processors, which runs the
+Python for this Mac's processor inside its own process on fwch.py app, so that the process is
+the application and macOS knows it by the bundle's identifier (installer/helper.icns is the
+icon, made from fwchelper/helper.ico by installer/icons.py). Two Pythons so that an Apple
 silicon Mac runs the helper natively: with the Intel one alone it asked for Rosetta (9 Nov 2026).
+A script launcher that started the Python left the process with no bundle, and a newer macOS
+never placed its menu bar icon (macOS 26 or later, 9 Nov 2026); the build's check of that is
+the launcher with --identity, which prints the bundle's identifier.
 Info.plist names the bundle (com.foreverwowcraft.helper), the version, and
 LSUIElement, which keeps the app out of the Dock: it is an icon in the menu bar and nothing
 else. The disk image holds the application and a link to Applications, to drag it there.
 
-The application is not signed: the project's business entity signs and notarizes it once it
+The application is signed ad hoc (codesign with no certificate, under the bundle's
+identifier): the project's business entity signs it with a certificate and notarizes it once it
 has an Apple Developer membership (docs/signing.md in the core). Until then Gatekeeper asks
-the user to allow it (System Settings > Privacy & Security, Open Anyway). The disk image is
-made on a Mac (hdiutil); the layout can be staged anywhere, which the tests do."""
+the user to allow it (System Settings > Privacy & Security, Open Anyway). Nothing writes inside
+the signed bundle afterwards: the launcher has Python write no bytecode, and an update is a
+whole new application dragged over the old. The launcher, the signature and the disk image
+are made on a Mac (clang, codesign, hdiutil); the layout without Python can be staged
+anywhere, which the tests do."""
 from __future__ import annotations
 import argparse
 import io
@@ -66,12 +75,8 @@ PYTHON_LEAVE_OUT = ("lib/python3.14/test", "lib/python3.14/idlelib", "lib/python
                     "lib/tdbcmysql1.1.7", "lib/tdbcodbc1.1.7", "lib/tdbcpostgres1.1.7", "lib/sqlite3.45.3", "bin/idle3", "bin/idle3.14",
                     "share")
 
-LAUNCHER = """#!/bin/sh
-# ForeverWowCraft Helper: the Python inside this application for this Mac's processor, on the helper's fwch.py app.
-here="$(cd "$(dirname "$0")/.." && pwd)"
-case "$(uname -m)" in arm64) py=python-arm64 ;; *) py=python-x86_64 ;; esac
-exec "$here/Resources/$py/{exe}" "$here/Resources/helper/fwch.py" app
-"""
+LAUNCHER = HERE / "launcher.c"                           # the main executable's source: Python in its own process, on fwch.py app
+MACOS_MIN = "11.0"                                       # LSMinimumSystemVersion, and what the launcher is compiled for
 
 
 def info_plist(ver: str) -> dict:
@@ -83,8 +88,39 @@ def info_plist(ver: str) -> dict:
             "NSHighResolutionCapable": True, "NSHumanReadableCopyright": "ForeverWowCraft: MIT licence. Python: PSF licence."}
 
 
-def launcher() -> str:
-    return LAUNCHER.format(exe=PYTHON_EXE)
+def launcher_commands(resources: Path, exe: Path, work: Path) -> list[list[str]]:
+    """What makes the main executable: launcher.c compiled for each processor against the
+    Python for it (its headers, and its lib/libpython3.14.dylib, found at run time through the
+    slice's rpath into Resources), then the two joined into one universal file. The arm64 slice
+    is cross-compiled on an Intel Mac, as the x86_64 one would be on Apple silicon."""
+    cmds, slices = [], []
+    for arch in PYTHONS:
+        tree = resources / f"python-{arch}"
+        out = work / f"launcher-{arch}"
+        cmds.append(["clang", "-arch", arch, f"-mmacosx-version-min={MACOS_MIN}", "-O2", "-Wall",
+                     "-I", str(tree / "include" / "python3.14"), str(LAUNCHER),
+                     "-L", str(tree / "lib"), "-lpython3.14", f"-Wl,-rpath,@executable_path/../Resources/python-{arch}/lib",
+                     "-o", str(out)])
+        slices.append(str(out))
+    cmds.append(["lipo", "-create", *slices, "-output", str(exe)])
+    return cmds
+
+
+def sign_command(app: Path) -> list[str]:
+    """The ad-hoc signature over the whole bundle, under the bundle's identifier: no certificate
+    (that waits for the business's Apple Developer membership, docs/signing.md in the core), but
+    an identity macOS can read from the signature as well as from Info.plist."""
+    return ["codesign", "--force", "--sign", "-", "--identifier", BUNDLE_ID, str(app)]
+
+
+def compile_launcher(resources: Path, exe: Path) -> None:
+    if not shutil.which("clang"):
+        raise SystemExit("clang is not on this Mac: the application's launcher is compiled here (xcode-select --install puts it in)")
+    import tempfile
+    with tempfile.TemporaryDirectory() as work:
+        for cmd in launcher_commands(resources, exe, Path(work)):
+            run(cmd)
+    exe.chmod(0o755)
 
 
 def unpack_python(url: str, sha256: str, cache: Path, into: Path) -> Path:
@@ -137,17 +173,16 @@ def stage(where: Path, cache: Path, ver: str, python: bool = True) -> Path:
     with open(contents / "Info.plist", "wb") as f:
         plistlib.dump(info_plist(ver), f)
     (contents / "PkgInfo").write_text("APPL????", encoding="ascii")
-    exe = contents / "MacOS" / NAME
-    exe.write_text(launcher(), encoding="utf-8", newline="\n")
-    exe.chmod(0o755)
     shutil.copyfile(HERE / "helper.icns", resources / "helper.icns")       # the .ico as an .icns, made once with Pillow (installer/icons.py)
     helper = resources / "helper"
     for rel in build.helper_files():
         dst = helper / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(HELPER / rel, dst)
-    if python:
+    if python:                                       # the launcher is compiled against the Pythons, and the whole then signed: on a Mac
         python_tree(cache, resources)
+        compile_launcher(resources, contents / "MacOS" / NAME)
+        run(sign_command(app))
     return app
 
 

@@ -134,8 +134,11 @@ PIPE_TIMEOUT = 60
 # The site: where the routes the addon shows in game come from (fwchelper/plans.py). FWC_SITE_URL
 # names another one.
 SITE_URL = "https://foreverwowcraft.com"
-PLANS_EVERY = 60      # seconds between looks at the site for newer routes, while `send --watch` runs: one small fetch of houses.json; the routes follow only when the site has rebuilt
-FRESH_EVERY = 300     # seconds between looks at the pipe for when each auction house was last scanned (fwchelper/fresh.py); the addon reads it at /reload
+# Both were far more often until 1.7.2 (60 s and 300 s): every helper's looks add up, the pipe's are counted against a daily
+# allowance (a few hundred helpers took nearly half of it, 9 Nov 2026), and the site replans a house every half hour at most.
+# "Fetch routes now" in the menu still looks at once.
+PLANS_EVERY = 600     # seconds between looks at the site for newer routes, while `send --watch` runs: one small fetch of houses.json; the routes follow only when the site has rebuilt
+FRESH_EVERY = 1800    # seconds between looks at the pipe for when each auction house was last scanned (fwchelper/fresh.py); the addon reads it at /reload
 VENDORS_EVERY = 600   # seconds between looks at the saved file for vendors met (sent when they changed: cli.send_vendors_once)
 RETRY_FIRST = 30      # seconds a watch waits before sending again after the pipe refused or failed; doubled each time it fails again ...
 RETRY_MAX = 900       # ... up to this (15 min): a pipe that is down is not asked twice a minute by every helper (5 Nov 2026)

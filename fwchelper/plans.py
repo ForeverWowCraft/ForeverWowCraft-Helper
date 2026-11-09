@@ -306,12 +306,42 @@ def get(url: str) -> dict:
         raise PlansError(f"{url} is not JSON") from e
 
 
+# How often the watch looks, as the site last said (houses.json "helper", since 1.7.2), so that
+# it can be changed for every helper at once without a release. Empty until houses.json has been
+# fetched; settings.PLANS_EVERY and FRESH_EVERY stand in for whatever the site does not say.
+INTERVALS: dict = {}
+INTERVAL_RANGE = (60, 86400)       # seconds: a site value outside is held to the nearer end
+
+
+def hints(doc) -> dict:
+    """The site's intervals from a houses.json document: whole seconds only, held to INTERVAL_RANGE."""
+    given = doc.get("helper") if isinstance(doc, dict) else None
+    out = {}
+    for name in ("plans_every", "fresh_every"):
+        value = given.get(name) if isinstance(given, dict) else None
+        if isinstance(value, int) and not isinstance(value, bool):
+            out[name] = min(max(value, INTERVAL_RANGE[0]), INTERVAL_RANGE[1])
+    return out
+
+
+def plans_every() -> int:
+    """Seconds between the watch's looks at the site for newer routes."""
+    return INTERVALS.get("plans_every", settings.PLANS_EVERY)
+
+
+def fresh_every() -> int:
+    """Seconds between the watch's looks at the pipe for when each house was last scanned."""
+    return INTERVALS.get("fresh_every", settings.FRESH_EVERY)
+
+
 def houses(site: str | None = None) -> list[dict]:
-    """What the site has: its auction houses."""
+    """What the site has: its auction houses. What it says of how often to look is kept (INTERVALS)."""
     doc = get((site or site_url()) + "/data/houses.json")
     listed = doc.get("houses") if isinstance(doc, dict) else None
     if not isinstance(listed, list):
         raise PlansError("the site lists no auction houses")
+    INTERVALS.clear()
+    INTERVALS.update(hints(doc))
     rules = doc.get("rules") if isinstance(doc.get("rules"), list) else []      # the name rules, on every house for by_rule
     return [dict(h, rules=rules) for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])]
 

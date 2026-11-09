@@ -229,6 +229,25 @@ def test_a_realm_nobody_scanned_from_gets_its_house_by_the_sites_rules():
         srv.shutdown()
 
 
+def test_the_site_says_how_often_the_watch_looks():
+    kept = dict(plans.INTERVALS)
+    try:
+        plans.INTERVALS.clear()                                    # nothing fetched yet: the helper's own
+        assert (plans.plans_every(), plans.fresh_every()) == (settings.PLANS_EVERY, settings.FRESH_EVERY)
+        assert plans.hints({"houses": []}) == {} and plans.hints(None) == {} and plans.hints({"helper": 5}) == {}
+        plans.INTERVALS.update(plans.hints({"helper": {"plans_every": 900, "fresh_every": 3600}}))
+        assert (plans.plans_every(), plans.fresh_every()) == (900, 3600)
+        assert plans.hints({"helper": {"plans_every": 5, "fresh_every": 10 ** 9}}) == {"plans_every": 60, "fresh_every": 86400}
+        for wrong in ("600", 600.0, None, True, False, [600]):    # whole seconds only
+            assert plans.hints({"helper": {"plans_every": wrong, "fresh_every": wrong}}) == {}
+        plans.INTERVALS.clear()
+        plans.INTERVALS.update(plans.hints({"helper": {"plans_every": 1200, "fresh_every": "x"}}))
+        assert (plans.plans_every(), plans.fresh_every()) == (1200, settings.FRESH_EVERY)
+    finally:
+        plans.INTERVALS.clear()
+        plans.INTERVALS.update(kept)
+
+
 def test_nothing_a_character_has_is_sent():
     doc = pipe.scan_document(scan.load_scan(_saved()))
     sent = json.dumps(doc)

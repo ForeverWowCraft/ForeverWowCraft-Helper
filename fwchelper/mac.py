@@ -27,6 +27,10 @@ UPDATE_HOW = "the disk image opens: drag the new helper over the one in Applicat
 ICON = Path(__file__).with_name("helper-menubar.png")
 ICON_POINTS = 18                                     # the menu bar's icons are 18 points tall; the image is 64 px and scaled
 POKE = "com.foreverwowcraft.helper.show"             # the word a second start sends the running helper: show your menu (poke())
+PLACED_AFTER = 5.0                                   # seconds after the start before the icon's window is looked at (placed())
+REOPEN_AFTER = 0.3                                   # seconds between a reopen and the menu: the activation that comes with it closed a menu shown at once
+NOT_PLACED = ("Its icon cannot be shown in this Mac's menu bar. "
+              "Open the helper again from Applications: its menu appears at the mouse.")
 LABEL = "com.foreverwowcraft.helper"                 # the launch agent's, and the application bundle's identifier
 _held: list = []                                     # the lock's file, open as long as the app runs
 
@@ -67,6 +71,42 @@ def poke() -> bool:
         return True
     except Exception:  # noqa: BLE001 - no AppKit here (a checkout on another system), or the centre refused
         return False
+
+
+def shown(path) -> str:
+    """A path as the log writes it, the home folder as ~: a log pasted for help names no user."""
+    p, home = str(path), str(Path.home())
+    return "~" + p[len(home):] if p == home or p.startswith(home + "/") else p
+
+
+def identity() -> dict:
+    """What macOS knows this process as: the main bundle (the .app since 1.7.3, when its own
+    executable runs Python; a bare Python's bin folder, with no identifier, before) and the
+    running application's identifier."""
+    from AppKit import NSRunningApplication
+    from Foundation import NSBundle
+    bundle = NSBundle.mainBundle()
+    return {"path": shown(bundle.bundlePath()), "id": bundle.bundleIdentifier(),
+            "running": NSRunningApplication.currentApplication().bundleIdentifier()}
+
+
+def identity_check() -> int:
+    """`fwch.py app --identity` (the bundle's executable with --identity): the identity printed,
+    nothing started; 0 when the main bundle is the helper's. The build's test of the bundle."""
+    who = identity()
+    print(f"main bundle {who['path']}: identifier {who['id']}, running application {who['running']}")
+    return 0 if who["id"] == LABEL else 1
+
+
+def start_lines() -> list[str]:
+    """What the log says of this Mac and this process at start: enough to settle a report of a
+    missing icon in one round."""
+    import platform
+    from Foundation import NSProcessInfo
+    who = identity()
+    return [f"macOS: {NSProcessInfo.processInfo().operatingSystemVersionString()}, processor {platform.machine()}",
+            f"executable: {shown(sys.executable)}",
+            f"main bundle: {who['path']}, identifier {who['id']}; running application {who['running']}"]
 
 
 def app_bundle(executable: str | None = None) -> Path | None:
@@ -190,7 +230,21 @@ def _delegate_class():
             self.tray._drain()
 
         def poke_(self, note):                       # a second start of the helper: the menu, at the mouse
+            print("menu asked for by a second start")
             self.tray.pop()
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, app, visible):
+            # opened again from Applications or the Finder while running: macOS sends the running app this,
+            # not a second process. The menu at the mouse, once the activation that comes with it has settled
+            print("menu asked for by a reopen")
+            self.performSelector_withObject_afterDelay_("popLater:", None, REOPEN_AFTER)
+            return False
+
+        def popLater_(self, _):
+            self.tray.pop()
+
+        def placed_(self, _):
+            self.tray.placed()
 
     return Delegate
 
@@ -212,14 +266,22 @@ class Tray:
         self.app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)     # no Dock icon, no menu of its own
         self.delegate = _delegate_class().alloc().initWithTray_(self)
         self.app.setDelegate_(self.delegate)
+        try:
+            for line in start_lines():
+                print(line)
+        except Exception as e:  # noqa: BLE001 - the log's lines are not worth the icon
+            print(f"macOS: not told ({e})")
         self.item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
         image = NSImage.alloc().initWithContentsOfFile_(str(self.icon))
         if image:
             image.setSize_(NSSize(ICON_POINTS, ICON_POINTS))
             image.setTemplate_(True)                 # the glyph alone: white on a dark bar, black on a light one. The whole icon,
             self.item.button().setImage_(image)      # a navy square, could not be seen on a dark bar (reported 9 Nov 2026)
+            size = image.size()
+            print(f"menu bar icon made: image {size.width:g}x{size.height:g} points, template {image.isTemplate()}, visible {self.item.isVisible()}")
         else:
             self.item.button().setTitle_("FWC")
+            print(f"menu bar icon made: no image (the title FWC), visible {self.item.isVisible()}")
         self.item.button().setToolTip_(self.title)
         try:                                         # a second start asks for the menu (poke()): shown at the mouse, whatever hides the icon
             from Foundation import NSDistributedNotificationCenter
@@ -230,7 +292,21 @@ class Tray:
         menu.setAutoenablesItems_(False)
         menu.setDelegate_(self.delegate)
         self.item.setMenu_(menu)
+        self.delegate.performSelector_withObject_afterDelay_("placed:", None, PLACED_AFTER)
         self.app.run()
+
+    def placed(self) -> None:
+        """Whether macOS placed the icon: its button has a window, on a screen. Said in the log
+        either way; when it was not, the player is told once how to reach the menu (the helper
+        is otherwise quiet about its icon). A newer macOS never placed the icon of a process it
+        knew by no bundle (9 Nov 2026)."""
+        button = self.item.button() if self.item is not None else None
+        window = button.window() if button is not None else None
+        screen = window.screen() if window is not None else None
+        line, ok = placement(window, screen)
+        print(line)
+        if not ok:
+            self.balloon(self.title, NOT_PLACED)
 
     def pop(self) -> None:
         """The menu at the mouse, as a click on the icon shows it."""
@@ -293,6 +369,16 @@ class Tray:
         """Stop the event loop: run() returns, and app.py closes the rest."""
         from PyObjCTools import AppHelper
         AppHelper.stopEventLoop()
+
+
+def placement(window, screen) -> tuple[str, bool]:
+    """The log's line on the icon's window and screen, and whether the icon was placed."""
+    if window is None or screen is None:
+        return f"menu bar icon not placed: {'no window' if window is None else 'a window on no screen'}", False
+    f, s = window.frame(), screen.frame()
+    visible = bool(window.occlusionState() & 2)      # NSWindowOcclusionStateVisible
+    return (f"menu bar icon placed: frame {f.origin.x:g},{f.origin.y:g} {f.size.width:g}x{f.size.height:g} "
+            f"on a screen {s.size.width:g}x{s.size.height:g}, visible {visible}"), True
 
 
 def _quoted(text: str) -> str:

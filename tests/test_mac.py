@@ -122,14 +122,10 @@ def test_the_application_bundle_holds_the_helper_its_icon_and_a_launcher():
         info = plistlib.load(f)
     assert info["CFBundleIdentifier"] == "com.foreverwowcraft.helper" and info["CFBundleShortVersionString"] == "1.5.9"
     assert info["LSUIElement"] is True and info["CFBundleExecutable"] == "ForeverWowCraft Helper" and info["CFBundleIconFile"] == "helper"
+    assert info["LSMinimumSystemVersion"] == build_mac.MACOS_MIN
     assert (app / "Contents" / "PkgInfo").read_text() == "APPL????"
-    exe = app / "Contents" / "MacOS" / "ForeverWowCraft Helper"
-    text = exe.read_text(encoding="utf-8")
-    # the launcher picks the Python for this Mac's processor: an Apple silicon Mac asked for Rosetta with the Intel one alone (9 Nov 2026)
-    assert text.startswith("#!/bin/sh\n") and 'Resources/$py/bin/python3.14" "$here/Resources/helper/fwch.py" app' in text
-    assert 'case "$(uname -m)" in arm64) py=python-arm64 ;; *) py=python-x86_64 ;; esac' in text
-    if os.name != "nt":
-        assert os.access(exe, os.X_OK)
+    # the executable is compiled against the Pythons, so a layout without them has none: never a script that starts Python
+    assert (app / "Contents" / "MacOS").is_dir() and list((app / "Contents" / "MacOS").iterdir()) == []
     assert (app / "Contents" / "Resources" / "helper.icns").stat().st_size > 1000
     helper = app / "Contents" / "Resources" / "helper"
     for rel in ("fwch.py", "fwchelper/app.py", "fwchelper/mac.py", "fwchelper/helper-menubar.png", "addon/ForeverWowCraftScanner/ForeverWowCraftScanner.toc",
@@ -140,6 +136,128 @@ def test_the_application_bundle_holds_the_helper_its_icon_and_a_launcher():
     assert build_mac.PYTHONS["arm64"][0].endswith("aarch64-apple-darwin-install_only_stripped.tar.gz") and len(build_mac.PYTHONS["arm64"][1]) == 64
     assert build_mac.native_arch() in ("x86_64", "arm64")
     assert build_mac.info_plist(__version__)["CFBundleVersion"] == __version__
+
+
+def test_the_launcher_is_compiled_for_both_processors_and_runs_python_in_its_own_process():
+    """A script that started the bundle's Python left the process with no bundle, and a newer
+    macOS never placed its menu bar icon (9 Nov 2026): the main executable is compiled from
+    installer/launcher.c, one slice for each processor against that processor's Python, joined
+    with lipo, and the bundle is then signed ad hoc under its identifier."""
+    res, exe, work = Path("/b/Resources"), Path("/b/MacOS/ForeverWowCraft Helper"), Path("/w")
+    cmds = build_mac.launcher_commands(res, exe, work)
+    assert [c[0] for c in cmds] == ["clang", "clang", "lipo"]
+    for cmd, arch in zip(cmds, ("x86_64", "arm64")):
+        assert cmd[1:3] == ["-arch", arch] and "-mmacosx-version-min=11.0" in cmd and str(build_mac.LAUNCHER) in cmd
+        assert cmd[cmd.index("-I") + 1] == str(res / f"python-{arch}" / "include" / "python3.14")
+        assert cmd[cmd.index("-L") + 1] == str(res / f"python-{arch}" / "lib") and "-lpython3.14" in cmd
+        assert f"-Wl,-rpath,@executable_path/../Resources/python-{arch}/lib" in cmd      # libpython found inside the bundle, wherever it is
+        assert cmd[-2:] == ["-o", str(work / f"launcher-{arch}")]
+    assert cmds[2] == ["lipo", "-create", str(work / "launcher-x86_64"), str(work / "launcher-arm64"), "-output", str(exe)]
+    assert build_mac.sign_command(Path("/o/ForeverWowCraft Helper.app")) == [
+        "codesign", "--force", "--sign", "-", "--identifier", "com.foreverwowcraft.helper", str(Path("/o/ForeverWowCraft Helper.app"))]
+    src = build_mac.LAUNCHER.read_text(encoding="utf-8")
+    for part in ("Py_InitializeFromConfig", "Py_RunMain", "config.home", "config.write_bytecode = 0", "_NSGetExecutablePath",
+                 '"%s/Resources/python-" ARCH', '"%s/Resources/helper/fwch.py"', 'args[n++] = "app";', '#define ARCH "arm64"', '#define ARCH "x86_64"'):
+        assert part in src, part
+    assert "execv" not in src and "posix_spawn" not in src and "#!/bin/sh" not in (HELPER / "installer" / "build_mac.py").read_text(encoding="utf-8")
+    assert "launcher.c" not in [p.name for p in build_mac.build.helper_files()]       # the source stays out of the bundle's helper/
+
+
+def test_no_clang_is_said_plainly():
+    which = build_mac.shutil.which
+    build_mac.shutil.which = lambda name: None
+    try:
+        build_mac.compile_launcher(Path("/b/Resources"), Path("/b/MacOS/x"))
+    except SystemExit as e:
+        assert "clang" in str(e) and "xcode-select --install" in str(e)
+    else:
+        raise AssertionError("no SystemExit without clang")
+    finally:
+        build_mac.shutil.which = which
+
+
+class _Rect:
+    def __init__(self, x, y, w, h):
+        self.origin = type("P", (), {"x": x, "y": y})()
+        self.size = type("S", (), {"width": w, "height": h})()
+
+
+class _Window:
+    def __init__(self, screen, occlusion=2):
+        self._screen, self._occlusion = screen, occlusion
+
+    def screen(self):
+        return self._screen
+
+    def frame(self):
+        return _Rect(2206, 1416, 34, 24)
+
+    def occlusionState(self):
+        return self._occlusion
+
+
+class _Screen:
+    def frame(self):
+        return _Rect(0, 0, 2560, 1440)
+
+
+def _tray_with(window):
+    """A Tray whose status item's button has `window`, its notifications kept in a list."""
+    t = mac.Tray("ForeverWowCraft Helper", mac.ICON, list, print, print)
+    button = type("B", (), {"window": lambda self: window})()
+    t.item = type("I", (), {"button": lambda self: button})()
+    t.said = []
+    t.balloon = lambda title, text: t.said.append((title, text))
+    return t
+
+
+def test_an_icon_the_menu_bar_did_not_place_is_said_once_and_a_placed_one_only_in_the_log():
+    import contextlib
+    import io
+    screen = _Screen()
+    assert mac.placement(None, None) == ("menu bar icon not placed: no window", False)
+    assert mac.placement(_Window(None), None) == ("menu bar icon not placed: a window on no screen", False)
+    line, ok = mac.placement(_Window(screen), screen)
+    assert ok and line == "menu bar icon placed: frame 2206,1416 34x24 on a screen 2560x1440, visible True"
+    assert mac.placement(_Window(screen, occlusion=0), screen)[0].endswith("visible False")
+    for window, told in ((None, True), (_Window(None), True), (_Window(screen), False)):
+        t = _tray_with(window)
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            t.placed()
+        assert printed.getvalue().startswith("menu bar icon ")
+        assert t.said == ([("ForeverWowCraft Helper", mac.NOT_PLACED)] if told else [])          # quiet when the icon is there
+    assert "Open the helper again from Applications" in mac.NOT_PLACED
+    text = (HELPER / "fwchelper" / "mac.py").read_text(encoding="utf-8")
+    assert 'performSelector_withObject_afterDelay_("placed:", None, PLACED_AFTER)' in text          # once a start, a few seconds in
+    assert text.count("def placed(") == 1 and mac.PLACED_AFTER >= 1
+
+
+def test_opening_the_running_helper_again_shows_its_menu_after_the_activation():
+    """Opened again from Applications or the Finder, a running app is sent a reopen, not
+    started twice: the menu at the mouse, a moment later (the activation that comes with the
+    reopen closed a menu shown at once), and False to AppKit."""
+    text = (HELPER / "fwchelper" / "mac.py").read_text(encoding="utf-8")
+    body = text.split("def applicationShouldHandleReopen_hasVisibleWindows_(self, app, visible):", 1)[1].split("def popLater_", 1)[0]
+    assert 'print("menu asked for by a reopen")' in body and "return False" in body
+    assert 'self.performSelector_withObject_afterDelay_("popLater:", None, REOPEN_AFTER)' in body
+    assert "def popLater_(self, _):\n            self.tray.pop()" in text and 0 < mac.REOPEN_AFTER < 1
+    assert 'print("menu asked for by a second start")' in text
+
+
+def test_the_log_writes_the_home_folder_as_a_tilde_and_identity_is_the_macs_alone():
+    home = str(Path.home())
+    assert mac.shown(home + "/Downloads/ForeverWowCraft Helper.app") == "~/Downloads/ForeverWowCraft Helper.app"
+    assert mac.shown("/Applications/ForeverWowCraft Helper.app") == "/Applications/ForeverWowCraft Helper.app"
+    assert mac.shown(home + "x/y") == home + "x/y"                                    # another user's folder beside it is left
+    if sys.platform != "darwin":
+        from fwchelper import cli
+        try:
+            cli.main(["app", "--identity"])
+        except SystemExit as e:
+            assert "Mac" in str(e)
+        else:
+            raise AssertionError("--identity ran off a Mac")
 
 
 if __name__ == "__main__":

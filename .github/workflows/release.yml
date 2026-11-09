@@ -102,6 +102,15 @@ jobs:
         run: |
           echo "/Library/Frameworks/Python.framework/Versions/3.14/bin" >> "$GITHUB_PATH"
           /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 installer/build_mac.py --out dist --cache "$HOME/Library/Caches/ForeverWowCraft-build"
+      - name: "The application is the helper to macOS: its own executable runs Python, and the main bundle is the .app (a newer macOS placed no icon for a bare Python, 9 Nov 2026)"
+        run: |
+          app="dist/mac/ForeverWowCraft Helper.app"
+          lipo -info "$app/Contents/MacOS/ForeverWowCraft Helper"
+          codesign --verify --strict "$app"
+          codesign -dv "$app" 2>&1 | grep -E '^(Identifier|Format|Signature)='
+          out=$("$app/Contents/MacOS/ForeverWowCraft Helper" --identity)
+          echo "$out"
+          case "$out" in *"identifier com.foreverwowcraft.helper,"*) ;; *) echo "the main bundle is not the helper's"; exit 1 ;; esac
       - name: On the release, by its version and by its fixed name
         env:
           GH_TOKEN: ${{ github.token }}

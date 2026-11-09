@@ -308,10 +308,10 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
             if tick is not None:
                 tick()
             wanted = asks.pop("plans", False)
-            if wanted or time.time() - looked >= settings.PLANS_EVERY:      # the routes the addon shows: newer ones, now and then
+            if wanted or time.time() - looked >= plansmod.plans_every():      # the routes the addon shows: newer ones, now and then
                 looked = time.time()
                 plans(quiet=True, again=wanted)
-            if time.time() - freshened >= settings.FRESH_EVERY:   # when each house was last scanned, for the addon's box
+            if time.time() - freshened >= plansmod.fresh_every():   # when each house was last scanned, for the addon's box
                 freshened = time.time()
                 told = freshen(p, quiet=True) or told
             if time.time() - vendored >= settings.VENDORS_EVERY:  # the vendors met, when they changed
@@ -507,7 +507,8 @@ def main(argv=None) -> None:
     p.add_argument("--path", help="a scan file (default: the newest found)")
     p.add_argument("--realm")
     p.add_argument("--faction", help="Alliance or Horde (default: every auction house the file holds)")
-    sub.add_parser("app", help="run as an application: an icon by the clock (Windows) or in the menu bar (Mac), no window; sends, fetches, installs the addon")
+    p = sub.add_parser("app", help="run as an application: an icon by the clock (Windows) or in the menu bar (Mac), no window; sends, fetches, installs the addon")
+    p.add_argument("--identity", action="store_true", help="(Mac) print the bundle macOS knows this process by and start nothing; fails unless it is the helper's")
     p = sub.add_parser("autostart", help="have the app start when you log in")
     p.add_argument("--off", action="store_true", help="undo that")
     sub.add_parser("lists", help="fetch the lists from the pipe and write them into the addon")
@@ -526,6 +527,11 @@ def main(argv=None) -> None:
             status(Path(a.path) if a.path else None, a.realm, a.faction)
         elif a.cmd == "send":
             send(Path(a.path) if a.path else None, a.realm, a.faction, a.watch, a.interval, a.again)
+        elif a.cmd == "app" and a.identity:
+            if sys.platform != "darwin":
+                raise SystemExit("--identity is the Mac's: the bundle macOS knows the helper by")
+            from . import mac
+            sys.exit(mac.identity_check())
         elif a.cmd == "app":
             from . import app
             app.run()
