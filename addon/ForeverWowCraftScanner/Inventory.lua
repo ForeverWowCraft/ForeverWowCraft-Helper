@@ -40,6 +40,16 @@ local function Char()
 end
 
 -- the auction house of this character among those the helper wrote routes for
+-- The auction house a realm is of by its name, as the site's rules have it (the core's
+-- config.HOUSE_PATTERNS): "CAMWOW US2 Realm 1 PvE" is US PvE (US and AU are one region),
+-- "CAMWOW EU4 Realm 3 RP PvP" is EU RP PvP. Spelt as the houses' names are compared.
+local function Ruled(realm)
+  local region, rules = (realm or ""):match("^CAMWOW (%a+)%d+ Realm %d+ (.+)$")
+  if not region then return nil end
+  if region == "AU" then region = "US" end
+  return Spelt(region .. " " .. rules)
+end
+
 local function House()
   local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
   local mine, group = Spelt(GetRealmName()), Spelt(ns.RealmKey())
@@ -48,6 +58,14 @@ local function House()
       for _, realm in ipairs(house.realms or {}) do
         if realm == mine or realm == group then return house, key end
       end
+    end
+  end
+  -- a realm no list has (nobody scanned from it, or the helper fetched the region's houses before it
+  -- had seen this character): the house its name says (the blank window players reported, 9 Nov 2026)
+  local ruled = Ruled(GetRealmName())
+  if ruled then
+    for key, house in pairs(FWCS_PLANS or {}) do
+      if house.faction == faction and Spelt(house.realm or "") == ruled then return house, key end
     end
   end
 end

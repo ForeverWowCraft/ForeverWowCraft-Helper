@@ -516,7 +516,21 @@ def test_a_character_of_a_house_without_routes_is_told_what_to_do():
     lua = _game(document(house="elsewhere--alliance", realm="Elsewhere", faction="Alliance"))
     lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("plan")')
     text = lua.eval("AllText()")
-    assert "No routes for this character's auction house yet." in text and "The helper fetches them" in text
+    assert "No routes for this character's auction house yet." in text and "The helper sees a new character at its first reload" in text
+    # the way on is a button: a secure one that runs /reload (the game lets no addon call ReloadUI)
+    assert lua.eval("ForeverWowCraftWindowReload.shown") is True and lua.eval('ForeverWowCraftWindowReload.attributes.macrotext') == "/reload"
+    # a realm no house lists is of its house by its name (the helper fetched the region's houses before it saw the character)
+    lua.execute('''
+      local h = FWCS_PLANS["elsewhere--alliance"]
+      h.realm, h.realms, h.faction = "US RP PvP", {}, UnitFactionGroup("player")       -- the character's faction: a house of the other is never its own
+      local was = GetRealmName
+      GetRealmName = function() return "CAMWOW AU3 Realm 7 RP PvP" end
+      ruled = ns.inv.House()
+      GetRealmName = function() return "CAMWOW EU3 Realm 7 RP PvP" end
+      other = ns.inv.House()
+      GetRealmName = was
+    ''')
+    assert lua.eval("ruled ~= nil and ruled.realm") == "US RP PvP" and lua.eval("other") is None
     assert "helper is not installed" not in text and "helper last ran" not in text        # Plans.lua was just written
     # the helper has not run for days: one grey line, nothing else
     lua.execute("FWCS_PLANS_WRITTEN = time() - 3 * 86400; Fire('BAG_UPDATE_DELAYED'); RunTimers()")

@@ -252,12 +252,19 @@ def is_of(house: dict, want: set[tuple[str, str]]) -> bool:
     return any((n, house.get("faction", "")) in want for n in names if n) or bool(by_rule(house, want))
 
 
-def choose(houses: list[dict], want: set[tuple[str, str]]) -> list[dict]:
-    """The houses to fetch: those of the characters seen; with none seen yet, all of them when
-    there are few."""
+def choose(houses: list[dict], want: set[tuple[str, str]], region: str | None = None) -> list[dict]:
+    """The houses to fetch: those of the characters seen. With none seen yet (a first install:
+    the addon saves a character at its first /reload or logout), the houses of the client's
+    `region` (scan.portal: "US" has US PvE, US PvP, ...), so that /fwc has routes at the very
+    first login instead of an empty window and two reloads (players kept reporting the blank
+    window, 9 Nov 2026); or all of them when there are few. More than UNASKED_HOUSES, none."""
     listed = [h for h in houses if h.get("ingame")]          # a site from before it had routes for the addon says nothing
     if want:
         return [h for h in listed if is_of(h, want)]
+    if region:
+        mine = [h for h in listed if str(h.get("realm") or "").upper().startswith(region.upper() + " ")]
+        if 0 < len(mine) <= UNASKED_HOUSES:
+            return mine
     return listed if len(listed) <= UNASKED_HOUSES else []
 
 
@@ -431,7 +438,7 @@ def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], l
     now written, the files written): no files when nothing was new."""
     site = site or site_url()
     want = wanted()
-    chosen = choose(houses(site), want)
+    chosen = choose(houses(site), want, None if want else scan.portal())
     have = stamps()
     current = {h["key"]: int(h.get("generated") or 0) for h in chosen}
     missing = installed_file().parent.is_dir() and not installed_file().exists()

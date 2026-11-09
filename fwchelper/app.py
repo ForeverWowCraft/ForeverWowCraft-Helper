@@ -364,6 +364,10 @@ def hands():
 def run() -> None:
     win = hands()
     if not win.one_instance(MUTEX):
+        # on a Mac the running helper is told to show its menu at the mouse: its icon may be out of sight
+        # (behind the notch, or in a crowded bar), and this is then the way to it
+        if getattr(win, "poke", None) and win.poke():
+            return
         win.message(f"{settings.NAME} Helper", f"The helper is running already: its icon is {win.WHERE_ICON}.")
         return
     log = tray.Log(settings.STATE / "helper.log")

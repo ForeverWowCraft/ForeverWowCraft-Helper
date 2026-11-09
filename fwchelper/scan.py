@@ -215,6 +215,19 @@ def flavor() -> str:
     return config.env("WOW_FLAVOR", config.WOW_FLAVOR)
 
 
+def portal() -> str | None:
+    """The region this client plays in ("US", "EU", ...), from the game's own Config.wtf (its
+    line SET portal): known before the addon has saved anything, so the routes of the region's
+    auction houses can be fetched for a player's very first login. None without the file or
+    the line."""
+    try:
+        text = (wow_dir() / flavor() / "WTF" / "Config.wtf").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    m = re.search(r'^SET portal "([A-Za-z]{2,4})"', text, re.M)
+    return m.group(1).upper() if m else None
+
+
 def wow_dir() -> Path:
     """The World of Warcraft base folder: FWC_WOW_DIR if set; else settings.WOW_DIR when it exists;
     else what Battle.net registered or a common install folder, preferring one that holds the

@@ -226,6 +226,16 @@ local function Build()
   win.gethelper:SetPoint("RIGHT", win.arrowBox.label, "LEFT", -6, 0)
   win.gethelper:SetScript("OnClick", function() ns.ShowHelper() end)
   win.gethelper:Hide()
+  -- the empty window's way on: a reload (a secure button running /reload: the game lets no addon call
+  -- ReloadUI). Shown while the helper runs and this character's house has no routes here yet
+  win.reload = CreateFrame("Button", "ForeverWowCraftWindowReload", win, "SecureActionButtonTemplate, UIPanelButtonTemplate")
+  win.reload:SetSize(120, 24)
+  win.reload:SetText("Reload now")
+  win.reload:SetPoint("BOTTOM", win, "BOTTOM", 0, 18)
+  win.reload:SetAttribute("type", "macro")
+  win.reload:SetAttribute("macrotext", "/reload")
+  win.reload:RegisterForClicks("AnyDown", "AnyUp")
+  win.reload:Hide()
 
   -- the first row: a button per profession the routes cover, made as they are known (DrawProfessions)
   win.profs = {}
@@ -891,16 +901,21 @@ Refresh = function()
   local chosen = house and Chosen(house)
   ShowRange(chosen and chosen.plan ~= nil)
   DrawProfessions(chosen)
+  local combat = InCombatLockdown and InCombatLockdown()          -- a secure button is left as it is in a fight
+  if win.reload and not combat then
+    if not chosen and FWCS_PLANS_WRITTEN then win.reload:Show() else win.reload:Hide() end
+  end
   if not chosen then
     lines, last = {}, nil
     win.also:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
     win.summary:SetText("No routes for this character's auction house yet.")
     SetNotice(HelperNote() or "")
-    if FWCS_PLANS_WRITTEN then                -- the helper runs: the site has none for this house, or has not been asked
-      Line("The helper fetches them from the site every minute while it runs; a character it has not")
-      Line("seen yet is seen after its first /reload or logout. If the site has no prices for this realm")
-      Line("and faction, nobody has saved its auction house yet: open it, click Save Prices, and the site")
-      Line("has routes for it within minutes; the helper fetches them, and /reload shows them.")
+    if FWCS_PLANS_WRITTEN then                -- the helper runs: it has not seen this character, or the site has none for its house
+      Line("Click |cffffd100Reload now|r below. The helper sees a new character at its first reload and")
+      Line("fetches the routes of its auction house within a minute; a second reload shows them here.")
+      Line("")
+      Line("Still empty after that? Then nobody has saved this realm and faction's auction house yet:")
+      Line("open it, click Save Prices, and the site has routes for it within minutes.")
     else
       Line("The helper on this PC fetches the routes from foreverwowcraft.com and sends the prices the")
       Line("addon records. Until it is installed, what is recorded stays on this PC.")

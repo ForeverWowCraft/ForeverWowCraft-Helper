@@ -26,6 +26,7 @@ UPDATE_HOW = "the disk image opens: drag the new helper over the one in Applicat
 
 ICON = Path(__file__).with_name("helper-menubar.png")
 ICON_POINTS = 18                                     # the menu bar's icons are 18 points tall; the image is 64 px and scaled
+POKE = "com.foreverwowcraft.helper.show"             # the word a second start sends the running helper: show your menu (poke())
 LABEL = "com.foreverwowcraft.helper"                 # the launch agent's, and the application bundle's identifier
 _held: list = []                                     # the lock's file, open as long as the app runs
 
@@ -54,6 +55,18 @@ def agents_dir() -> Path:
 
 def agent_path() -> Path:
     return agents_dir() / f"{LABEL}.plist"
+
+
+def poke() -> bool:
+    """Tell the helper already running to show its menu at the mouse: what a second start does,
+    for a Mac whose menu bar hides the icon (behind the notch, or crowded out). True when the
+    word was sent."""
+    try:
+        from Foundation import NSDistributedNotificationCenter
+        NSDistributedNotificationCenter.defaultCenter().postNotificationName_object_userInfo_deliverImmediately_(POKE, None, None, True)
+        return True
+    except Exception:  # noqa: BLE001 - no AppKit here (a checkout on another system), or the centre refused
+        return False
 
 
 def app_bundle(executable: str | None = None) -> Path | None:
@@ -176,6 +189,9 @@ def _delegate_class():
         def runCall_(self, box):
             self.tray._drain()
 
+        def poke_(self, note):                       # a second start of the helper: the menu, at the mouse
+            self.tray.pop()
+
     return Delegate
 
 
@@ -200,15 +216,28 @@ class Tray:
         image = NSImage.alloc().initWithContentsOfFile_(str(self.icon))
         if image:
             image.setSize_(NSSize(ICON_POINTS, ICON_POINTS))
-            self.item.button().setImage_(image)
+            image.setTemplate_(True)                 # the glyph alone: white on a dark bar, black on a light one. The whole icon,
+            self.item.button().setImage_(image)      # a navy square, could not be seen on a dark bar (reported 9 Nov 2026)
         else:
             self.item.button().setTitle_("FWC")
         self.item.button().setToolTip_(self.title)
+        try:                                         # a second start asks for the menu (poke()): shown at the mouse, whatever hides the icon
+            from Foundation import NSDistributedNotificationCenter
+            NSDistributedNotificationCenter.defaultCenter().addObserver_selector_name_object_(self.delegate, "poke:", POKE, None)
+        except Exception:  # noqa: BLE001
+            pass
         menu = NSMenu.alloc().initWithTitle_(self.title)
         menu.setAutoenablesItems_(False)
         menu.setDelegate_(self.delegate)
         self.item.setMenu_(menu)
         self.app.run()
+
+    def pop(self) -> None:
+        """The menu at the mouse, as a click on the icon shows it."""
+        from AppKit import NSEvent
+        menu = self.item.menu()
+        self._fill(menu)
+        menu.popUpMenuPositioningItem_atLocation_inView_(None, NSEvent.mouseLocation(), None)
 
     def _fill(self, menu) -> None:
         from AppKit import NSMenuItem

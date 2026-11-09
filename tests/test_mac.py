@@ -79,6 +79,27 @@ def test_one_instance_at_a_time_through_the_lock():
     assert out == "False", out                                                        # another process: the lock is held
 
 
+def test_the_menu_bar_image_is_a_template_and_a_second_start_asks_for_the_menu():
+    """The menu bar's image is the glyph on a clear ground (the Mac colours it for a dark or a
+    light bar); the whole icon, a navy square, could not be seen on a dark bar, and players
+    reported the helper running with no icon (9 Nov 2026). A second start sends the running
+    helper the word to show its menu at the mouse."""
+    text = (HELPER / "fwchelper" / "mac.py").read_text(encoding="utf-8")
+    assert "image.setTemplate_(True)" in text and 'addObserver_selector_name_object_(self.delegate, "poke:", POKE, None)' in text
+    assert "popUpMenuPositioningItem_atLocation_inView_" in text and mac.POKE == "com.foreverwowcraft.helper.show"
+    assert isinstance(mac.poke(), bool)                                              # False without AppKit, never an error
+    try:
+        from PIL import Image
+    except ImportError:
+        return
+    im = Image.open(mac.ICON).convert("RGBA")
+    alpha = im.getchannel("A")
+    corners = [alpha.getpixel(p) for p in ((0, 0), (63, 0), (0, 63), (63, 63))]
+    opaque = sum(1 for v in alpha.tobytes() if v > 128) / (im.size[0] * im.size[1])
+    assert im.size == (64, 64) and corners == [0, 0, 0, 0] and 0.15 < opaque < 0.5       # a glyph, not a filled square
+    assert all(px[:3] == (0, 0, 0) for px in im.getdata() if px[3] > 0)                # black: the Mac does the colouring
+
+
 def test_a_disk_image_is_known_by_its_trailer_and_an_msi_by_its_head():
     folder = Path(tempfile.mkdtemp())
     dmg = folder / "a.dmg"

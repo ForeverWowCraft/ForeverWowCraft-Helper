@@ -167,6 +167,13 @@ def test_the_characters_say_whose_routes_to_fetch():
     # nobody seen yet: everything when the site has few houses, nothing when it has many
     assert len(plans.choose(houses, set())) == 4
     assert plans.choose(houses * 3, set()) == []
+    # no character seen yet (a first install): the houses of the client's region, where they are few (the blank /fwc
+    # window players reported, 9 Nov 2026); a region the site has no house of changes nothing
+    many = [dict(houses[0], key=f"us{r.lower().replace(' ', '')}--{f.lower()}", realm=f"US {r}", faction=f) for r in ("PvE", "PvP", "RP", "RP PvP") for f in ("Alliance", "Horde")] \
+        + [dict(houses[0], key=f"eu{r.lower()}--{f.lower()}", realm=f"EU {r}", faction=f) for r in ("PvE", "PvP", "RP") for f in ("Alliance", "Horde")]
+    assert plans.choose(many, set()) == [] and len(plans.choose(many, set(), "US")) == 8 and len(plans.choose(many, set(), "eu")) == 6
+    assert plans.choose(many, set(), "KR") == [] and {h["realm"] for h in plans.choose(many, set(), "US")} == {"US PvE", "US PvP", "US RP", "US RP PvP"}
+    assert [h["key"] for h in plans.choose(houses, want, "US")] == ["stonespine--horde", "classicbetapve--alliance"]     # characters seen: theirs alone
     assert plans.choose([dict(houses[0], ingame=False)], set()) == []                 # a house without routes for the addon
     assert plans.choose([{k: v for k, v in houses[0].items() if k != "ingame"}], want) == []      # a site from before it had any
     # a realm nobody has scanned from is of the house its name says, by the site's rules (6 Nov 2026)
@@ -177,6 +184,29 @@ def test_the_characters_say_whose_routes_to_fetch():
     assert plans.by_rule(us, new) == ["CAMWOW AU1 Realm 9 PvE"] and plans.choose([us], new) == [us]
     assert plans.choose([dict(us, rules=[])], new) == [] and plans.choose([dict(us, rules=[["(", "x"], "no"])], new) == []
     assert plans.ruled("CAMWOW EU4 Realm 2 PvP", rules) == "EU PvP" and plans.ruled("Stonespine", rules) is None
+
+
+def test_the_clients_region_is_read_from_the_games_own_settings():
+    import os
+    import tempfile
+    root = Path(tempfile.mkdtemp())
+    kept = os.environ.get("FWC_WOW_DIR")
+    os.environ["FWC_WOW_DIR"] = str(root)
+    try:
+        assert scan.portal() is None                                             # no file
+        wtf = root / scan.flavor() / "WTF"
+        wtf.mkdir(parents=True)
+        (wtf / "Config.wtf").write_text('SET agentUID "wowf"\nSET portal "US"\nSET lastCharacterIndex "2"\n', encoding="utf-8")
+        assert scan.portal() == "US"
+        (wtf / "Config.wtf").write_text('SET portal "eu"\n', encoding="utf-8")
+        assert scan.portal() == "EU"
+        (wtf / "Config.wtf").write_text('SET agentUID "wowf"\n', encoding="utf-8")
+        assert scan.portal() is None                                             # no such line
+    finally:
+        if kept is None:
+            os.environ.pop("FWC_WOW_DIR", None)
+        else:
+            os.environ["FWC_WOW_DIR"] = kept
 
 
 def test_a_realm_nobody_scanned_from_gets_its_house_by_the_sites_rules():

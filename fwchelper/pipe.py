@@ -440,6 +440,18 @@ class Pipe:
     def set_sell(self, doc: dict) -> dict:
         return self.ask("PUT", "/v1/sell", pack(doc))
 
+    def report(self) -> str | None:
+        """The archivist's quality report (one HTML page); None when none was put yet."""
+        status, data = self.request("GET", "/v1/report")
+        if status == 404:
+            return None
+        if status >= 400:
+            raise PipeError(f"GET /v1/report: {status} {_why(data)}".strip())
+        return data.decode("utf-8", "replace")
+
+    def set_report(self, html_text: str) -> dict:
+        return self.ask("PUT", "/v1/report", html_text.encode("utf-8"), packed=False, content_type="text/html; charset=utf-8")
+
     def move_blobs(self, after: str = "", limit: int = 50) -> dict:
         """Copies a page of what the service's database still holds into its bucket; the answer says
         `moved`, `had` (already there), `last` (the key to go on from) and `left`."""
