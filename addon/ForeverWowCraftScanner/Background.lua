@@ -202,10 +202,10 @@ local function BuildOptions()
       .. "stretch, as the site does when you type your level. Where none fits, the Make button and the /fwc window say so.",
       function() return saved().levelRoutes ~= false end,
       function(v) saved().levelRoutes = v; if ns.RefreshWindow then ns.RefreshWindow() end; if ns.RoutePicked then ns.RoutePicked() end end),
-    CheckBox(page, Next(76), "A reminder to reload, every 15 minutes",
+    CheckBox(page, Next(76), "A reminder to reload, every hour",
       "A small box at the top of the screen with a Reload now button, when there is something to save "
       .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
-      .. "nor while the auction house, a merchant or a profession window is open. Later puts it off a quarter of an hour.",
+      .. "nor while the auction house, a merchant or a profession window is open. Later puts it off an hour.",
       function() return ns.remind.Enabled() end, function(v) ns.RemindCommand(v and "on" or "off") end),
   }
   -- where the prices are kept: told from where the character stands, unless said here

@@ -9,13 +9,16 @@ carries it, ForeverWowCraft-Helper-<version>.dmg.
 
 What goes in: the helper's files (fwch.py, fwchelper/, addon/, README.md, LICENSE; not the
 tests, not this folder, nothing the helper writes; build.py says which) under
-Contents/Resources/helper, a Python of its own under Contents/Resources/python (a standalone
-build from python-build-standalone, which runs from wherever it is put, checked against its
-hash like the Windows build's; the test suite, IDLE and Tk are left out, 30 MB that nothing
-here uses), with PyObjC installed into it for the menu bar (installer/build.py's embed.py
-fetches; the Windows helper is standard library alone, the Mac's menu bar is not), the icon
-as an .icns, and Contents/MacOS/ForeverWowCraft Helper, a script that starts that Python on
-fwch.py app (installer/helper.icns is the icon, made from fwchelper/helper.ico by installer/icons.py).
+Contents/Resources/helper, a Python of its own for each processor under Contents/Resources/
+python-x86_64 and python-arm64 (standalone builds from python-build-standalone, which run from
+wherever they are put, checked against their hashes like the Windows build's; the test suite,
+IDLE and Tk are left out, 30 MB that nothing here uses), with PyObjC installed into both for
+the menu bar (universal wheels: installed once with the Python that runs here, copied to the
+other; installer/build.py's embed.py fetches; the Windows helper is standard library alone, the
+Mac's menu bar is not), the icon as an .icns, and Contents/MacOS/ForeverWowCraft Helper, a
+script that starts the Python for this Mac's processor on fwch.py app (installer/helper.icns is
+the icon, made from fwchelper/helper.ico by installer/icons.py). Two Pythons so that an Apple
+silicon Mac runs the helper natively: with the Intel one alone it asked for Rosetta (9 Nov 2026).
 Info.plist names the bundle (com.foreverwowcraft.helper), the version, and
 LSUIElement, which keeps the app out of the Dock: it is an icon in the menu bar and nothing
 else. The disk image holds the application and a link to Applications, to drag it there.
@@ -47,10 +50,14 @@ APP = f"{NAME}.app"
 BUNDLE_ID = "com.foreverwowcraft.helper"
 PYTHON_VERSION = "3.14.10"
 PYTHON_BUILD = "20261026"                                # python-build-standalone's release
-PYTHON_URL = (f"https://github.com/astral-sh/python-build-standalone/releases/download/{PYTHON_BUILD}/"
-              f"cpython-{PYTHON_VERSION}+{PYTHON_BUILD}-x86_64-apple-darwin-install_only_stripped.tar.gz")
-PYTHON_SHA256 = "2fd8becd48cf0ff5f0a15df3c0db7cae7aa708dcaacf901bd30d6cdd6229370b"
+_RELEASE = f"https://github.com/astral-sh/python-build-standalone/releases/download/{PYTHON_BUILD}/cpython-{PYTHON_VERSION}+{PYTHON_BUILD}-"
+PYTHONS = {                                              # one Python a processor, as `uname -m` names it; the launcher picks
+    "x86_64": (_RELEASE + "x86_64-apple-darwin-install_only_stripped.tar.gz", "2fd8becd48cf0ff5f0a15df3c0db7cae7aa708dcaacf901bd30d6cdd6229370b"),
+    "arm64": (_RELEASE + "aarch64-apple-darwin-install_only_stripped.tar.gz", "95eb8c87d16af37c54e9765e31d8c56c0d8ffa9968ea0f704f73a9b83f84e9f9"),
+}
+PYTHON_URL, PYTHON_SHA256 = PYTHONS["x86_64"]
 PYTHON_EXE = "bin/python3.14"
+SITE_PACKAGES = "lib/python3.14/site-packages"
 PYOBJC = ("pyobjc-core==13.0", "pyobjc-framework-Cocoa==13.0")
 # of Python's tree, what the helper has no use for: the test suite, IDLE, Tk and its libraries
 PYTHON_LEAVE_OUT = ("lib/python3.14/test", "lib/python3.14/idlelib", "lib/python3.14/tkinter", "lib/python3.14/turtledemo",
@@ -60,9 +67,10 @@ PYTHON_LEAVE_OUT = ("lib/python3.14/test", "lib/python3.14/idlelib", "lib/python
                     "share")
 
 LAUNCHER = """#!/bin/sh
-# ForeverWowCraft Helper: the Python inside this application, on the helper's fwch.py app.
+# ForeverWowCraft Helper: the Python inside this application for this Mac's processor, on the helper's fwch.py app.
 here="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$here/Resources/python/{exe}" "$here/Resources/helper/fwch.py" app
+case "$(uname -m)" in arm64) py=python-arm64 ;; *) py=python-x86_64 ;; esac
+exec "$here/Resources/$py/{exe}" "$here/Resources/helper/fwch.py" app
 """
 
 
@@ -79,10 +87,10 @@ def launcher() -> str:
     return LAUNCHER.format(exe=PYTHON_EXE)
 
 
-def python_tree(cache: Path, into: Path) -> None:
-    """The standalone Python, fetched and checked, unpacked under `into` without what the
-    helper has no use for, and PyObjC installed into it."""
-    data = embed.fetch(PYTHON_URL, PYTHON_SHA256, cache)
+def unpack_python(url: str, sha256: str, cache: Path, into: Path) -> Path:
+    """One standalone Python, fetched and checked, unpacked under `into` without what the helper
+    has no use for; returns its executable."""
+    data = embed.fetch(url, sha256, cache)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         members = []
         for m in tar.getmembers():
@@ -94,9 +102,26 @@ def python_tree(cache: Path, into: Path) -> None:
         tar.extractall(into, members=members, filter="data")
     python = into / PYTHON_EXE
     python.chmod(python.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return python
+
+
+def native_arch() -> str:
+    import platform
+    return "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
+
+
+def python_tree(cache: Path, resources: Path) -> None:
+    """A Python for each processor under resources/python-<arch>, and PyObjC in both: installed
+    with the one that runs on this Mac (its wheels are universal), its site-packages copied to
+    the others."""
+    trees = {arch: unpack_python(url, sha, cache, resources / f"python-{arch}") for arch, (url, sha) in PYTHONS.items()}
+    mine = native_arch() if native_arch() in trees else next(iter(trees))
     env = dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONDONTWRITEBYTECODE="1")
-    run([str(python), "-m", "pip", "install", "--quiet", "--no-compile", "--no-warn-script-location", *PYOBJC], env=env)
-    for p in list(into.rglob("__pycache__")) + list(into.rglob("*.dSYM")):      # bytecode, and PyObjC's debug symbols
+    run([str(trees[mine]), "-m", "pip", "install", "--quiet", "--no-compile", "--no-warn-script-location", *PYOBJC], env=env)
+    for arch in trees:
+        if arch != mine:
+            shutil.copytree(resources / f"python-{mine}" / SITE_PACKAGES, resources / f"python-{arch}" / SITE_PACKAGES, dirs_exist_ok=True, symlinks=True)
+    for p in list(resources.rglob("__pycache__")) + list(resources.rglob("*.dSYM")):      # bytecode, and PyObjC's debug symbols
         shutil.rmtree(p, ignore_errors=True)
 
 
@@ -122,7 +147,7 @@ def stage(where: Path, cache: Path, ver: str, python: bool = True) -> Path:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(HELPER / rel, dst)
     if python:
-        python_tree(cache, resources / "python")
+        python_tree(cache, resources)
     return app
 
 

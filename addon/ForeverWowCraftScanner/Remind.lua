@@ -14,8 +14,8 @@
 
 local _, ns = ...
 
-local EVERY = 15 * 60                      -- seconds between reminders
-local LATER = 15 * 60                      -- what "Later" buys
+local EVERY = 60 * 60                      -- seconds between reminders (a quarter of an hour until 1.7.0; the user, 9 Nov 2026)
+local LATER = 60 * 60                      -- what "Later" buys
 local RETRY = 30                           -- seconds between looks while something is in the way
 
 local box, due

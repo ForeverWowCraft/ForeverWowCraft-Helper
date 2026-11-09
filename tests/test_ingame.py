@@ -544,7 +544,7 @@ def test_the_scanner_in_the_background():
     lua.execute("ns.options:refresh()")
     labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 12)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
-    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level" and labels[10] == "A reminder to reload, every 15 minutes"
+    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level" and labels[10] == "A reminder to reload, every hour"
     # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
     # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), reminder
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")

@@ -269,7 +269,7 @@ at logon, "Start the helper now" at the end, and the running app closed before a
 removal. A release (a `v<version>` tag, a draft until the installer is on it) builds it on a Windows runner and puts it on the
 GitHub release beside the zips.
 
-`python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac: the
+`python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac (one application for Apple silicon and Intel alike, a Python for each inside; an Apple silicon Mac asked for Rosetta before 1.7.0): the
 application bundle (`ForeverWowCraft Helper.app`: the helper's files, a standalone Python from
 python-build-standalone fetched and checked against its hash, PyObjC installed into it for the
 menu bar, the icon, and a launcher script; `LSUIElement`, so no Dock icon) and a disk image

@@ -428,6 +428,18 @@ class Pipe:
     def set_state(self, blob: bytes) -> dict:
         return self.ask("PUT", "/v1/state", blob, packed=False, content_type="application/zip")
 
+    def sell(self) -> dict | None:
+        """The archivist's fwc-sell/1 document (what sold, per auction house and item); None when none was put yet."""
+        status, data = self.request("GET", "/v1/sell")
+        if status == 404:
+            return None
+        if status >= 400:
+            raise PipeError(f"GET /v1/sell: {status} {_why(data)}".strip())
+        return json.loads(gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data)
+
+    def set_sell(self, doc: dict) -> dict:
+        return self.ask("PUT", "/v1/sell", pack(doc))
+
     def move_blobs(self, after: str = "", limit: int = 50) -> dict:
         """Copies a page of what the service's database still holds into its bucket; the answer says
         `moved`, `had` (already there), `last` (the key to go on from) and `left`."""

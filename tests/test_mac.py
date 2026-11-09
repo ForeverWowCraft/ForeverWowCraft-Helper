@@ -104,7 +104,9 @@ def test_the_application_bundle_holds_the_helper_its_icon_and_a_launcher():
     assert (app / "Contents" / "PkgInfo").read_text() == "APPL????"
     exe = app / "Contents" / "MacOS" / "ForeverWowCraft Helper"
     text = exe.read_text(encoding="utf-8")
-    assert text.startswith("#!/bin/sh\n") and 'Resources/python/bin/python3.14" "$here/Resources/helper/fwch.py" app' in text
+    # the launcher picks the Python for this Mac's processor: an Apple silicon Mac asked for Rosetta with the Intel one alone (9 Nov 2026)
+    assert text.startswith("#!/bin/sh\n") and 'Resources/$py/bin/python3.14" "$here/Resources/helper/fwch.py" app' in text
+    assert 'case "$(uname -m)" in arm64) py=python-arm64 ;; *) py=python-x86_64 ;; esac' in text
     if os.name != "nt":
         assert os.access(exe, os.X_OK)
     assert (app / "Contents" / "Resources" / "helper.icns").stat().st_size > 1000
@@ -114,6 +116,8 @@ def test_the_application_bundle_holds_the_helper_its_icon_and_a_launcher():
         assert (helper / rel).is_file(), rel
     assert not (helper / "tests").exists() and not (helper / "installer").exists() and not (helper / "state").exists()
     assert build_mac.PYTHON_URL.endswith("x86_64-apple-darwin-install_only_stripped.tar.gz") and len(build_mac.PYTHON_SHA256) == 64
+    assert build_mac.PYTHONS["arm64"][0].endswith("aarch64-apple-darwin-install_only_stripped.tar.gz") and len(build_mac.PYTHONS["arm64"][1]) == 64
+    assert build_mac.native_arch() in ("x86_64", "arm64")
     assert build_mac.info_plist(__version__)["CFBundleVersion"] == __version__
 
 
