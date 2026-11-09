@@ -8,6 +8,13 @@
 --
 -- The route is the one the /fwc window shows for that profession (its variant and companion:
 -- ns.RouteFor).
+--
+-- WHAT THIS FILE GATHERS: with the profession panel open, a crafting station (an anvil, a forge)
+-- the panel says the character stands at, as a place for the arrow (ns.NotePlace, Places.lua:
+-- kept here, not sent); and the item-data level of the recipe scroll the route buys
+-- (ns.NoteRecipeLevel, ForeverWowCraftScanner.lua: sent with the vendors met, pooled into the
+-- shared database the project means to publish). Nothing of the character. Everything the
+-- addon gathers: docs/scanner-addon.md, "What the addon gathers".
 
 local _, ns = ...
 local Char, House, Spelt = ns.inv.Char, ns.inv.House, ns.inv.Spelt

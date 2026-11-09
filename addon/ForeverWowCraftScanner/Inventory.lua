@@ -12,7 +12,13 @@
 -- own auctions can only be read while each is open (the game has no other way to them), so
 -- those counts are from the last visit (bankSeen, mailSeen, ahSeen). Only items a profession
 -- uses or makes are kept (the lists of Queue.lua and the routes' own).
--- Nothing of this is sent anywhere: the helper sends auction prices only.
+-- WHAT THIS FILE GATHERS: what the character has (the items above, its skills, the gold typed as
+-- a budget), when the bags change and while the bank, the mailbox or the auction house is open,
+-- for the /fwc window and the Make button: a route less what is in hand. It is kept in the saved
+-- file on this computer and NEVER sent: the helper reads FWCS_DB.__chars to know which auction
+-- houses' routes to fetch from the site, and its `status` command lists the characters on the
+-- screen; none of it leaves the computer. Everything the addon
+-- gathers: docs/scanner-addon.md, "What the addon gathers".
 --
 -- Window.lua draws from it, through ns.inv.
 

@@ -92,6 +92,38 @@ def test_what_is_not_a_document_is_refused():
         pass
 
 
+def test_what_the_core_reads_of_a_scan_is_checked_and_bounded():
+    # 9 Nov 2026: a scan without scanned_at stopped the core's pull; everything the core reads of
+    # a scan is checked now, as the pipe checks it, and a rung is held to the game's bounds
+    good = pipe.scan_document(_scan())
+    rows = lambda *rungs: {"items": {"1": {"t": 1, "l": list(rungs)}}}   # noqa: E731
+    for change, why in (({"scanned_at": None}, "scanned_at"), ({"scanned_at": "1790000900"}, "scanned_at"), ({"scanned_at": True}, "scanned_at"),
+                        ({"scanned_at": -1}, "scanned_at"), ({"realm": "x" * 81}, "no realm"), ({"helper": 7}, "helper"),
+                        ({"realm_names": ["Test Realm"]}, "realm_names"), ({"realm_names": {"TestRealm": 1}}, "realm_names"),
+                        ({"connected": "TestRealm"}, "connected"), ({"connected": [None]}, "connected"),
+                        ({"items": {"²": {"t": 1, "l": []}}}, "not an item"), ({"items": {"1" * 11: {"t": 1, "l": []}}}, "not an item"),
+                        ({"items": {"1": {"t": True, "l": []}}}, "not an item"), ({"items": {"1": {"t": 1, "l": [], "name": 5}}}, "its name"),
+                        ({"items": {"1": {"t": 1, "l": [], "full": "yes"}}}, "its name"),
+                        (rows([pipe.MAX_PRICE + 1, 1, 1]), "unit price"), (rows([1, pipe.MAX_STACK + 1, 1]), "unit price"),
+                        (rows([1, 1, pipe.MAX_AUCTIONS + 1]), "unit price"), (rows([True, 1, 1]), "unit price"),
+                        ({"items": {str(i): {"t": 1, "l": []} for i in range(pipe.MAX_ITEMS + 1)}}, "too many items")):
+        assert why in (pipe.check_scan(dict(good, **change)) or ""), change
+    assert pipe.check_scan(dict(good, **rows([pipe.MAX_PRICE, pipe.MAX_STACK, pipe.MAX_AUCTIONS, 4]))) is None
+    # what Forever's houses hold (9 Nov 2026): units listed at 99,999,999,999 copper, stacks of 10000, 5,937 alike
+    assert pipe.check_scan(dict(good, **rows([99999999999, 10000, 5937, 4]))) is None
+    for price in (2 ** 53, 10 ** 300):                                   # past what a client could have read
+        assert "unit price" in pipe.check_scan(dict(good, **rows([price, 1, 1]))), price
+    del good["scanned_at"]
+    assert "scanned_at" in pipe.check_scan(good)
+    # a document from every helper there has been: without faction, rungs of three, no realm_names
+    old = {"format": "fwc-scan/1", "realm": "Test Realm", "scanned_at": 1790000100, "helper": "0.5.0",
+           "items": {"4358": {"t": 1790000100, "name": "Rough Dynamite", "full": 1, "l": [[0, 20, 2], [79, 20, 1]]}}}
+    assert pipe.check_scan(old) is None
+    # a house as the core keeps it: who each row is from, and whether it is unverified
+    kept = dict(old, helper=None, items={"4358": dict(old["items"]["4358"], by="h-abc", u=1)})
+    assert pipe.check_scan(kept) is None
+
+
 def test_a_scan_file_may_be_a_document():
     folder = Path(tempfile.mkdtemp())
     doc = pipe.scan_document(_scan())
@@ -184,6 +216,97 @@ def test_the_core_state_goes_as_a_zip_and_comes_back_as_bytes():
     assert p.state() == b"PK\x03\x04 a zip"                                     # bytes as they were, never unpacked
     assert seen[1] == ("PUT", "/v1/state", False, "application/zip")             # not gzipped on the way: a zip already
     assert seen[0][2:] == (True, "application/json")                             # what every other call sends
+
+class _Clock:
+    """Time that passes only when slept, and the sleeps."""
+    def __init__(self):
+        self.now, self.slept = 1000.0, []
+    def sleep(self, s):
+        self.slept.append(round(s, 3))
+        self.now += s
+    def clock(self):
+        return self.now
+
+
+def _paced(answers, pace, clock):
+    """A Pipe whose requests answer `answers` in turn (status, Retry-After), each taking 0.2 s."""
+    started = []
+
+    class Answering(pipe.Pipe):
+        def __init__(self):
+            self.url, self.token, self.registers, self.pace = "https://paced.test", "core", False, pace
+        def _request(self, method, path, body, packed, content_type):
+            started.append(clock.now)
+            status, self.retry_after = answers.pop(0) if answers else (200, 0)
+            clock.now += 0.2
+            return status, b"{}"
+    return Answering(), started
+
+
+def _faked(clock):
+    kept = pipe._sleep, pipe._clock
+    pipe._sleep, pipe._clock = clock.sleep, clock.clock
+    return kept
+
+
+def test_the_cores_requests_keep_a_pace_and_a_helpers_do_not():
+    clock = _Clock()
+    kept = _faked(clock)
+    try:
+        p, started = _paced([], pipe.CORE_PACE, clock)
+        for i in range(40):
+            p.scan(i + 1)
+        gaps = [b - a for a, b in zip(started, started[1:])]
+        assert min(gaps) >= pipe.CORE_PACE - 1e-9
+        # a steady pace: never more than 8 in any 10 s
+        assert max(sum(1 for t in started if s <= t < s + 10) for s in started) <= 8
+        h, quick = _paced([], 0.0, clock)
+        clock.slept.clear()
+        for i in range(10):
+            h.me()
+        assert clock.slept == [] and len(quick) == 10
+    finally:
+        pipe._sleep, pipe._clock = kept
+
+
+def test_only_the_cores_token_is_paced():
+    saved = pipe.settings.saved
+    try:
+        pipe.settings.saved = lambda name: {"PIPE_CORE_TOKEN": "the-core"}.get(name)
+        assert pipe.Pipe(url="https://p.test", token="the-core").pace == pipe.CORE_PACE
+        assert pipe.Pipe(url="https://p.test", token="a-scanner").pace == 0
+        assert pipe.Pipe(url="https://p.test", register=False).pace == 0          # a helper: no token given
+        assert pipe.Pipe(url="https://p.test", token="a-scanner", pace=2).pace == 2
+        pipe.settings.saved = lambda name: None                                  # no core token set anywhere
+        assert pipe.Pipe(url="https://p.test", token="").pace == 0
+    finally:
+        pipe.settings.saved = saved
+
+
+def test_a_429_is_waited_out_a_few_times_then_answered():
+    clock = _Clock()
+    kept = _faked(clock)
+    try:
+        p, started = _paced([(429, 0), (429, 30), (200, 0)], pipe.CORE_PACE, clock)
+        assert p.request("GET", "/v1/scans/1") == (200, b"{}")
+        assert len(started) == 3 and clock.slept == [pipe.RULE_WAIT, 30]       # the least wait, then what Retry-After said
+
+        clock.slept.clear()
+        p, started = _paced([(429, 7200)] * 10, pipe.CORE_PACE, clock)
+        try:
+            p.scan(1)
+        except pipe.TooSoon:
+            pass
+        else:
+            raise AssertionError("a 429 that does not end is the caller's")
+        assert len(started) == pipe.RULE_TRIES + 1 and max(clock.slept) == pipe.RULE_WAIT_MOST
+
+        clock.slept.clear()
+        h, started = _paced([(429, 60)], 0.0, clock)                            # a helper: told at once, as before
+        assert h.request("POST", "/v1/scans", b"") == (429, b"{}") and clock.slept == [] and len(started) == 1
+    finally:
+        pipe._sleep, pipe._clock = kept
+
 
 if __name__ == "__main__":
     for k, v in list(globals().items()):

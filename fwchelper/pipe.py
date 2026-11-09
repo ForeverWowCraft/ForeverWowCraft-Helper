@@ -1,5 +1,20 @@
 """The pipe: scans go to a service, lists come back from it.
 
+WHAT IS SENT, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the addon
+gathers"). Two documents leave this computer, both built here from the addon's saved file:
+  a scan (fwc-scan/1): the auction house's realm and faction, each listed item's id, name and
+    auctions (unit price, stack, how many, time left), when; the names of the realms the
+    account's characters logged in on with the addon, and the house's connected realms, so that
+    the site names the house. Sent after the player saved a scan in game. For the routes' prices.
+  the sightings (fwc-vendors/1): the merchants, trainers and recipe scrolls the player met
+    (fields in vendors_document below), sent when they changed. For who sells what on Forever,
+    the skill a trainer teaches a recipe at, and the level a recipe is gated at.
+Both go to the project's pipe under this helper's own token (a random name the pipe gave it),
+pooled with other players' into one shared database that the project means to publish openly.
+NEVER sent: no character name, gold, bags, bank or mail, chat, guild, account name or password,
+and no position but the spot of a merchant's or trainer's window the player opened. What each
+character has (FWCS_DB.__chars) stays on this computer.
+
 Two documents, both JSON, sent gzipped:
 
     fwc-scan/1   what one scanner saw: for each item, when, and its ladder
@@ -104,23 +119,71 @@ def scan_document(sd: ScanData) -> dict:
     return doc
 
 
+MAX_ITEMS, MAX_RUNGS = 20000, 400000      # in a scan, as the pipe has them (pipe/src/worker.js)
+MAX_TIME = 2 ** 32 - 1                    # a time is unix seconds: past this it is not one
+MAX_NAMES = 1000                          # realms in realm_names, or in connected
+MAX_TEXT = 200                            # characters of an item's name, the helper's version
+# a rung's bounds, as the pipe has them. A bound here must be one no honest scan can reach: a
+# single auction past it would have every honest scan of that house refused. They refuse numbers
+# no client could have read (an integer past JavaScript's safe range), not prices nobody would
+# pay: measured 9 Nov 2026, Forever's houses list units at up to 99,999,999,999 copper, stacks
+# of 10000 and 5,937 auctions alike
+MAX_PRICE, MAX_STACK, MAX_AUCTIONS = 2 ** 53 - 1, 1000000, 1000000
+
+
+def _whole(x, lo: int = 0, hi: int = MAX_TIME) -> bool:
+    """An integer (not a bool: JSON's true is not a number) from lo to hi."""
+    return isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi
+
+
+def _text(x, most: int = MAX_TEXT) -> bool:
+    return isinstance(x, str) and len(x) <= most
+
+
+def _id(key) -> bool:
+    """An item id as a document's key: ASCII digits, ten at most (int() refuses other digits, and very long ones)."""
+    return isinstance(key, str) and 0 < len(key) <= 10 and key.isascii() and key.isdigit()
+
+
 def check_scan(doc) -> str | None:
-    """Why this is not a fwc-scan/1 document, or None when it is one."""
+    """Why this is not a fwc-scan/1 document, or None when it is one. Everything the core
+    reads of a scan is checked here, its type and its size, so that a document sent by anyone
+    cannot fail where it is read (9 Nov 2026: one without scanned_at stopped the core's pull).
+    What it names of the document is cut short: the text is the sender's."""
     if not isinstance(doc, dict) or doc.get("format") != SCAN_FORMAT:
         return f"not a {SCAN_FORMAT} document"
-    if not isinstance(doc.get("realm"), str) or not doc["realm"].strip():
+    if not isinstance(doc.get("realm"), str) or not doc["realm"].strip() or len(doc["realm"]) > 80:
         return "no realm"
     if doc.get("faction", "") not in FACTIONS + ("",):
-        return f"faction {doc.get('faction')!r} is not one of {', '.join(FACTIONS)}"
+        return f"faction {str(doc.get('faction'))[:20]!r} is not one of {', '.join(FACTIONS)}"
+    if not _whole(doc.get("scanned_at")):
+        return "scanned_at is not a time"
+    if doc.get("helper") is not None and not _text(doc["helper"]):      # None: a house the core kept from scans that did not say
+        return "helper is not a version"
+    names, group = doc.get("realm_names", {}), doc.get("connected", [])
+    if not isinstance(names, dict) or len(names) > MAX_NAMES or not all(_text(k, 80) and _text(v, 80) for k, v in names.items()):
+        return "realm_names is not {realm: name}"
+    if not isinstance(group, list) or len(group) > MAX_NAMES or not all(_text(g, 80) for g in group):
+        return "connected is not a list of realms"
     if not isinstance(doc.get("items"), dict) or not doc["items"]:
         return "no items"
+    if len(doc["items"]) > MAX_ITEMS:
+        return "too many items"
+    rungs = 0
     for key, row in doc["items"].items():
-        if not str(key).isdigit() or not isinstance(row, dict) or not isinstance(row.get("t"), int) or not isinstance(row.get("l"), list):
-            return f"item {key!r} is not an item"
+        if not _id(key) or not isinstance(row, dict) or not _whole(row.get("t")) or not isinstance(row.get("l"), list):
+            return f"item {str(key)[:20]!r} is not an item"
+        # what else a row may carry: its name, whether it was a full scan, and in a house as the
+        # core keeps it, who it is from and whether it is unverified (inbox.merge)
+        if not _text(row.get("name", "")) or row.get("full", 0) not in (0, 1) or row.get("u", 0) not in (0, 1) or not _text(row.get("by", ""), 80):
+            return f"item {key}: its name, full, u or by is not what it should be"
         for rung in row["l"]:       # a unit price of 0 is a stack listed for under a copper a unit (addons before 0.6.1 sent it)
-            if not (isinstance(rung, list) and len(rung) in (3, 4) and all(isinstance(x, int) for x in rung) and rung[0] >= 0
-                    and rung[1] > 0 and rung[2] > 0 and (len(rung) == 3 or 1 <= rung[3] <= 4)):
-                return f"item {key}: {rung!r} is not [unit price, stack size, auctions, time left]"
+            if not (isinstance(rung, list) and len(rung) in (3, 4) and _whole(rung[0], 0, MAX_PRICE) and _whole(rung[1], 1, MAX_STACK)
+                    and _whole(rung[2], 1, MAX_AUCTIONS) and (len(rung) == 3 or _whole(rung[3], 1, 4))):
+                return f"item {key}: {repr(rung)[:60]} is not [unit price, stack size, auctions, time left]"
+        rungs += len(row["l"])
+        if rungs > MAX_RUNGS:
+            return "too many auctions"
     return None
 
 
@@ -146,14 +209,31 @@ def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None 
     "helper", "vendors": {creature id: {name, map, x, y, t, faction, build, items: {item id:
     {price, stack, n, usable, t, cost?}}}}, "trainers": {creature id: {name, map, x, y, t,
     faction, build, skill, teaches: {service: the skill it asks for}}}} (the trainers since
-    helper 1.6.12), "recipes": {recipe item id: {level: the character level the scroll asks
-    for, t}} (since 1.6.22: a hotfix the public tables lack). Nothing of the player: the
-    vendor's name and where it stood, its wares and their prices, the trainer's and what it
-    teaches at which skill, what a scroll asks for, when each was seen."""
+    helper 1.6.12), "recipes": {recipe item id: {level: the scroll's minimum level from the
+    client's item data, t, and since 1.7.5, from a tooltip the player brought up, tip: [line,
+    level, ...], made: the made item, made_level: its item-data level}} (since 1.6.22). The
+    pipe as deployed checks level and t and keeps a row whole, so the fields of 1.7.5 travel
+    without a change to it. Nothing of the player: the vendor's name and where it stood, its
+    wares and their prices, the trainer's and what it teaches at which skill, a scroll's
+    levels, when each was seen."""
     return {"format": VENDORS_FORMAT, "helper": __version__,
             "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()},
             "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()},
-            "recipes": {str(k): {"level": int(r["level"]), "t": int(r.get("t") or 0)} for k, r in (recipes or {}).items()}}
+            "recipes": {str(k): {"level": int(r["level"]), "t": int(r.get("t") or 0), **{f: r[f] for f in RECIPE_EXTRAS if f in r}}
+                        for k, r in (recipes or {}).items()}}
+
+
+RECIPE_EXTRAS = ("tip", "made", "made_level")      # a recipe row's fields since 1.7.5, each there only when known
+
+
+def _recipe_extras(row: dict) -> bool:
+    """Whether a recipe row's fields of 1.7.5, those it has, are what they should be."""
+    tip = row.get("tip", [2, 2])
+    if not (isinstance(tip, list) and 0 < len(tip) <= 8 and len(tip) % 2 == 0 and all(_whole(n, 1, 100) for n in tip)):
+        return False
+    if "made" in row and not _whole(row["made"], 1, 10 ** 10):
+        return False
+    return "made_level" not in row or ("made" in row and _whole(row["made_level"], 0, 100))
 
 
 def check_vendors(doc) -> str | None:
@@ -175,35 +255,37 @@ def check_vendors(doc) -> str | None:
     if len(recipes) > 3000:
         return "too many recipes"
     for iid, row in recipes.items():
-        if not (isinstance(iid, str) and iid.isdigit()) or not isinstance(row, dict) or not isinstance(row.get("level"), int) \
+        if not _id(iid) or not isinstance(row, dict) or not isinstance(row.get("level"), int) \
                 or not 1 <= row["level"] <= 100 or not isinstance(row.get("t"), int):
             return f"recipe {str(iid)[:20]!r}: not a level"
+        if not _recipe_extras(row):
+            return f"recipe {str(iid)[:20]!r}: its tip, made or made_level is not what it should be"
     for tid, t in trainers.items():
         if not (isinstance(tid, str) and 0 < len(tid) <= 80) or not isinstance(t, dict) or not isinstance(t.get("name"), str) or len(t["name"]) > 80:
-            return f"trainer {tid!r} is not a trainer"
+            return f"trainer {str(tid)[:40]!r} is not a trainer"
         if not (isinstance(t.get("map"), int) and isinstance(t.get("t"), int) and t.get("faction", "") in FACTIONS + ("",)):
-            return f"trainer {tid}: no map, time or faction"
+            return f"trainer {str(tid)[:40]}: no map, time or faction"
         if not all(isinstance(t.get(k), (int, float)) and 0 <= t[k] <= 1 for k in ("x", "y")):
-            return f"trainer {tid}: not on its map"
+            return f"trainer {str(tid)[:40]}: not on its map"
         if not isinstance(t.get("skill"), str) or not t["skill"] or len(t["skill"]) > 40:
-            return f"trainer {tid}: no skill"
+            return f"trainer {str(tid)[:40]}: no skill"
         if not isinstance(t.get("teaches"), dict) or len(t["teaches"]) > 400:
-            return f"trainer {tid}: no services, or too many"
+            return f"trainer {str(tid)[:40]}: no services, or too many"
         for name, level in t["teaches"].items():
             if not isinstance(name, str) or len(name) > 80 or not isinstance(level, int) or level < 0:
-                return f"trainer {tid}: {str(name)[:40]!r} is not a service"
+                return f"trainer {str(tid)[:40]}: {str(name)[:40]!r} is not a service"
     for vid, v in doc["vendors"].items():
         if not (isinstance(vid, str) and 0 < len(vid) <= 80) or not isinstance(v, dict) or not isinstance(v.get("name"), str) or len(v["name"]) > 80:
-            return f"vendor {vid!r} is not a vendor"
+            return f"vendor {str(vid)[:40]!r} is not a vendor"
         if not (isinstance(v.get("map"), int) and isinstance(v.get("t"), int) and v.get("faction", "") in FACTIONS + ("",)):
-            return f"vendor {vid}: no map, time or faction"
+            return f"vendor {str(vid)[:40]}: no map, time or faction"
         if not all(isinstance(v.get(k), (int, float)) and 0 <= v[k] <= 1 for k in ("x", "y")):
-            return f"vendor {vid}: not on its map"
+            return f"vendor {str(vid)[:40]}: not on its map"
         if not isinstance(v.get("items"), dict) or len(v["items"]) > 400:
-            return f"vendor {vid}: no items, or too many"
+            return f"vendor {str(vid)[:40]}: no items, or too many"
         for iid, row in v["items"].items():
-            if not str(iid).isdigit() or not isinstance(row, dict) or not all(isinstance(row.get(k), int) for k in ("price", "stack", "n", "t")):
-                return f"vendor {vid}: item {iid!r} is not a ware"
+            if not _id(iid) or not isinstance(row, dict) or not all(isinstance(row.get(k), int) for k in ("price", "stack", "n", "t")):
+                return f"vendor {str(vid)[:40]}: item {str(iid)[:20]!r} is not a ware"
     return None
 
 
@@ -262,14 +344,32 @@ def mark(doc: dict) -> str:
 
 
 # ---- the service ------------------------------------------------------------------------------
-class Pipe:
-    """The service at `url`, spoken to with `token`."""
+# The core's pace. The core fetches documents one by one (every new scan, every changed vendors
+# document), and as fast as the pipe answers that would be a flood; so a Pipe speaking with the
+# core's token keeps a steady pace, a request no sooner than CORE_PACE after the last, and never
+# floods the pipe. A helper is not paced: it asks a handful of times when it starts and once or
+# twice a save. A 429 the core gets anyway is waited out a few times, then given to the caller:
+# the pull stops there and goes on from its cursor at the next pass. The numbers behind the
+# pace: see docs/security.md in the core.
+CORE_PACE = 1.25            # seconds from the start of one of the core's requests to the next
+RULE_TRIES = 3              # 429s waited out in a row, at most, before the 429 is the answer
+RULE_WAIT, RULE_WAIT_MOST = 11, 60     # seconds a 429 is waited out: this, or the Retry-After, up to a minute
+_sleep, _clock = time.sleep, time.monotonic      # the tests fake these
 
-    def __init__(self, url: str | None = None, token: str | None = None, register: bool = True):
+
+class Pipe:
+    """The service at `url`, spoken to with `token`. `pace` is the least time in seconds from
+    the start of one request to the next; by default CORE_PACE when the token is the core's
+    (FWC_PIPE_CORE_TOKEN), and none for a helper."""
+
+    def __init__(self, url: str | None = None, token: str | None = None, register: bool = True, pace: float | None = None):
         self.url = (url or settings.saved("PIPE_URL") or settings.PIPE_URL or "").rstrip("/")
         if not self.url:
             raise PipeError("no pipe to talk to: set FWC_PIPE_URL")
         self.name = None
+        if pace is None:            # a helper gives no token, and so is never paced; the core gives its own
+            pace = CORE_PACE if token and token == settings.saved("PIPE_CORE_TOKEN") else 0.0
+        self.pace = float(pace)
         self.token = token if token is not None else settings.saved("PIPE_TOKEN")
         self.registers = register and token is None and not self.token       # no token given: get one of our own
         if self.registers:
@@ -306,6 +406,23 @@ class Pipe:
 
     def request(self, method: str, path: str, body: bytes | None = None, packed: bool = True,
                 content_type: str = "application/json") -> tuple[int, bytes]:
+        """One request, as (status, body). A paced Pipe (the core's) keeps its pace, and waits
+        out a 429 up to RULE_TRIES times before answering with it; a helper's is answered at once."""
+        pace = getattr(self, "pace", 0.0)
+        tries = 0
+        while True:
+            if pace:
+                wait = getattr(self, "_last", float("-inf")) + pace - _clock()
+                if wait > 0:
+                    _sleep(wait)
+                self._last = _clock()
+            status, data = self._request(method, path, body, packed, content_type)
+            if status != 429 or not pace or tries >= RULE_TRIES:
+                return status, data
+            tries += 1
+            _sleep(min(max(self.retry_after, RULE_WAIT), RULE_WAIT_MOST))
+
+    def _request(self, method: str, path: str, body: bytes | None, packed: bool, content_type: str) -> tuple[int, bytes]:
         headers = {"User-Agent": f"{settings.NAME}-helper/{__version__}"}
         if self.token and path != "/v1/register":
             headers["Authorization"] = "Bearer " + self.token

@@ -29,6 +29,11 @@ FWCS_DB = {
 	["__recipes"] = {
 		[250389] = { ["l"] = 45, ["t"] = 1790000200 },
 		[7288] = { ["l"] = 1, ["t"] = 1790000200 },
+		[250390] = { ["l"] = 1, ["t"] = 1790000300, ["tip"] = { 5, -- [1]
+			45, -- [2]
+		}, ["made"] = 99001, ["madel"] = 35 },
+		[250391] = { ["l"] = 1, ["t"] = 1790000300, ["tip"] = { 5, 45 }, ["made"] = 99002 },
+		[250392] = { ["l"] = 1, ["t"] = 1790000300, ["tip"] = { 5 }, ["made"] = true, ["madel"] = 35 },
 		["bad"] = { ["l"] = 45, ["t"] = 1790000200 },
 	},
 	["__trainers"] = {
@@ -99,11 +104,27 @@ def test_the_vendors_met_are_read_and_make_a_document_the_pipe_takes():
     assert pipe.check_vendors(bad) == "trainer 3363: 'Embossed Leather Gloves' is not a service"
     bad["trainers"]["3363"]["skill"] = ""
     assert pipe.check_vendors(bad) == "trainer 3363: no skill"
-    # the recipe scrolls looked at, with the character level each asks for (since 1.6.22: a hotfix the tables lack)
+    # the recipe scrolls looked at, with the character level each asks for (since 1.6.22: a hotfix the tables lack);
+    # 7288's level 1 is a row an addon before 1.7.4 kept for a scroll asking none (1.7.4 lets such rows go at login), read as it is
+    # and ignored by the core, which takes no level of 1 or below
+    # since 1.7.5 a scroll the player hovered has its tooltip's "Requires Level" lines [line, level, ...], the made item and
+    # that item's item-data level beside its own item-data level ("level", as it has always been); a malformed field is dropped
     asked = scan.recipes(_saved())
-    assert asked == {250389: {"level": 45, "t": 1790000200}, 7288: {"level": 1, "t": 1790000200}}
+    assert asked == {250389: {"level": 45, "t": 1790000200}, 7288: {"level": 1, "t": 1790000200},
+                     250390: {"level": 1, "t": 1790000300, "tip": [5, 45], "made": 99001, "made_level": 35},
+                     250391: {"level": 1, "t": 1790000300, "tip": [5, 45], "made": 99002},
+                     250392: {"level": 1, "t": 1790000300}}
     full = pipe.vendors_document(seen, met, asked)
-    assert pipe.check_vendors(full) is None and full["recipes"] == {"250389": {"level": 45, "t": 1790000200}, "7288": {"level": 1, "t": 1790000200}}
+    assert pipe.check_vendors(full) is None and full["recipes"] == {"250389": {"level": 45, "t": 1790000200}, "7288": {"level": 1, "t": 1790000200},
+                                                                    "250390": {"level": 1, "t": 1790000300, "tip": [5, 45], "made": 99001, "made_level": 35},
+                                                                    "250391": {"level": 1, "t": 1790000300, "tip": [5, 45], "made": 99002},
+                                                                    "250392": {"level": 1, "t": 1790000300}}
+    bad = pipe.vendors_document(seen, met, asked)
+    bad["recipes"]["250390"]["tip"] = [5, 45, 6]
+    assert pipe.check_vendors(bad) == "recipe '250390': its tip, made or made_level is not what it should be"
+    bad["recipes"]["250390"]["tip"] = [5, 45]
+    bad["recipes"]["250390"]["made"] = True
+    assert pipe.check_vendors(bad) == "recipe '250390': its tip, made or made_level is not what it should be"
     assert pipe.check_vendors(pipe.vendors_document({}, {}, asked)) is None               # the scrolls alone are a document
     assert pipe.mark_vendors(full) != pipe.mark_vendors(both) and both["recipes"] == {}
     bad = pipe.vendors_document(seen, met, asked)

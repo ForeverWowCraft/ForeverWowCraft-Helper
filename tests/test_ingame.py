@@ -131,10 +131,13 @@ end
 '''
 
 
-def _game(doc=None):
-    """A Lua with the stand-in game and the addon loaded as the .toc says, the character logged in."""
+def _game(doc=None, saved=None):
+    """A Lua with the stand-in game and the addon loaded as the .toc says, the character logged in.
+    `saved`: Lua run before the files, as the saved file the game reads in."""
     lua = lupa.LuaRuntime()
     lua.execute(GAME)
+    if saved:
+        lua.execute(saved)
     toc = (ADDON / "ForeverWowCraftScanner.toc").read_text(encoding="utf-8")
     files = [line.strip() for line in toc.splitlines() if line.strip().endswith(".lua")]
     assert files == ["Queue.lua", "Plans.lua", "Fresh.lua", "ForeverWowCraftScanner.lua", "Tailor.lua", "Inventory.lua", "Widgets.lua", "Window.lua",
@@ -362,6 +365,21 @@ def test_the_window_shows_the_route_less_bags_and_bank():
     # /fwc again closes it; /fwcs plan opens it
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
     assert lua.eval("AllText()").count("Shopping list") == 1          # still drawn, in a window that is hidden
+
+
+def test_bags_that_change_with_the_window_closed_are_counted_when_it_opens():
+    # since 1.7.5 a bag change counts the bags slot by slot only for the window shown; it counts them itself as it
+    # opens, and the shopping list and the Make button read the bags live (ns.inv.Count): none of them sees an old count
+    lua = _game()
+    lua.execute('SlashCmdList.FOREVERWOWCRAFT(""); ns.ToggleWindow()')            # opened and closed: 0 bolts counted
+    assert lua.eval("ForeverWowCraftWindow:IsShown()") is False
+    lua.execute('bags[0][1] = { 2996, 5 }; bags[0][2] = { 2320, 20 }; Fire("BAG_UPDATE_DELAYED"); RunTimers()')
+    me = lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"]')
+    assert me["items"][BOLT] is None                                                # not counted with the window closed
+    assert lua.eval("ns.inv.Count(2996)") == 5                                      # what the list and the button read
+    lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
+    assert me["items"][BOLT][1] == 5                                                # counted as it opened
+    assert lua.eval("(ns.AuctionatorImport())") == 'FWC Tailoring 44-60^"Linen Cloth";;;;;;;;;;;;;76'   # the list less the 5 bolts
 
 
 def test_a_client_in_another_language_sees_its_own_names():
@@ -896,10 +914,278 @@ def test_places_are_noted_as_the_character_meets_them():
     p, d, here = lua.eval('ns.NearestPlace("vendor", nil, %d)' % THREAD)
     assert p.kind == "vendor" and abs(d - 200) < 1e-6 and here is True
     assert lua.eval('ns.NearestPlace("vendor", nil, 25)') is None
+    # a place replaced at the same count, then any place noted: the nearest is looked for among them as they are now
+    lua.execute('FWCS_DB.__places[2] = { map = 1453, x = 0.90, y = 0.50, kind = "vendor", what = "Other", sells = { 2320 }, t = 1 }; '
+                'px, py = 0.60, 0.30; Fire("AUCTION_HOUSE_SHOW"); px, py = 0.50, 0.50')
+    assert len(places()) == 3 and abs(lua.eval('(select(2, ns.NearestPlace("vendor", nil, %d)))' % THREAD) - 400) < 1e-6
     # on another map, the one seen is named, with the way through the world (Stormwind from Elwynn)
     lua.execute('map = 1429')
     p, d, here = lua.eval('ns.NearestPlace("trainer", "tailoring")')
     assert p.what == "tailoring" and d is not None and 0 < d < 3000 and here is False
+
+
+# Forever's client (Interface 16001) has no GetMerchantItemInfo, only C_MerchantFrame.GetItemInfo,
+# which gives a table: until 1.7.4 no ware and no price was read there (50 vendors noted, not one
+# ware, 9 Nov 2026)
+MERCHANT_FRAME_GAME = '''
+  GetMerchantItemInfo = nil
+  slots = {
+    { name = "Coarse Thread", texture = 1, price = 10, stackCount = 1, numAvailable = -1, isPurchasable = true, isUsable = true, hasExtendedCost = false },
+    { name = "Sword", texture = 2, price = 500, stackCount = 5, numAvailable = 2, isPurchasable = true, isUsable = false, hasExtendedCost = true },
+    { name = "Bleach", texture = 3, price = 0, stackCount = 1, numAvailable = -1, isPurchasable = true, isUsable = true, hasExtendedCost = true },
+  }
+  C_MerchantFrame = { GetItemInfo = function(i) return slots[i] end }
+  function GetMerchantItemCostInfo(i) return (i == 2 and 1) or (i == 3 and 2) or 0 end
+  function GetMerchantItemCostItem(i, j)
+    if i == 3 and j == 2 then return "tex", 20, "|cffffffff|Hcurrency:1792:0|h[Honor]|h|r", "Honor" end
+    return "tex", i == 2 and 45 or 3, "|cffffffff|Hitem:250000::::::::1:::::::|h[Favor]|h|r", "Favor"
+  end
+  function UnitGUID(unit) return "Creature-0-4170-0-10-3579-000057A14C" end
+'''
+
+
+def test_a_merchant_on_forevers_client_is_read_from_c_merchantframe():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute(MERCHANT_FRAME_GAME)
+    lua.execute('px = 0.70; wares = { 2320, 25, 2324 }; Fire("MERCHANT_SHOW")')
+    v = lua.eval("FWCS_DB.__vendors[3579]")
+    thread, sword, bleach = v["items"][THREAD], v["items"][25], v["items"][DYE]
+    # a ware in unlimited stock, one in short stock paid in Favor beside gold, one paid in an item and a currency only
+    assert (thread.price, thread.stack, thread.n, thread.usable) == (10, 1, -1, True) and thread.cost is None
+    assert (sword.price, sword.stack, sword.n, sword.usable) == (500, 5, 2, False) and dict(sword.cost) == {250000: 45}
+    assert (bleach.price, bleach.n) == (0, -1) and dict(bleach.cost) == {250000: 3, 1792: 20}
+    assert [p["kind"] for p in lua.eval("FWCS_DB.__places").values()] == ["vendor"]
+    # the same values in the same order as the old global gave them; an empty slot gives none
+    assert list(lua.eval("{ ns.MerchantItemInfo(2) }").values()) == ["Sword", 2, 500, 5, 2, True, False, True]
+    assert lua.eval('select("#", ns.MerchantItemInfo(9))') == 0
+
+
+def test_the_shopping_list_sees_the_merchants_prices_on_forevers_client():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute(MERCHANT_FRAME_GAME)
+    lua.execute('''
+      slots[1].stackCount = 1
+      wares = { 2320, 25 }
+      function GetMerchantItemMaxStack(i) return 5 end
+      function BuyMerchantItem() end
+      MerchantFrame = CreateFrame("Frame")
+      skill = 44
+      bags[0] = { { 2589, 14 } }
+      Fire("MERCHANT_SHOW")
+    ''')
+    shop = lambda path: lua.eval("ForeverWowCraftShop." + path)  # noqa: E731
+    assert shop("rows[1].name.text") == "Coarse Thread" and shop("rows[1].buy.text") == "Buy 5"
+    assert re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", shop("rows[1].status.text")) == "50c"               # 5 at 10c: not 0
+
+
+def test_a_merchant_on_a_client_with_neither_way_records_no_wares():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute('GetMerchantItemInfo, C_MerchantFrame = nil, nil; function UnitGUID() return "Creature-0-4170-0-10-3579-000057A14C" end')
+    lua.execute('px = 0.70; wares = { 2320 }; Fire("MERCHANT_SHOW")')
+    assert lua.eval("FWCS_DB.__vendors") is None and lua.eval('select("#", ns.MerchantItemInfo(1))') == 0
+    assert [p["kind"] for p in lua.eval("FWCS_DB.__places").values()] == ["vendor"]          # the place as before
+
+
+# A recipe scroll on Forever's client: GetItemInfo's minimum level is 1 for every scroll seen (670
+# such rows sent until 1.7.4, 9 Nov 2026). Its tooltip, as the client gave it for Recipe: Elixir of
+# Intellect (250389), line by line. The made item's id and level here (99001, 35) are the test's
+# own: the client found it by the name on line 3, which it has already loaded to draw the tooltip
+RECIPE_GAME = r'''
+  ITEM_MIN_LEVEL, ITEM_SPELL_TRIGGER_ONUSE = "Requires Level %d", "Use:"
+  C_Item.GetItemInfoInstant = function(id) if type(id) == "number" and id >= 250000 then return id, "Recipe", "Alchemy", "", 134939, 9, 6 end
+                                           if type(id) == "number" then return id, "Trade Goods", "Cloth", "", 1, 7, 5 end end
+  minlevels, ids = {}, {}             -- ids[name] = item id, for the client's look-up by name (an item it has loaded)
+  C_Item.GetItemInfo = function(id)
+    if type(id) == "string" then id = ids[id]; if not id then return end end
+    if known[id] then return known[id], "|cffffffff|Hitem:" .. id .. "::::::::60:::::|h[" .. known[id] .. "]|h|r", 1, 1, minlevels[id] or 1 end
+  end
+  tips = { [250389] = { "Recipe: Elixir of Intellect", "", "\nElixir of Intellect", "Use: Drink to increase your Intellect by 10. Lasts for 30 min.",
+                        "Requires Level 45", "Use: Teaches you how to craft Elixir of Intellect.", "Khadgar's Whisker (3), Leaded Vial", "Requires Alchemy (135)" } }
+  nested = {}                         -- nested[scroll] = { line, item }: a tooltip data line that names the made item (a nested block)
+  C_TooltipInfo = { GetItemByID = function(id)
+    local out = { id = id, lines = {} }
+    for i, t in ipairs(tips[id] or {}) do
+      local line = { leftText = t }
+      if nested[id] and nested[id][1] == i then line.tooltipID, line.tooltipType = nested[id][2], 0 end
+      table.insert(out.lines, line)
+    end
+    return out
+  end }
+  function Hover(id) return postcalls[1](GameTooltip, C_TooltipInfo.GetItemByID(id)) end      -- the player brings the item's tooltip up
+'''
+# The client's hook for item tooltips, as this client has it: given before the addon loads
+HOOK = "Enum.TooltipDataType = { Item = 0 }; postcalls = {}; TooltipDataProcessor = { AddTooltipPostCall = function(kind, fn) assert(kind == 0); table.insert(postcalls, fn) end }"
+SCROLL = "known[250389], known[99001], ids['Elixir of Intellect'], minlevels[99001] = 'Recipe: Elixir of Intellect', 'Elixir of Intellect', 99001, 35"
+
+
+def _row(lua, item):
+    row = lua.eval(f"(FWCS_DB.__recipes or {{}})[{item}]")
+    return None if row is None else {k: (list(v.values()) if lupa.lua_type(v) == "table" else v) for k, v in row.items()}
+
+
+def test_a_scroll_hovered_gives_its_three_levels():
+    lua = _game(saved=HOOK)
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL)
+    assert lua.eval("#postcalls") == 1                                    # the one hook, for item tooltips
+    lua.execute("Hover(250389)")
+    row = _row(lua, 250389)
+    # the tooltip's "Requires Level 45" on its line 5; the scroll's own item data, 1; the made item's, 35
+    assert row == {"l": 1, "tip": [5, 45], "made": 99001, "madel": 35, "t": row["t"]} and row["t"] > 0
+    assert lua.eval("ns.NoteRecipeLevel(250389)") is None and _row(lua, 250389)["tip"] == [5, 45]    # the scan's look leaves it be
+    # a scroll with no level line and item data of 1 has nothing to say: no row
+    lua.execute('known[250010] = "Recipe: Minor Potion"; tips[250010] = { "Recipe: Minor Potion", "Use: Teaches you how to craft Minor Potion." }; Hover(250010)')
+    assert _row(lua, 250010) is None
+    # a level line in another language: the client's own format, not English
+    lua.execute('ITEM_MIN_LEVEL = "Benötigt Stufe %d"')
+    lua.execute('known[250011] = "Rezept"; tips[250011] = { "Rezept", "Benötigt Stufe 30" }')
+    lua2 = _game(saved=HOOK)
+    lua2.execute(RECIPE_GAME)
+    lua2.execute('ITEM_MIN_LEVEL = "Benötigt Stufe %d"; known[250011] = "Rezept"; tips[250011] = { "Rezept", "Requires Level 12", "Benötigt Stufe 30" }; Hover(250011)')
+    assert _row(lua2, 250011)["tip"] == [3, 30]
+    # what the helper reads of the saved row, and the document the pipe takes
+    from fwchelper import pipe, scan
+    import tempfile
+    f = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
+    f.write_text('FWCS_DB = { ["__recipes"] = { [250389] = { ["l"] = 1, ["t"] = %d, ["tip"] = { 5, 45 }, ["made"] = 99001, ["madel"] = 35 } } }' % row["t"], encoding="utf-8")
+    asked = scan.recipes(f)
+    assert asked == {250389: {"level": 1, "t": row["t"], "tip": [5, 45], "made": 99001, "made_level": 35}}
+    assert pipe.check_vendors(pipe.vendors_document({}, {}, asked)) is None
+
+
+def _counting(lua):
+    """Every call into the stand-in's item and tooltip API counted (calls[name]), and every field
+    of the tooltip data read (reads[field])."""
+    lua.execute('''
+      calls, reads = {}, {}
+      local function counted(t, name) local fn = t[name]; t[name] = function(...) calls[name] = (calls[name] or 0) + 1; return fn(...) end end
+      for _, name in ipairs({ "GetItemInfo", "GetItemInfoInstant", "RequestLoadItemDataByID" }) do counted(C_Item, name) end
+      counted(_G, "time")
+      TooltipUtil = { SurfaceArgs = function() calls.SurfaceArgs = (calls.SurfaceArgs or 0) + 1 end }
+      function Watched(data) return setmetatable({}, { __index = function(_, k) reads[k] = (reads[k] or 0) + 1; return data[k] end }) end
+      function HoverWatched(id) calls, reads = {}, {}; return postcalls[1](GameTooltip, Watched(C_TooltipInfo.GetItemByID(id))) end
+    ''')
+
+
+def test_a_tooltip_that_is_not_a_scroll_or_a_scroll_read_costs_one_look_up():
+    lua = _game(saved=HOOK)
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL)
+    _counting(lua)
+    calls = lambda: dict(lua.eval("calls").items())  # noqa: E731
+    reads = lambda: dict(lua.eval("reads").items())  # noqa: E731
+    # an item that is not a recipe: its class asked once, then never again this session
+    lua.execute('known[2589] = "Linen Cloth"; tips[2589] = { "Linen Cloth" }; HoverWatched(2589)')
+    assert calls() == {"GetItemInfoInstant": 1} and reads() == {"id": 1}
+    lua.execute("HoverWatched(2589)")
+    assert calls() == {} and reads() == {"id": 1}                              # the id, and the one look-up in the addon's table
+    # a scroll: read the first time (its lines, its data, the made item's), then nothing at all
+    lua.execute("HoverWatched(250389)")
+    assert calls()["GetItemInfoInstant"] == 1 and calls()["GetItemInfo"] == 2 and reads()["lines"] == 1
+    assert "RequestLoadItemDataByID" not in calls()                            # nothing asked of the server beyond the hover
+    t = _row(lua, 250389)["t"]
+    lua.execute("HoverWatched(250389); HoverWatched(250389)")
+    assert calls() == {} and reads() == {"id": 1} and _row(lua, 250389)["t"] == t
+    # an item event for something not awaited: nothing
+    lua.execute('calls = {}; Fire("GET_ITEM_INFO_RECEIVED", 2589, true)')
+    assert calls() == {}
+
+
+def test_nothing_the_client_gives_the_tooltip_hook_makes_it_raise():
+    lua = _game(saved=HOOK)
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL)
+    _counting(lua)
+    # tooltip data whose lines are not a table, a line that is not a table, an item look-up that raises
+    lua.execute('postcalls[1](GameTooltip, { id = 250401, lines = 5 }); postcalls[1](GameTooltip, { id = 250402, lines = { 9 } })')
+    lua.execute('known[250403] = "Recipe: Odd"; tips[250403] = { "Recipe: Odd", "Requires Level 9" }; '
+                'local was = C_Item.GetItemInfo; C_Item.GetItemInfo = function() error("no") end; Hover(250403); C_Item.GetItemInfo = was')
+    lua.execute('postcalls[1](GameTooltip, 7); postcalls[1](GameTooltip, nil)')                          # not even a table: nothing
+    assert lua.eval("ns.scrollFailures") == 3 and lua.eval("(FWCS_DB.__recipes or {})[250401]") is None
+    # each is let be for the session: no second try, no second failure
+    lua.execute("HoverWatched(250403); calls, reads = {}, {}; postcalls[1](GameTooltip, Watched({ id = 250401, lines = 5 }))")
+    assert lua.eval("ns.scrollFailures") == 3 and dict(lua.eval("calls").items()) == {} and dict(lua.eval("reads").items()) == {"id": 1}
+    # the next ordinary scroll still reads
+    lua.execute("Hover(250389)")
+    assert _row(lua, 250389)["tip"] == [5, 45]
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("debug")')                                       # where the count shows
+    assert "3 recipe scroll tooltip(s) could not be read this session" in lua.eval("printed[#printed]")
+    # a client without the hook, whose tooltip refuses GetItem: nothing either
+    old = _game(saved="hooked = {}; GameTooltip.HookScript = function(self, name, fn) hooked[name] = fn end")
+    old.execute('GameTooltip.GetItem = function() error("no") end; hooked.OnTooltipSetItem(GameTooltip)')
+    # and nothing before the saved variables are in
+    lua.execute("FWCS_DB = nil; postcalls[1](GameTooltip, { id = 250404, lines = {} })")
+
+
+def test_the_made_items_data_may_come_late():
+    lua = _game(saved=HOOK)
+    lua.execute(RECIPE_GAME)
+    # the tooltip data names the made item (a nested block), whose data the client has not yet
+    lua.execute('known[250390] = "Recipe: Elixir of Agility"; tips[250390] = { "Recipe: Elixir of Agility", "", "\\nElixir of Agility", "Requires Level 27" }')
+    lua.execute("nested[250390] = { 3, 99002 }; Hover(250390)")
+    assert _row(lua, 250390) == {"l": 1, "tip": [4, 27], "made": 99002, "t": _row(lua, 250390)["t"]}
+    lua.execute("FWCS_DB.__recipes[250390].t = 5")
+    lua.execute('known[99002], minlevels[99002] = "Elixir of Agility", 27; Fire("GET_ITEM_INFO_RECEIVED", 99002, true)')
+    row = _row(lua, 250390)
+    assert row["madel"] == 27 and row["made"] == 99002 and row["t"] > 5                 # the number came: the row rewritten
+    lua.execute('FWCS_DB.__recipes[250390].t = 5; Fire("GET_ITEM_INFO_RECEIVED", 99002, true)')
+    assert _row(lua, 250390)["t"] == 5                                                     # once only
+
+
+def test_a_scroll_row_is_rewritten_only_when_a_number_changed():
+    saved = HOOK + "; FWCS_DB = { __recipes = { [250389] = { l = 1, t = 5, tip = { 5, 45 }, made = 99001, madel = 35 }, [250012] = { l = 1, t = 5 } } }"
+    lua = _game(saved=saved)
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL)
+    assert _row(lua, 250012) is None and _row(lua, 250389)["t"] == 5                      # kept at login for its tooltip level; a bare 1 let go
+    lua.execute("Hover(250389)")
+    assert _row(lua, 250389)["t"] == 5                                                     # the same numbers: not rewritten
+    lua = _game(saved=saved)                                                               # another session, a hotfix in between
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL + "; minlevels[99001] = 36; Hover(250389)")
+    row = _row(lua, 250389)
+    assert row["madel"] == 36 and row["t"] > 5 and row["tip"] == [5, 45]
+
+
+def test_a_client_without_the_tooltip_hook_reads_the_tooltip_drawn():
+    saved = "hooked = {}; GameTooltip.HookScript = function(self, name, fn) hooked[name] = fn end"
+    lua = _game(saved=saved)
+    lua.execute(RECIPE_GAME)
+    lua.execute(SCROLL)
+    assert lua.eval("hooked.OnTooltipSetItem") is not None and lua.eval("postcalls") is None
+    lua.execute('''
+      GameTooltip.GetItem = function() return "Recipe: Elixir of Intellect", "|cffffffff|Hitem:250389::::::::60:::::|h[Recipe: Elixir of Intellect]|h|r" end
+      GameTooltip.GetName = function() return "GameTooltip" end
+      GameTooltip.NumLines = function() return #tips[250389] end
+      for i, t in ipairs(tips[250389]) do _G["GameTooltipTextLeft" .. i] = { GetText = function() return t end } end
+      hooked.OnTooltipSetItem(GameTooltip)
+    ''')
+    row = _row(lua, 250389)
+    assert row == {"l": 1, "tip": [5, 45], "made": 99001, "madel": 35, "t": row["t"]}
+    lua.execute('GameTooltip.GetItem = function() return "Linen Cloth", "|cffffffff|Hitem:2589::::::::60:::::|h[Linen Cloth]|h|r" end; hooked.OnTooltipSetItem(GameTooltip)')
+    assert _row(lua, 2589) is None
+
+
+def test_a_scroll_keeps_a_level_only_when_the_client_gives_a_real_one():
+    lua = _game()
+    lua.execute(RECIPE_GAME)
+    lua.execute('known[250389], known[250001], known[250002] = "Recipe: Elixir of Intellect", "Recipe: Minor Potion", "Recipe: Odd Potion"; minlevels[250001] = 0')
+    # level 1, as the client's item data gives it for this scroll, and 0: no row (the tooltip is not read)
+    assert lua.eval("ns.NoteRecipeLevel(250389)") is None and lua.eval("(FWCS_DB.__recipes or {})[250389]") is None
+    assert lua.eval("ns.NoteRecipeLevel(250001)") is None and lua.eval("(FWCS_DB.__recipes or {})[250001]") is None
+    assert lua.eval("ns.NoteRecipeLevel(250003)") is None                                    # data not in yet: nothing, nothing breaks
+    lua.execute("minlevels[250002] = 30")
+    assert lua.eval("ns.NoteRecipeLevel(250002)") == 30 and lua.eval("FWCS_DB.__recipes[250002].l") == 30
+    assert lua.eval("(FWCS_DB.__recipes or {})[250389]") is None
+
+
+def test_the_made_up_level_1_rows_are_let_go_at_load():
+    saved = "FWCS_DB = { __recipes = { [250010] = { l = 1, t = 5 }, [250011] = { l = 45, t = 5 }, [250012] = { t = 5 } } }"
+    lua = _game(saved=saved)
+    assert {k: dict(v) for k, v in lua.eval("FWCS_DB.__recipes").items()} == {250011: {"l": 45, "t": 5}}
 
 
 def test_a_recipe_the_route_buys_takes_gold_and_only_gold():
@@ -1649,16 +1935,6 @@ def test_the_shopping_list_buys_at_the_auction_house_a_click_and_a_confirm_each(
     assert "does not open with the auction house" in lua.eval("printed[#printed]")
 
 
-if __name__ == "__main__":
-    if lupa is None:
-        print("skipped: no Lua here (pip install lupa); tests/lua_check.py still reads the addon's files")
-        sys.exit(0)
-    for k, v in list(globals().items()):
-        if k.startswith("test_") and callable(v):
-            v()
-            print("ok", k)
-
-
 # ---- the reload reminder (Remind.lua) ---------------------------------------------------------
 def test_the_reminder_to_reload_comes_when_due_and_waits_while_busy():
     lua = _game()
@@ -1779,3 +2055,23 @@ def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_s
     # the box off: the route as planned, whatever the level
     lua.execute('UnitLevel = function() return 30 end; FWCS_DB.__ui.levelRoutes = false; Fire("BAG_UPDATE_DELAYED")')
     assert text() == "Needs level 45 for White Linen Shirt"
+    # the profession window closed, the verdict is the background pass's: in a fight it waits (no route walk on a bag
+    # change there), and comes when the fight is over
+    lua.execute('Fire("TRADE_SKILL_CLOSE"); ForeverWowCraftMake:Hide(); runs = 0; local was = ns.Effective; ns.Effective = function(...) runs = runs + 1; return was(...) end')
+    assert text() == "Needs level 45 for White Linen Shirt"
+    lua.execute('runs = 0; InCombatLockdown = function() return true end; FWCS_DB.__ui.levelRoutes = nil; Fire("BAG_UPDATE_DELAYED"); Fire("PLAYER_MONEY")')
+    assert text() == "Needs level 45 for White Linen Shirt" and lua.eval("runs") == 0                  # no route looked at in the fight
+    lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
+    assert lua.eval("runs") > 0                                                                       # the pass held back, run once it is over
+    lua.execute('runs = 0; Fire("PLAYER_REGEN_ENABLED")')
+    assert lua.eval("runs") == 0                                                                      # and only what was owed
+
+
+if __name__ == "__main__":
+    if lupa is None:
+        print("skipped: no Lua here (pip install lupa); tests/lua_check.py still reads the addon's files")
+        sys.exit(0)
+    for k, v in list(globals().items()):
+        if k.startswith("test_") and callable(v):
+            v()
+            print("ok", k)

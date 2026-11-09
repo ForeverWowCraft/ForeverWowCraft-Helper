@@ -227,7 +227,12 @@ function Standing(profession)
   if ok and type(v) == "table" then return v end
 end
 
+-- in a fight the verdict waits (a bag change, a skill-up or the 5 s ticker would each run a
+-- whole route walk there): it is owed, and run once the fight is over (PLAYER_REGEN_ENABLED)
+local owed = false
 local function Headless()
+  if InCombatLockdown and InCombatLockdown() then owed = true; return end
+  owed = false
   if not House() then return end
   Unlearned()
   if PanelShown() or ns.Settings().arrowKeep == false or ns.Settings().arrow == false then return end
@@ -375,16 +380,26 @@ local frame = CreateFrame("Frame")
 for _, event in ipairs({ "ADDON_LOADED", "PLAYER_ENTERING_WORLD", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "TRADE_SKILL_CLOSE",
                          "SKILL_LINES_CHANGED", "CHAT_MSG_SKILL", "BAG_UPDATE_DELAYED", "PLAYER_MONEY", "PLAYER_LEVEL_UP",
                          "NEW_RECIPE_LEARNED", "LEARNED_SPELL_IN_TAB", "LEARNED_SPELL_IN_SKILL_LINE", "ITEM_DATA_LOAD_RESULT",
-                         "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED" }) do
+                         "MAIL_SHOW", "MAIL_INBOX_UPDATE", "MAIL_CLOSED", "PLAYER_REGEN_ENABLED" }) do
   pcall(frame.RegisterEvent, frame, event)
 end
+local named = false             -- a redraw for names that came is on its way
 frame:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" then
     if name == "Blizzard_Professions" or name == "Blizzard_TradeSkillUI" then Place() end
     return
   end
+  if event == "PLAYER_REGEN_ENABLED" then                  -- the fight is over: the verdict it held back
+    if owed then Headless() end
+    return
+  end
   if event == "ITEM_DATA_LOAD_RESULT" then                 -- an item's name came from the client: the arrow's note names it as the game does
-    if pointed then if PanelShown() then Refresh() else Headless() end end
+    -- they come in bursts (hundreds while a list is scanned): one redraw for a burst
+    if pointed and not named then
+      named = true
+      local function redraw() named = false; if PanelShown() then Refresh() else Headless() end end
+      if C_Timer and C_Timer.After then C_Timer.After(0.5, redraw) else redraw() end
+    end
     return
   end
   if event == "PLAYER_ENTERING_WORLD" then                 -- a login or a reload: the arrow back as it was, then moved on

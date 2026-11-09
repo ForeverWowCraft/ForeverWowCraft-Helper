@@ -7,6 +7,13 @@ A dataset is an auction house: a realm and a faction, Alliance or Horde. The add
 under the key "<realm>|<faction>". Scans from before it knew the faction are under the realm's
 name alone; their faction is "" (unknown). The house both factions share is not scanned (13
 Oct 2026); a dataset of it left from before is passed over.
+
+WHAT IS READ HERE, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the addon
+gathers"): of the addon's saved file, the auction ladders and their history (load_scan), the
+realm names (FWCS_DB.__realms, __groups), the merchants, trainers and recipe scrolls the player
+met (vendors, trainers, recipes). pipe.py says which of it is sent and where. The characters'
+own table (FWCS_DB.__chars: what each has) is read by plans.py to know which houses' routes to
+fetch, never sent; the addon's settings (__ui) and its places (__places) are not read here.
 """
 from __future__ import annotations
 import glob
@@ -350,9 +357,12 @@ def trainers(path: Path | None = None) -> dict[int, dict]:
 
 def recipes(path: Path | None = None) -> dict[int, dict]:
     """The recipe scrolls the addon looked at (FWCS_DB.__recipes, since addon 1.6.22): {item id:
-    {"level": the character level the scroll asks for, as the client showed it, "t"}}. A hotfix
-    the public tables lack (Recipe: Elixir of Intellect asks for 45, 8 Nov 2026). Empty without
-    the file or the table."""
+    {"level": the scroll's minimum level from the client's item data, "t", and since addon 1.7.5,
+    from a tooltip the player brought up, "tip": [line, level, ...] (each "Requires Level N" line
+    of the tooltip and its position), "made": the item the recipe makes, "made_level": that
+    item's minimum level from the item data}}. "level" has meant the same in every version, so a
+    row of 1.7.4 or before (level alone) reads as it always did. Empty without the file or the
+    table."""
     if path is None:
         found = find_saved_variables()
         if not found:
@@ -368,7 +378,20 @@ def recipes(path: Path | None = None) -> dict[int, dict]:
     for iid, row in (held.items() if isinstance(held, dict) else []):
         if isinstance(iid, int) and isinstance(row, dict) and isinstance(row.get("l"), (int, float)) and 1 <= row["l"] <= 100:
             out[iid] = {"level": int(row["l"]), "t": int(row.get("t") or 0)}
+            # since addon 1.7.5, from the scroll's tooltip when the player hovered it: each
+            # "Requires Level N" line as [line, N, ...], the made item and its item-data level
+            tip = row.get("tip")
+            if isinstance(tip, list) and 0 < len(tip) <= 2 * MAX_TIP_LINES and len(tip) % 2 == 0 \
+                    and all(type(n) is int and 0 < n <= 100 for n in tip):
+                out[iid]["tip"] = tip
+            if type(row.get("made")) is int and row["made"] > 0:
+                out[iid]["made"] = row["made"]
+                if type(row.get("madel")) is int and 0 <= row["madel"] <= 100:
+                    out[iid]["made_level"] = row["madel"]
     return out
+
+
+MAX_TIP_LINES = 4                 # "Requires Level" lines kept of one scroll's tooltip (one on every scroll seen)
 
 
 def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:

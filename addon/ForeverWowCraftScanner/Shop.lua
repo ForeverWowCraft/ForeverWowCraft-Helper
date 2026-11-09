@@ -59,8 +59,7 @@ local function ScanMerchant()
     local link = GetMerchantItemLink(i)
     local item = link and tonumber(link:match("item:(%d+)"))
     if item then
-      local _, _, price, stack, available = nil, nil, 0, 1, -1
-      if GetMerchantItemInfo then _, _, price, stack, available = GetMerchantItemInfo(i) end
+      local _, _, price, stack, available = ns.MerchantItemInfo(i)
       stack = math.max(1, tonumber(stack) or 1)
       local max = GetMerchantItemMaxStack and tonumber(GetMerchantItemMaxStack(i)) or 0
       merchant[item] = { index = i, price = tonumber(price) or 0, stack = stack,

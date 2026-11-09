@@ -952,7 +952,9 @@ local function RefreshSoon()
   pending = true
   C_Timer.After(REFRESH_DELAY, function()
     pending = false
-    CountBags()
+    -- the bags slot by slot only for the window shown (its Refresh counts them too, and so does
+    -- the logout): every bag change, loot in a fight included, read them all before (9 Nov 2026)
+    if win and win:IsShown() then CountBags() end
     CountBank()
     CountMail()
     Refresh()

@@ -1,5 +1,21 @@
 -- ForeverWowCraft Scanner (the addon folder and its saved-variables file are ForeverWowCraftScanner)
 --
+-- WHAT THIS FILE GATHERS, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the
+-- addon gathers")
+--   WHAT: for each item on its lists, the auctions the house shows of it: unit price, stack size,
+--     the time-left band, how many, when; the item's name. The auction house's realm and faction,
+--     and the names of the realms this account's characters have logged in on with the addon (as
+--     the client spells them: FWCS_DB.__realms, __groups), sent with a scan so that the site can
+--     name the house. And the levels of a recipe scroll (see "recipe scrolls" below).
+--   WHEN: prices only with the auction house open, when the player scans or the house opens with a
+--     scan due (Interface > AddOns turns that off); never in the background. A scroll's levels only
+--     when the player brings up its tooltip.
+--   WHY: the routes are priced from them, and a recipe's level gate is learned from the scrolls.
+--   NEVER: no character name, gold, bags or bank, chat, guild or position goes with a scan. What a
+--     character has is kept for /fwc (FWCS_DB.__chars, Inventory.lua) and is never sent.
+--   WHERE: the helper sends a scan to the project's pipe, pooled with other players' scans into
+--     one shared database that the project means to publish openly.
+--
 -- Records auction-house price ladders for the items on its lists.
 -- The helper (`python fwch.py lists`) writes Queue.lua next to this file:
 --     FWCS_QUEUE = { ["list name"] = { {itemID, "item name"}, ... }, ... }
@@ -622,26 +638,217 @@ local function LogProgress()
     state.skipped, state.deferrals, state.pages, FormatLargeNumber(state.listings)))
 end
 
--- The character level a recipe scroll asks for, as this client shows it (a hotfix the public
--- tables lack: Recipe: Elixir of Intellect asks for 45, 8 Nov 2026), kept in FWCS_DB.__recipes
--- for the helper to send with the vendors met; nothing of the player in it. Looked at for
--- every recipe item the scan meets, and for the recipe a route buys (Verdict.lua). Returns
--- the level when the client has the item's data, else nil.
+-- ================================================================ recipe scrolls: three levels
+-- WHAT: for a recipe scroll (an item of the Recipe class, nothing else), FWCS_DB.__recipes[item id]
+-- = { l, t, tip, made, madel }:
+--   l     the scroll's own minimum level from the game's item data (GetItemInfo, 5th value);
+--   tip   each "Requires Level N" line on the scroll's tooltip, as { line, N, line, N, ... }:
+--         the line's position on the tooltip, then its level (one line on every scroll seen, so
+--         two numbers; a second such line would add two more, nothing is merged or dropped);
+--   made  the item the recipe makes, when the client says which; madel its minimum level
+--         from the item data;
+--   t     when a number last changed.
+-- WHEN: only when the player brings up a scroll's tooltip (hovering it in the bags, at a vendor,
+-- at the auction house, a link in chat), read from the tooltip the game has just drawn; once a
+-- scroll a session. The addon never draws a tooltip itself and never walks the bags or the house
+-- for scrolls. `l` alone is also looked at for the recipes the auction scan records and the
+-- route buys (ns.NoteRecipeLevel).
+-- WHY: the level a recipe is gated at. On Forever's client the item data says 1 for every scroll
+-- seen; the tooltip of Recipe: Elixir of Intellect (250389) has "Requires Level 45" between the
+-- made item's "Use:" text and the scroll's own "Use: Teaches ..." line, and the project takes
+-- that line as the recipe's gate (data/overrides/recipe_levels.json, by hand). The three numbers
+-- side by side, over every scroll players hover, show how they relate; nothing is gated by them
+-- yet.
+-- NEVER: nothing of the character: not its name, its level, its gold or what else it carries.
+-- WHERE: the helper sends the rows with the vendors met (fwchelper/pipe.py vendors_document) to
+-- the project's pipe, pooled with other players' sightings into one shared database that the
+-- project means to publish openly. Everything gathered is listed in docs/scanner-addon.md,
+-- "What the addon gathers".
+
+local function ItemData(item)                -- the client's item info, whichever name it has
+  local info = C_Item and C_Item.GetItemInfo or GetItemInfo
+  if info then return info(item) end
+end
+
+-- the level of a scroll as the item data gives it, kept from 2 up (a 1 says nothing on its
+-- own): for the recipes the auction scan records and the route buys (Verdict.lua). Returns the
+-- level when the client has the item's data and it is 2 or more, else nil. A row the tooltip
+-- made is updated in place, its other numbers kept.
 function ns.NoteRecipeLevel(itemID)
   if type(itemID) ~= "number" then return nil end
   local instant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
   if not instant then return nil end
   local ok, _, _, _, _, _, classID = pcall(instant, itemID)
   if not ok or classID ~= 9 then return nil end                -- 9: a recipe
-  local info = C_Item and C_Item.GetItemInfo or GetItemInfo
-  if not info then return nil end
-  local ok2, _, _, _, _, minLevel = pcall(info, itemID)
+  local ok2, _, _, _, _, minLevel = pcall(ItemData, itemID)
   if not ok2 or type(minLevel) ~= "number" then return nil end
-  local level = math.max(1, math.floor(minLevel))
+  local level = math.floor(minLevel)
+  if level <= 1 then return nil end                            -- no level asked: no row, and none made up
   FWCS_DB.__recipes = FWCS_DB.__recipes or {}
   local row = FWCS_DB.__recipes[itemID]
-  if not row or row.l ~= level then FWCS_DB.__recipes[itemID] = { l = level, t = time() } end
+  if not row then FWCS_DB.__recipes[itemID] = { l = level, t = time() }
+  elseif row.l ~= level then row.l, row.t = level, time() end
   return level
+end
+-- the rows with nothing to say, let go once at login: a level of 1 or none and no tooltip
+-- level (kept by addons before 1.7.4); no row is sent for them
+function ns.DropRecipesWithoutLevel()
+  for itemID, row in pairs(FWCS_DB.__recipes or {}) do
+    if type(row) ~= "table" or not ((tonumber(row.l) or 0) > 1 or (type(row.tip) == "table" and #row.tip > 0)) then FWCS_DB.__recipes[itemID] = nil end
+  end
+end
+
+local looked = {}        -- [item id] = true: looked at this session (a scroll read, or not a scroll)
+local madeFor = {}       -- [made item id] = scroll, while the made item's data is on its way
+local levelPattern       -- ITEM_MIN_LEVEL as a pattern, made once (false: the client has none)
+
+-- "Requires Level %d", in the client's language, as a pattern that takes the number
+local function LevelPattern()
+  if levelPattern == nil then
+    levelPattern = false
+    if type(ITEM_MIN_LEVEL) == "string" and ITEM_MIN_LEVEL ~= "" then
+      local p = ITEM_MIN_LEVEL:gsub("[%%%(%)%.%+%-%*%?%[%]%^%$]", "%%%0")
+      p = p:gsub("%%%%%d+%%%$d", "(%%d+)"):gsub("%%%%d", "(%%d+)"):gsub("%%%%%d*%%?%$?s", ".-")
+      levelPattern = "^%s*" .. p .. "%s*$"
+    end
+  end
+  return levelPattern
+end
+
+local function Same(a, b)
+  if a == b then return true end
+  if type(a) ~= "table" or type(b) ~= "table" or #a ~= #b then return false end
+  for i = 1, #a do if a[i] ~= b[i] then return false end end
+  return true
+end
+
+-- the row of a scroll, rewritten only when a number changed
+local function Keep(itemID, numbers)
+  FWCS_DB.__recipes = FWCS_DB.__recipes or {}
+  local row = FWCS_DB.__recipes[itemID] or {}
+  local changed = FWCS_DB.__recipes[itemID] == nil
+  for k, v in pairs(numbers) do
+    if not Same(row[k], v) then row[k], changed = v, true end
+  end
+  if changed then row.t = time(); FWCS_DB.__recipes[itemID] = row end
+end
+
+-- the made item's data came late: its level goes in the scroll's row (one table look-up for any
+-- other item the client loads, and the events are let go when nothing is awaited)
+local madeLoads = CreateFrame("Frame")
+madeLoads:SetScript("OnEvent", function(self, _, item)
+  local scroll = madeFor[item]
+  if not scroll then return end
+  madeFor[item] = nil
+  local ok, _, _, _, _, minLevel = pcall(ItemData, item)                  -- as unproven as the tooltip: nothing may escape
+  if ok and type(minLevel) == "number" and type(FWCS_DB) == "table" then Keep(scroll, { made = item, madel = math.floor(minLevel) }) end
+  if next(madeFor) == nil and self.UnregisterAllEvents then self:UnregisterAllEvents() end
+end)
+
+-- a scroll's tooltip, read once: `texts` its lines in order, `made` the made item's id when the
+-- tooltip data names it (a nested item block)
+local function ReadScroll(itemID, texts, made)
+  local _, _, _, _, minLevel = ItemData(itemID)
+  if type(minLevel) ~= "number" then return end      -- the scroll's own data not in: the next hover reads it
+  looked[itemID] = true
+  local tip, pattern = nil, LevelPattern()
+  for i, text in ipairs(pattern and texts or {}) do
+    local n = tonumber(text:match(pattern))
+    if n then tip = tip or {}; table.insert(tip, i); table.insert(tip, n) end
+  end
+  local level = math.floor(minLevel)
+  if not tip and level <= 1 then return end          -- nothing to say: no row
+  local numbers = { l = level, tip = tip }
+  local madeName
+  if not made then                                   -- the made item by its name, the line the client sets off with a new line
+    for i = 2, #texts do
+      madeName = texts[i]:match("^\n%s*(.-)%s*$")
+      if madeName and madeName ~= "" then break end
+      madeName = nil
+    end
+  end
+  local _, link, madeLevel
+  if made then
+    madeLevel = select(5, ItemData(made))            -- one look-up; the client asks the server when it has not the data
+  elseif madeName then
+    _, link, _, _, madeLevel = ItemData(madeName)    -- by name: only what the client already has, nothing is asked
+    made = link and tonumber(link:match("item:(%d+)"))
+    if not made then madeLevel = nil end
+  end
+  if made then
+    numbers.made = made
+    if type(madeLevel) == "number" then numbers.madel = math.floor(madeLevel)
+    else
+      madeFor[made] = itemID
+      for _, e in ipairs({ "GET_ITEM_INFO_RECEIVED", "ITEM_DATA_LOAD_RESULT" }) do pcall(madeLoads.RegisterEvent, madeLoads, e) end
+    end
+  end
+  Keep(itemID, numbers)
+end
+
+local function Recipe(itemID)               -- whether an item is a recipe scroll; looked at once a session
+  local instant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+  local classID = instant and select(6, instant(itemID))
+  if classID ~= 9 then looked[itemID] = true; return false end      -- 9: a recipe
+  return true
+end
+
+local function FromData(id, data)
+  if not Recipe(id) then return end
+  local surface = TooltipUtil and TooltipUtil.SurfaceArgs
+  local texts, made = {}, nil
+  for i, line in ipairs(data.lines) do
+    if line.leftText == nil and surface then surface(line) end
+    texts[i] = type(line.leftText) == "string" and line.leftText or ""
+    if not made and type(line.tooltipID) == "number" and (line.tooltipType == nil or not (Enum and Enum.TooltipDataType) or line.tooltipType == Enum.TooltipDataType.Item) then
+      made = line.tooltipID ~= id and line.tooltipID or nil
+    end
+  end
+  ReadScroll(id, texts, made)
+end
+
+local function FromDrawn(id, tooltip)
+  if not Recipe(id) then return end
+  local texts, name = {}, tooltip.GetName and tooltip:GetName()
+  for i = 1, (name and tooltip.NumLines and tooltip:NumLines()) or 0 do
+    local left = _G[name .. "TextLeft" .. i]
+    texts[i] = left and left.GetText and left:GetText() or ""
+  end
+  ReadScroll(id, texts, nil)
+end
+
+-- This runs inside the client's own tooltip handling, for every item tooltip, in a fight too, and
+-- what this client gives there is not all proven (9 Nov 2026): nothing may escape it. What fails
+-- is let be for the session (the item counted as looked at) and counted, for `/fwcs debug`.
+ns.scrollFailures = 0
+local function Guarded(read, id, arg)
+  local ok = pcall(read, id, arg)
+  if not ok then looked[id] = true; ns.scrollFailures = ns.scrollFailures + 1 end
+end
+
+-- the client's tooltip data for an item (TooltipDataProcessor): data.id is the item, data.lines
+-- what the tooltip shows. Anything looked at before costs the one look-up.
+function ns.ScrollTooltip(_, data)
+  local id = type(data) == "table" and data.id
+  if looked[id] or type(id) ~= "number" or type(FWCS_DB) ~= "table" then return end
+  Guarded(FromData, id, data)
+end
+
+-- a client without tooltip data: the item from the tooltip drawn, its lines from its own text
+function ns.ScrollTooltipDrawn(tooltip)
+  if type(FWCS_DB) ~= "table" then return end
+  local ok, _, link = pcall(tooltip.GetItem, tooltip)
+  local id = ok and type(link) == "string" and tonumber(link:match("item:(%d+)"))
+  if not id or looked[id] then return end
+  Guarded(FromDrawn, id, tooltip)
+end
+
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ns.ScrollTooltip)
+else
+  for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
+    if tooltip and tooltip.HookScript then tooltip:HookScript("OnTooltipSetItem", ns.ScrollTooltipDrawn) end
+  end
 end
 
 -- entry = { itemID, name, isCommodity?, assumedEmpty?, full?, attempts? }
@@ -1198,6 +1405,7 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
     UpdateStatus()
     return
   end
+  ns.DropRecipesWithoutLevel()                           -- PLAYER_LOGIN: the saved file is in
   if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then
     Print("this client does not use the modern auction house API; scanner disabled")
     return
@@ -1338,7 +1546,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     ns.NeedsCommand(arg)
   elseif cmd == "debug" then
     state.debug = not state.debug
-    Print("telemetry echo to chat " .. (state.debug and "on" or "off"))
+    Print("telemetry echo to chat " .. (state.debug and "on" or "off")
+      .. ((ns.scrollFailures or 0) > 0 and string.format("; %d recipe scroll tooltip(s) could not be read this session", ns.scrollFailures) or ""))
   else
     local n = 0
     for k in pairs(RealmDB()) do if type(k) == "number" then n = n + 1 end end

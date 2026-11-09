@@ -10,6 +10,28 @@
 -- that addon is there, else this one, a texture turned by the bearing less the character's
 -- facing, dragged where wanted, right-clicked away.
 --
+-- WHAT THIS FILE GATHERS, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the
+-- addon gathers")
+--   WHAT: a merchant's wares (FWCS_DB.__vendors, by the creature's id): the merchant's name, the
+--     map and the spot where the character stood as the window opened, each ware's item, price as
+--     asked of this character (after its reputation discount), stack, stock, whether the game lets
+--     this character buy it, what it costs beside gold; the character's faction, the client's
+--     build, when. A trainer's services (FWCS_DB.__trainers): its name, map and spot, each service
+--     and the skill it asks for, the character's faction, the build, when. Places for the arrow
+--     (FWCS_DB.__places): trainers, merchants that sell the routes' items, auctioneers, mailboxes,
+--     anvils and forges, each a map, a spot and a kind.
+--   WHEN: only when the player opens a merchant's, a trainer's, the auction house's or a mailbox's
+--     window, or the profession panel says a station's requirement is met where the character
+--     stands. Never in the background: the position is read at that moment, and only then.
+--   WHY: who sells which recipe and reagent on Forever, and at what price; the skill Forever's
+--     trainers teach each recipe at; where to send the arrow.
+--   NEVER: no character name, level, gold, bags, chat or guild. No movement is kept: the one
+--     position kept is that of the window just opened (the arrow reads where the character
+--     stands to turn itself, and keeps none of it).
+--   WHERE: the helper sends the merchants and the trainers (not the places, which stay here) to
+--     the project's pipe, pooled with other players' sightings into one shared database that
+--     the project means to publish openly.
+--
 -- ns.Bearing asks the game nothing, for the tests.
 
 local _, ns = ...
@@ -137,11 +159,16 @@ local function Seeded()
   return seeded
 end
 
--- every place: the seed's and the noted ones
+-- every place: the seed's and the noted ones. Made again only when a place was noted (the list
+-- was copied, some 1,700 rows, on every look for the nearest, several times a verdict)
+local all, allSeed, allMine, allN
 local function All()
+  local seed, mine = Seeded(), Places()
+  if all and allSeed == seed and allMine == mine and allN == #mine then return all end
   local out = {}
-  for _, p in ipairs(Seeded()) do table.insert(out, p) end
-  for _, p in ipairs(Places()) do table.insert(out, p) end
+  for _, p in ipairs(seed) do table.insert(out, p) end
+  for _, p in ipairs(mine) do table.insert(out, p) end
+  all, allSeed, allMine, allN = out, seed, mine, #mine
   return out
 end
 
@@ -153,6 +180,7 @@ end
 local function Note(kind, what, extra)
   local map, x, y = Here()
   if not map then return end
+  all = nil                                -- the list of every place made again at the next look (the count is a second guard)
   ns.notedAt = time()                      -- something to save (Remind.lua)
   for _, p in ipairs(Places()) do
     if p.map == map and p.kind == kind and p.what == what then
@@ -272,6 +300,18 @@ local function NoteTrainer()
   end
 end
 
+-- A merchant slot as the old GetMerchantItemInfo gave it (name, texture, price, stack, how many
+-- in stock, purchasable, usable, extended cost), from that global where the client has it, else
+-- from C_MerchantFrame.GetItemInfo's table: Forever's client (Interface 16001) has only the
+-- latter, and until 1.7.4 no ware or price was read there (9 Nov 2026). Nothing for an empty slot
+-- or a client with neither. Shop.lua's list reads prices by it too.
+function ns.MerchantItemInfo(i)
+  if GetMerchantItemInfo then return GetMerchantItemInfo(i) end
+  local info = C_MerchantFrame and C_MerchantFrame.GetItemInfo and C_MerchantFrame.GetItemInfo(i)
+  if type(info) ~= "table" then return end
+  return info.name, info.texture, info.price, info.stackCount, info.numAvailable, info.isPurchasable, info.isUsable, info.hasExtendedCost
+end
+
 -- a merchant: which of the routes' items it sells
 -- A merchant's window: the vendor is noted as a place (the route's items it sells, for the
 -- arrow), and its whole stock is kept by the creature's id (FWCS_DB.__vendors, since 1.6.5):
@@ -289,8 +329,8 @@ local function NoteVendor()
     local item = link and tonumber(link:match("item:(%d+)"))
     if item then
       if tracked[item] and not In(sells, item) then table.insert(sells, item) end
-      if GetMerchantItemInfo then
-        local _, _, price, stack, available, _, usable, extended = GetMerchantItemInfo(i)
+      local _, _, price, stack, available, _, usable, extended = ns.MerchantItemInfo(i)
+      if price ~= nil then
         local row = { price = tonumber(price) or 0, stack = tonumber(stack) or 1, n = tonumber(available) or -1, usable = usable and true or false }
         if extended and GetMerchantItemCostInfo and GetMerchantItemCostItem then
           local count = GetMerchantItemCostInfo(i)

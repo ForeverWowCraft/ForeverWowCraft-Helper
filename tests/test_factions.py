@@ -119,7 +119,7 @@ def test_every_auction_house_of_a_file_is_sent():
         assert sorted(f for _, f, _ in sent) == ["", "Alliance"]
     finally:
         cli.settings.STATE = kept
-    assert all(pipe.check_scan({"format": "fwc-scan/1", "realm": r, "faction": f, "items": {i: {"t": 1, "l": []} for i in ids}}) is None
+    assert all(pipe.check_scan({"format": "fwc-scan/1", "realm": r, "faction": f, "scanned_at": 1, "items": {i: {"t": 1, "l": []} for i in ids}}) is None
                for r, f, ids in sent)
 
 

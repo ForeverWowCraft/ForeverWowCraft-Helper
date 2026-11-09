@@ -13,6 +13,14 @@
 
 The first `send` or `lists` registers the helper with the pipe: it is given a token of its own,
 kept in the state folder (settings.STATE: identity.json). Nothing has to be set or asked for.
+
+WHAT IS SENT, WHEN (everything the addon gathers: docs/scanner-addon.md, "What the addon
+gathers"): `send` (and the app, which runs `send --watch`) sends a scan after the player saved
+one in game, and the merchants, trainers and recipe scrolls the player met when they changed
+(send_vendors_once), to the project's pipe, pooled with other players' into one shared database
+that the project means to publish openly. pipe.py says what each document holds and what is
+never in one. Besides, the helper only reads: the lists and the freshness from the pipe, the
+routes from the site (asked for by the auction house, nothing else), and new versions of itself.
 """
 from __future__ import annotations
 import argparse
