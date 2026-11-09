@@ -491,16 +491,22 @@ local function VerdictOf(given)
       act, got = "Buy " .. up.name, "learned from its book"
       place = { "vendor", nil, up.book, "Seller of " .. up.name }
       table.insert(tip, string.format("No trainer teaches %s: it is the book %s, sold by %s. The book asks for skill %d.", what, up.name, up.where, up.needs))
-    elseif up and up.quest then
+    end
+    local young                          -- below the quest's character level: the words say so, not the tooltip alone (a player was sent to a quest they could not take yet, 9 Nov 2026)
+    if up and up.quest then
+      local mine = UnitLevel and UnitLevel("player") or 0
+      young = mine > 0 and mine < up.level
       act, got = "Learn " .. what .. " by the quest " .. up.quest, "earned by its quest"
+      if young then act = string.format("At level %d, learn %s by the quest %s", up.level, what, up.quest) end
       place = { "quest", profession, nil, up.quest }
       table.insert(tip, string.format("No trainer teaches %s: the quest %s gives it, from %s. It asks for skill %d and character level %d.", what, up.quest, up.where, up.needs, up.level))
+      if young then table.insert(tip, string.format("You are level %d: the quest is offered from level %d.", mine, up.level)) end
     end
     if skill >= cap - 1 then
       table.insert(tip, skill >= cap
         and string.format("Skill %d is the cap: no craft gives a point until %s is %s.", skill, what, got)
         or string.format("Skill %d: the next point reaches the cap. %s first.", skill, act))
-      return { text = act .. " first", tip = tip, profession = profession, rank = cap, place = place }
+      return { text = young and act or act .. " first", tip = tip, profession = profession, rank = cap, place = place }
     end
     asideOf = { text = act, place = place, from = cap - RANK_EARLY, cap = cap }
     table.insert(tip, string.format("%s can be %s from skill %d (the cap is %d): see the arrow's note.", what, got, cap - RANK_EARLY, cap))

@@ -160,7 +160,7 @@ local function BuildOptions()
   blurb:SetWordWrap(true)
   blurb:SetText("The addon records the auction house's prices and sends them, through the helper on this PC, to "
     .. "foreverwowcraft.com, where every scanner's prices make the routes that /fwc shows. Nothing of yours is sent: "
-    .. "prices only. Each switch here has a command too (/fwcs); this page is the same settings.")
+    .. "only prices and the merchants and trainers you visit. Each switch here has a command too (/fwcs); this page is the same settings.")
   local saved = ns.Settings
   local y = -92
   local function Next(h) local at = y; y = y - h; return at end

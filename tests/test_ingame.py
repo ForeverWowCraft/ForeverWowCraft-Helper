@@ -778,6 +778,14 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     assert text() == "Learn Artisan Cooking by the quest Clamlette Surprise first" and lua.eval("ForeverWowCraftMake.mode") == "Learn"
     assert lua.eval("ForeverWowCraftMake.verdict.place[1]") == "quest" and lua.eval("ForeverWowCraftMake.verdict.target.name") == "Dirge Quikcleave"
     assert any("the quest Clamlette Surprise gives it, from Dirge Quikcleave in Gadgetzan" in line for line in tips())
+    # below the quest's character level the words say so, and no "first": a player was sent to a quest they could not take yet
+    lua.execute('UnitLevel = function() return 30 end; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "At level 35, learn Artisan Cooking by the quest Clamlette Surprise"
+    assert any("You are level 30: the quest is offered from level 35." in line for line in tips())
+    assert lua.eval("ForeverWowCraftMake.verdict.target.name") == "Dirge Quikcleave"
+    lua.execute('UnitLevel = function() return 35 end; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Learn Artisan Cooking by the quest Clamlette Surprise first"
+    lua.execute('UnitLevel = nil')
 
 
 # ---- places and the arrow (Places.lua) --------------------------------------------------------
