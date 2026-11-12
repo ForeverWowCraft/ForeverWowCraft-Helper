@@ -64,10 +64,11 @@ def store(name: str, value: str) -> Path:
 
 # What the helper keeps of its own: its name and token at the pipe, what it sent, the routes
 # and lists it fetched, its log. On Windows that is the user's local application data, on the
-# Mac the user's Application Support, so that an install under Program Files or Applications
-# or a reinstall touches none of it; FWC_STATE names another folder. An install from a zip of
-# before 22 Oct 2026 kept it in state/ beside the helper: carry_state() moves that over the
-# first time the helper runs.
+# Mac the user's Application Support, on Linux the user's data home (~/.local/share, or
+# XDG_DATA_HOME), so that an install under Program Files or Applications or a reinstall touches
+# none of it; FWC_STATE names another folder. An install from a zip of before 22 Oct 2026, and a
+# Linux install that kept it in state/ beside the helper, has it carried over the first time the
+# helper runs (carry_state()).
 def _state_dir() -> Path:
     given = env("STATE")
     if given:
@@ -77,7 +78,8 @@ def _state_dir() -> Path:
         return Path(base) / NAME / "Helper"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / NAME / "Helper"
-    return ROOT / "state"
+    data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(data) / NAME / "Helper"
 
 
 STATE = _state_dir()
@@ -88,7 +90,8 @@ STATE_FILES = ("identity.json", "sent.json", "Plans.lua", "Fresh.lua", "Queue.lu
 def carry_state() -> list[Path]:
     """Bring what an older install kept in state/ beside the helper into STATE, each file
     where STATE has none of that name. Returns what was carried. The old files stay, so that
-    the old send.cmd, should it still be run, keeps working."""
+    the old send.cmd, should it still be run, keeps working. On Linux the state lived beside
+    the helper until it moved under the data home, so the first run after that carries it too."""
     carried = []
     if STATE.resolve() == OLD_STATE.resolve() or not OLD_STATE.is_dir():
         return carried

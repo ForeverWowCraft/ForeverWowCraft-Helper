@@ -223,6 +223,140 @@ def _registry_wow_dirs() -> list[Path]:
     return out
 
 
+# A Wine or Proton prefix holds the Windows game under drive_c. These names are not themselves
+# prefixes, so a search that walks a Games folder does not go down into one.
+_SKIP_DESCENT = {"drive_c", "steamapps", "compatdata", "pfx", "common", "dosdevices", "users"}
+_WOW_IN_PREFIX = (
+    Path("drive_c") / "Program Files (x86)" / "World of Warcraft",
+    Path("drive_c") / "Program Files" / "World of Warcraft",
+)
+_linux_found: list[Path] | None = None
+
+
+def _descend(root: Path, depth: int, into: list[Path]) -> None:
+    """`root` and the directories `depth` levels under it, not walking into a prefix's drive."""
+    if not root.is_dir():
+        return
+    into.append(root)
+    if depth <= 0:
+        return
+    try:
+        children = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in _SKIP_DESCENT and not p.name.startswith("."))
+    except OSError:
+        return
+    for child in children:
+        _descend(child, depth - 1, into)
+
+
+def _lutris_game_path(home: Path) -> Path | None:
+    """The folder Lutris keeps its prefixes in, from its own system.yml, or None."""
+    try:
+        text = (home / ".config" / "lutris" / "system.yml").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    m = re.search(r"(?m)^game_path:\s*[\"']?([^\"'#\n]+)", text)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    path = Path(str(home) + raw[1:]) if raw.startswith("~") else Path(raw)
+    return path if path.is_dir() else None
+
+
+def _proton_prefixes(home: Path) -> list[Path]:
+    """Proton prefixes: steamapps/compatdata/<app>/pfx under each Steam library."""
+    data = home / ".local" / "share"
+    roots = [home / ".steam" / "steam", home / ".steam" / "root", data / "Steam",
+             home / ".var" / "app" / "com.valvesoftware.Steam" / "data" / "Steam",
+             home / "snap" / "steam" / "common" / ".local" / "share" / "Steam"]
+    seen: set[Path] = set()
+    libraries: list[Path] = []
+
+    def add(path: Path) -> None:
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key not in seen and path.is_dir():
+            seen.add(key)
+            libraries.append(path)
+
+    for root in roots:
+        add(root)
+        vdf = root / "steamapps" / "libraryfolders.vdf"
+        try:
+            text = vdf.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for m in re.finditer(r'"path"\s+"([^"]+)"', text):
+            add(Path(m.group(1).replace("\\\\", "\\")))
+    prefixes = []
+    for library in libraries:
+        compat = library / "steamapps" / "compatdata"
+        try:
+            apps = sorted(p for p in compat.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        prefixes.extend(app / "pfx" for app in apps)
+    return prefixes
+
+
+def _search_linux_wow_dirs(home: Path) -> list[Path]:
+    """World of Warcraft folders inside the Wine and Proton prefixes under `home`.
+
+    The usual places only: ~/.wine, ~/Games (a standalone Battle.net prefix, Lutris, Heroic a
+    few folders down), Bottles, Lutris's own game folder, and Steam's compatdata. A prefix
+    anywhere else is named with FWC_WOW_DIR. The walk is shallow and stays out of drive_c."""
+    prefixes: list[Path] = []
+    seen: set[Path] = set()
+
+    def add_tree(root: Path, depth: int) -> None:
+        found: list[Path] = []
+        _descend(root, depth, found)
+        for path in found:
+            try:
+                key = path.resolve()
+            except OSError:
+                key = path
+            if key not in seen:
+                seen.add(key)
+                prefixes.append(path)
+
+    add_tree(home / ".wine", 0)
+    add_tree(home / "Games", 3)
+    add_tree(home / ".local" / "share" / "bottles" / "bottles", 1)
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg and home == Path.home():
+        add_tree(Path(xdg) / "bottles" / "bottles", 1)
+    lutris = _lutris_game_path(home)
+    if lutris is not None:
+        add_tree(lutris, 3)
+    for prefix in _proton_prefixes(home):
+        try:
+            key = prefix.resolve()
+        except OSError:
+            key = prefix
+        if key not in seen:
+            seen.add(key)
+            prefixes.append(prefix)
+    found = []
+    for prefix in prefixes:
+        for rel in _WOW_IN_PREFIX:
+            wow = prefix / rel
+            if wow.is_dir() and wow not in found:
+                found.append(wow)
+    return found
+
+
+def _linux_wow_dirs() -> list[Path]:
+    """Those folders on this machine, searched once: `where` and `send --watch` ask often."""
+    global _linux_found
+    if sys.platform in ("win32", "darwin"):
+        return []
+    if _linux_found is None:
+        _linux_found = _search_linux_wow_dirs(Path.home())
+    return list(_linux_found)
+
+
 def flavor() -> str:
     """The client folder to use (FWC_WOW_FLAVOR, else settings.WOW_FLAVOR)."""
     return config.env("WOW_FLAVOR", config.WOW_FLAVOR)
@@ -249,7 +383,7 @@ def wow_dir() -> Path:
     if env:
         return Path(env)
     configured = Path(config.WOW_DIR)
-    candidates = [configured] + _registry_wow_dirs() + [Path(c).expanduser() for c in COMMON_WOW_DIRS]
+    candidates = [configured] + _registry_wow_dirs() + [Path(c).expanduser() for c in COMMON_WOW_DIRS] + _linux_wow_dirs()
     for c in candidates:
         if (c / flavor()).is_dir():
             return c
