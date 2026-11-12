@@ -15,6 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fwchelper import app as appmod, cli, settings, tray  # noqa: E402
 from test_register import _fresh_pc, _service  # noqa: E402
 
+# The state folder is the user's (on Linux, the data home). These tests write a log and a token there.
+settings.STATE = Path(tempfile.mkdtemp()) / "state"
+
 
 class FakeTray:
     def __init__(self):

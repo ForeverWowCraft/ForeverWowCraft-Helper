@@ -5,7 +5,8 @@
   status         what the addon's saved scans hold
   send           send the latest scan through the pipe; with --watch, after every SAVE in game
   app            the same, as a Windows application: an icon by the clock, no window (fwchelper/app.py)
-  autostart      have the app start when you log in (--off undoes it)
+  autostart      have the helper start when you log in (--off undoes it): the app on Windows
+                 and the Mac, a systemd user service on Linux
   lists          fetch the lists from the pipe and write them into the addon
   plans          fetch the routes of your characters' auction houses from the site and write them
                  into the addon, for its /fwc window; `send --watch` does it by itself
@@ -58,6 +59,8 @@ def where() -> None:
         old = os.name == "nt" and (startup_dir() / f"{settings.NAME} Helper.cmd").exists()
         print("At login:       " + ("the app starts" if on else "nothing (python fwch.py autostart, or the icon's menu)")
               + (" (and the old send.cmd entry is still there; the app removes it)" if old else ""))
+    else:
+        print("At login:       " + ("send --watch starts" if linux_startup_on() else "nothing (python fwch.py autostart)"))
     if not (base / flav).is_dir():
         print("\nSet FWC_WOW_DIR to the World of Warcraft folder and FWC_WOW_FLAVOR to the client folder "
               "(_forever_), or start the app and choose the game folder from the icon's menu.")
@@ -398,17 +401,110 @@ def retire_startup_entry(folder: Path | None = None) -> bool:
     return True
 
 
+LINUX_UNIT = "foreverwowcraft-helper.service"
+
+
+def linux_unit_path() -> Path:
+    """The systemd user service that starts the helper at login."""
+    config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return config / "systemd" / "user" / LINUX_UNIT
+
+
+def _systemd_arg(arg: str) -> str:
+    """One ExecStart argument. systemd quotes with double quotes."""
+    if arg and all(ch.isalnum() or ch in "/._:=@+-" for ch in arg):
+        return arg
+    return '"' + arg.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def linux_exec() -> str:
+    """The command the user service runs: this Python, this helper, send --watch."""
+    return f"{_systemd_arg(sys.executable)} {_systemd_arg(str(settings.ROOT / 'fwch.py'))} send --watch"
+
+
+def linux_unit_text() -> str:
+    """The unit file. default.target is every user session, so it starts at login."""
+    return (
+        "[Unit]\n"
+        "Description=ForeverWowCraft Helper\n"
+        "Documentation=https://foreverwowcraft.com/helper\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"ExecStart={linux_exec()}\n"
+        "Restart=on-failure\n"
+        "RestartSec=10\n"
+        "Environment=PYTHONUNBUFFERED=1\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
+def _systemctl_user(*args: str) -> None:
+    try:
+        done = subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+    except FileNotFoundError:
+        raise SystemExit("autostart on Linux needs systemd (systemctl --user was not found)") from None
+    if done.returncode != 0:
+        detail = (done.stderr or done.stdout).strip()
+        raise SystemExit(detail or f"systemctl --user {' '.join(args)} failed")
+
+
+def linux_startup_on(unit: Path | None = None) -> bool:
+    """Whether the user service is enabled. Without systemctl, the unit file's presence counts."""
+    unit = unit or linux_unit_path()
+    if not unit.is_file():
+        return False
+    try:
+        done = subprocess.run(["systemctl", "--user", "is-enabled", unit.name], capture_output=True, text=True)
+    except FileNotFoundError:
+        return True
+    return done.returncode == 0
+
+
+def linux_autostart(on: bool = True, unit: Path | None = None, systemctl=None) -> str:
+    """Have `send --watch` start when the user logs in: a systemd user service. There is no
+    icon on Linux; this is the same work. `systemctl` is _systemctl_user, or in tests anything
+    called with the same arguments. Returns the command written, or "" when taken out."""
+    unit = unit or linux_unit_path()
+    run = systemctl or _systemctl_user
+    if not on:
+        if systemctl is None:
+            try:
+                _systemctl_user("disable", "--now", unit.name)
+            except SystemExit:
+                pass
+        else:
+            run("disable", "--now", unit.name)
+        unit.unlink(missing_ok=True)
+        if systemctl is None:
+            try:
+                _systemctl_user("daemon-reload")
+            except SystemExit:
+                pass
+        else:
+            run("daemon-reload")
+        return ""
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text(linux_unit_text(), encoding="utf-8")
+    run("daemon-reload")
+    run("enable", "--now", unit.name)
+    return linux_exec()
+
+
 def autostart(on: bool = True, registry=None) -> str:
-    """Have the app start when the user logs on to Windows: a value under the user's Run key,
-    which Windows' Settings > Apps > Startup lists with a switch of its own; or, with `on`
-    false, take it out. Returns the command written, or "" when taken out. `registry` is
-    fwchelper/win.py, or in tests anything with its run_value, set_run_value and approve."""
+    """Have the helper start when the user logs on. On Windows, a value under the user's Run
+    key, which Settings > Apps > Startup lists with a switch of its own. On the Mac, a launch
+    agent. On Linux, a systemd user service that runs `send --watch`. With `on` false, take it
+    out. Returns the command written, or "" when taken out. `registry` is fwchelper/win.py, or
+    in tests anything with its run_value, set_run_value and approve."""
     if registry is None:
         if sys.platform == "darwin":
             from . import mac
             return mac.set_startup(on)
         if os.name != "nt":
-            raise SystemExit("autostart is for Windows and the Mac: elsewhere, have your session start `python fwch.py send --watch`")
+            return linux_autostart(on)
         from . import win as registry
     retire_startup_entry()
     if not on:
@@ -556,9 +652,13 @@ def main(argv=None) -> None:  # noqa: C901, PLR0912, PLR0915 - command dispatch:
             app.run()
         elif a.cmd == "autostart":
             command = autostart(not a.off)
-            switch = "System Settings > General > Login Items" if sys.platform == "darwin" else "Settings > Apps > Startup"
-            print("The app no longer starts when you log in." if a.off
-                  else f"The app starts when you log in ({switch} has a switch for it):\n  {command}")
+            if os.name != "nt" and sys.platform != "darwin":
+                print("The helper no longer starts when you log in." if a.off
+                      else f"The helper starts when you log in (a systemd user service, {LINUX_UNIT}):\n  {command}")
+            else:
+                switch = "System Settings > General > Login Items" if sys.platform == "darwin" else "Settings > Apps > Startup"
+                print("The app no longer starts when you log in." if a.off
+                      else f"The app starts when you log in ({switch} has a switch for it):\n  {command}")
         elif a.cmd == "lists":
             lists()
         elif a.cmd == "plans":

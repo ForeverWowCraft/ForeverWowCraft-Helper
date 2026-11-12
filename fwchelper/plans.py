@@ -477,7 +477,21 @@ def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], l
     if not force and not missing and current == have:
         touch()                                         # the addon still sees that the helper runs
         return [], []
-    docs = [fetch(h, site) for h in chosen]
+    # One house whose document cannot be used must not throw away the others. Until a character
+    # has been seen the whole region's houses are fetched together, and a single bad file used
+    # to leave /fwc empty. When every chosen house fails, the first error is still raised.
+    docs, kept, failed = [], [], []
+    for h in chosen:
+        try:
+            docs.append(fetch(h, site))
+            kept.append(h)
+        except PlansError as e:
+            failed.append(e)
+    if not docs and failed:
+        raise failed[0]
+    for e in failed:
+        print(f"routes not fetched: {e}")
+    chosen = kept
     for d, h in zip(docs, chosen):                      # as houses.json has it, so that "nothing new" is told from it alone
         d["generated"] = int(h.get("generated") or d.get("generated") or 0)
         mine = by_rule(h, want)                         # a realm of the house by its name: into the list the addon finds its house by

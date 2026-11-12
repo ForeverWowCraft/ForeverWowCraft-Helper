@@ -14,7 +14,7 @@ below, and <https://www.foreverwowcraft.com/privacy>.
 | | |
 |---|---|
 | **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code). At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Nothing of yours is sent: only prices and the merchants and trainers you visit |
-| **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon. On Windows and on the Mac |
+| **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon. On Windows and on the Mac it is an icon. On Linux, `send --watch` does that sending |
 
 ```
 python fwch.py where            what was found on this PC
@@ -93,6 +93,18 @@ looks for the game in `/Applications/World of Warcraft`; **Choose the game folde
 menu is for anywhere else. What the helper keeps is in `~/Library/Application Support/ForeverWowCraft/Helper`:
 its log, its name and token at the pipe, and `settings.json` with the folder you chose. The
 game is the same client and the same addon folder as on Windows. (Since 1.6.0.)
+
+**On Linux:** unzip `ForeverWowCraft-Helper-<version>.zip` somewhere permanent and use the system's
+Python, 3.10 or newer (`python3 fwch.py ...`). The zip's Python, when it has one, is Windows'.
+There is no icon. `python3 fwch.py send --watch` does the sending, and `python3 fwch.py autostart`
+has systemd start that when you log in (`--off` takes it out; the unit is
+`foreverwowcraft-helper.service`). The game is the Windows client, so the helper looks inside Wine
+and Proton prefixes: `~/.wine`, `~/Games` (a Battle.net prefix, Lutris, Heroic), Bottles, Lutris's
+game folder, and Steam's `compatdata`. Anywhere else, set `FWC_WOW_DIR` to the "World of Warcraft"
+folder, the one that holds `_forever_`. What the helper keeps is in
+`$XDG_DATA_HOME/ForeverWowCraft/Helper` (`~/.local/share/ForeverWowCraft/Helper` when that is unset):
+its log, its name and token at the pipe. A copy that kept those in `state/` beside itself has them
+carried over the first time this one runs.
 
 ## In game: what you still need
 
@@ -262,7 +274,8 @@ Each test file runs on its own, with nothing installed (`test_ingame.py` runs th
 when `lupa` is there, and passes without it). `test_app.py` and `test_tray.py` are the app with
 Windows stood in for; `test_installer.py` is what the installer puts in, without building it;
 `test_mac.py` is the Mac's side without a Mac: the launch agent, the settings file, the lock,
-and what the application bundle holds.
+and what the application bundle holds. `test_linux.py` is Linux's side without a real prefix:
+where the game is looked for, where the state goes, and the systemd user service.
 
 ## The installer
 

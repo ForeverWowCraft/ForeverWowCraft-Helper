@@ -343,6 +343,38 @@ def test_a_helper_older_than_the_site_asks_is_told_to_update():
         plans.get = kept
 
 
+def test_one_bad_house_does_not_drop_the_others():
+    good = document(house="eupve--alliance", realm="EU PvE", faction="Alliance")
+    bad = document(house="eupvp--horde", realm="EU PvP", faction="Horde")
+    bad["plans"]["tailoring-trainer"]["steps"][1]["uses"].append([99999, 1])   # an item without a name
+    listed = [
+        {"key": "eupve--alliance", "realm": "EU PvE", "faction": "Alliance", "realms": ["EU PvE"], "generated": NOW, "ingame": True},
+        {"key": "eupvp--horde", "realm": "EU PvP", "faction": "Horde", "realms": ["EU PvP"], "generated": NOW, "ingame": True},
+    ]
+    site, srv, _root = _site({"eupve--alliance": good, "eupvp--horde": bad}, listed)
+    game = Path(tempfile.mkdtemp())
+    (game / scan.PLANS_ADDON).mkdir()
+    kept = settings.STATE, scan.addons_dir, scan.find_saved_variables, scan.portal
+    settings.STATE, scan.addons_dir = Path(tempfile.mkdtemp()) / "state", (lambda: game)
+    scan.find_saved_variables, scan.portal = (lambda: []), (lambda: "EU")
+    try:
+        import io
+        from contextlib import redirect_stdout
+        out = io.StringIO()
+        with redirect_stdout(out):
+            docs, written = plans.refresh(site)
+        assert [d["house"] for d in docs] == ["eupve--alliance"]
+        assert written == [settings.STATE / "Plans.lua", game / scan.PLANS_ADDON / "Plans.lua"]
+        assert "eupve--alliance" in written[1].read_text(encoding="utf-8")
+        assert "eupvp--horde" not in written[1].read_text(encoding="utf-8")
+        said = out.getvalue()
+        assert said.startswith("routes not fetched:") and "eupvp--horde" in said and "names an item" in said
+    finally:
+        settings.STATE, scan.addons_dir, scan.find_saved_variables, scan.portal = kept
+        srv.shutdown()
+        srv.server_close()
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):
