@@ -37,6 +37,7 @@ from . import fresh as freshmod
 
 
 def where() -> None:
+    """Print what was found on this machine: the game folder, the client, the AddOns folder, the addon, the scan files, the state folder and what starts at login."""
     base, flav = scan.wow_dir(), scan.flavor()
     present = scan.flavors_present()
     print(f"WoW folder:     {base}  ({'found' if base.is_dir() else 'NOT FOUND'}"
@@ -63,6 +64,8 @@ def where() -> None:
 
 
 def install_addon(addons_dir: Path | None = None, force: bool = False) -> Path:
+    """Copy the scanner and the plans addon into the AddOns folder (`addons_dir`, else the game's) and say
+    what was done; a newer scanner already there is left as it is unless `force`. Returns where the scanner is."""
     root = addons_dir or scan.addons_dir()
     had_old = addons_dir is None and (root / settings.OLD_ADDON_NAME).is_dir()
     have, mine = scan.toc_version(root / scan.ADDON_NAME, scan.ADDON_NAME), scan.toc_version(settings.ADDON_SOURCE / scan.ADDON_NAME, scan.ADDON_NAME)
@@ -83,6 +86,7 @@ def install_addon(addons_dir: Path | None = None, force: bool = False) -> Path:
 
 
 def status(path: Path | None = None, realm: str | None = None, faction: str | None = None) -> None:
+    """Print what the addon's saved scans hold: the auction houses, items and auctions, and the characters seen."""
     sd = scan.load_scan(path, realm, faction)
     done = [it for it in sd.items.values() if it.complete]
     listed = [it for it in done if it.listings]
@@ -110,6 +114,7 @@ class Stamped:
         self.out, self.at_start = out, True
 
     def write(self, text: str) -> int:
+        """Write the text, the time first at the start of each line that is not empty, the game account's folder name redacted."""
         from . import tray
         for line in text.splitlines(keepends=True):
             if self.at_start and line.strip():
@@ -148,7 +153,7 @@ class Refused(pipemod.PipeError):
         self.errors = errors
 
 
-def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = None, faction: str | None = None,
+def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = None, faction: str | None = None,  # noqa: C901 - baseline 9 Nov 2026, to be split
               again: bool = False, fresh: dict | None = None) -> bool:
     """Send what the scan file holds and was not sent already: every auction house in it, or
     the one of `realm` and `faction`. `fresh` is what the pipe last said of the houses
@@ -246,6 +251,7 @@ def other_watcher() -> int | None:
 
 
 def release_watch() -> None:
+    """Remove the note that this process is the one watching, so that the next helper to start may watch."""
     _watch_lock().unlink(missing_ok=True)
 
 
@@ -269,6 +275,7 @@ def retry_wait(failures: int) -> float:
 
 
 def wait_text(seconds: float) -> str:
+    """A wait in seconds as text: "2 min", or "30 s" under a minute."""
     return f"{seconds / 60:g} min" if seconds >= 60 else f"{seconds:g} s"
 
 
@@ -299,7 +306,7 @@ def send_vendors_once(p, path: Path | None = None) -> bool:
     return True
 
 
-def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,
+def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,  # noqa: C901, PLR0912 - baseline 9 Nov 2026, to be split
           stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None,
           tick=None) -> None:
     """Send after every save in game, fetch the routes and the freshness now and then, until
@@ -358,6 +365,7 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
 
 
 def send(path: Path | None, realm: str | None, faction: str | None, watch_it: bool, interval: float, again: bool) -> None:
+    """Send the latest scan through the pipe once, or with `watch_it` after every save in game until stopped (one watching helper at a time)."""
     p = pipemod.Pipe()
     if not watch_it:
         send_once(p, path, realm, faction, again)
@@ -413,6 +421,7 @@ def autostart(on: bool = True, registry=None) -> str:
 
 
 def whoami() -> None:
+    """Print the pipe's address, the name this helper sends under and whether it is trusted."""
     p = pipemod.Pipe()
     me = p.me()
     print(f"{p.url}\nThis helper sends as {me['name']} ({me['trust']}).")
@@ -421,6 +430,7 @@ def whoami() -> None:
 
 
 def lists(p: pipemod.Pipe | None = None) -> None:
+    """Fetch the lists of items to scan from the pipe and write them as Queue.lua, in the state folder and the installed addon, in place of those there."""
     doc = (p or pipemod.Pipe()).lists()
     if doc is None:
         print("the service has no lists yet")
@@ -497,7 +507,8 @@ def plans(quiet: bool = False, again: bool = False) -> bool:
     return True
 
 
-def main(argv=None) -> None:
+def main(argv=None) -> None:  # noqa: C901, PLR0912, PLR0915 - command dispatch: one branch per subcommand, after its parser
+    """The helper's command line: parse `argv` (the process's arguments when None) and run the command it names."""
     ap = argparse.ArgumentParser(prog="fwch", description=f"{settings.NAME} Helper {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("where", help="show the detected WoW folder, client flavour, AddOns folder and scan files")

@@ -13,7 +13,6 @@ import winreg
 from ctypes import wintypes as wt
 from pathlib import Path
 
-from . import settings
 
 # how the app's messages speak of the icon on this platform
 CLICK = "Right-click the icon"
@@ -75,6 +74,7 @@ for fn, args, res in (
 
 
 class WNDCLASSW(ctypes.Structure):
+    """The window class the icon's hidden window is registered with (user32 WNDCLASSW)."""
     _fields_ = [("style", wt.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
                 ("hInstance", wt.HINSTANCE), ("hIcon", wt.HICON), ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
                 ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR)]
@@ -84,10 +84,12 @@ user32.RegisterClassW.argtypes, user32.RegisterClassW.restype = [ctypes.POINTER(
 
 
 class GUID(ctypes.Structure):
+    """A Windows GUID, as NOTIFYICONDATAW carries one."""
     _fields_ = [("a", wt.DWORD), ("b", wt.WORD), ("c", wt.WORD), ("d", ctypes.c_ubyte * 8)]
 
 
 class NOTIFYICONDATAW(ctypes.Structure):
+    """What Shell_NotifyIconW is told of the icon: its window, tooltip, balloon text and icons (shell32 NOTIFYICONDATAW)."""
     _fields_ = [("cbSize", wt.DWORD), ("hWnd", wt.HWND), ("uID", wt.UINT), ("uFlags", wt.UINT), ("uCallbackMessage", wt.UINT),
                 ("hIcon", wt.HICON), ("szTip", wt.WCHAR * 128), ("dwState", wt.DWORD), ("dwStateMask", wt.DWORD),
                 ("szInfo", wt.WCHAR * 256), ("uVersion", wt.UINT), ("szInfoTitle", wt.WCHAR * 64), ("dwInfoFlags", wt.DWORD),
@@ -98,6 +100,7 @@ shell32.Shell_NotifyIconW.argtypes, shell32.Shell_NotifyIconW.restype = [wt.DWOR
 
 
 class BROWSEINFOW(ctypes.Structure):
+    """What the folder dialog is opened with (shell32 BROWSEINFOW)."""
     _fields_ = [("hwndOwner", wt.HWND), ("pidlRoot", wt.LPVOID), ("pszDisplayName", wt.LPWSTR), ("lpszTitle", wt.LPCWSTR),
                 ("ulFlags", wt.UINT), ("lpfn", wt.LPVOID), ("lParam", wt.LPARAM), ("iImage", ctypes.c_int)]
 
@@ -116,6 +119,7 @@ def one_instance(name: str) -> bool:
 
 
 def message(title: str, text: str) -> None:
+    """Show a message box with an OK button."""
     user32.MessageBoxW(None, text, title, MB_ICONINFORMATION)
 
 
@@ -127,6 +131,8 @@ DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
 
 
 def dpi_aware() -> bool:
+    """Tell Windows this process draws at the screen's own scale (per-monitor v2, else the older
+    system-wide call), so that the icon's menu is not drawn scaled up; whether either call took."""
     try:
         fn = user32.SetProcessDpiAwarenessContext
         fn.argtypes, fn.restype = [ctypes.c_void_p], wt.BOOL
@@ -180,10 +186,12 @@ class Tray:
         shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(self._data(NIF_MESSAGE | NIF_ICON | NIF_TIP)))
 
     def tooltip(self, text: str) -> None:
+        """Set the text shown when the pointer rests on the icon."""
         self.tip = text
         shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(self._data(NIF_TIP)))
 
     def balloon(self, title: str, text: str) -> None:
+        """Show a notification by the icon, with the large icon, kept back while Windows is in quiet time."""
         d = self._data(NIF_INFO)
         d.szInfo, d.szInfoTitle = text[:255], title[:63]
         d.dwInfoFlags, d.hBalloonIcon = NIIF_USER | NIIF_LARGE_ICON | NIIF_RESPECT_QUIET_TIME, self.hbig
@@ -195,6 +203,7 @@ class Tray:
         user32.PostMessageW(self.hwnd, WM_CALL, 0, 0)
 
     def quit(self) -> None:
+        """End the icon's message loop (run()), from any thread."""
         self.call(lambda: user32.PostQuitMessage(0))
 
     def run(self) -> None:
@@ -272,35 +281,28 @@ def open_path(what: str | Path) -> None:
     shell32.ShellExecuteW(None, "open", str(what), None, None, SW_SHOWNORMAL)
 
 
-def update_script(installer: Path, log: Path, exe: Path, fwch: Path) -> str:
-    """The Windows Script Host script that installs a newer helper with nothing shown: it waits
-    a moment for this helper to close, runs the installer without a window (msiexec /qn: a
-    per-user install, no administrator, so nothing asks; window style 0, hidden) with its log
-    in `log`, and starts the new helper. A VBScript run by wscript.exe, which has no console:
-    the cmd script of before, started with no console of its own, had every console program
-    in it (the ping that waited) open a black window of its own, which unsettled a player who
-    is no developer (the user, 7 Nov 2026). Inside a VBScript string a quote is doubled."""
-    def q(path: Path) -> str:
-        return '""' + str(path) + '""'
-    return "\r\n".join([
-        'Set sh = CreateObject("WScript.Shell")',
-        "WScript.Sleep 3000",
-        f'sh.Run "msiexec /i {q(installer)} /qn /norestart /l*v {q(log)}", 0, True',
-        f'sh.Run "{q(exe)} {q(fwch)} app", 1, False',
-        ""])
+def install_command(installer: Path, log: Path) -> list[str]:
+    """The command that installs a newer helper with nothing shown: Windows' own msiexec, by
+    its full path, on the downloaded installer, quiet (/qn: a per-user install, no
+    administrator, so nothing asks), its log in `log`, and LAUNCHAPP=1, which has the
+    installer start the new helper when it is done (installer/helper.wxs)."""
+    msiexec = Path(os.environ.get("SystemRoot") or r"C:\Windows") / "System32" / "msiexec.exe"
+    return [str(msiexec), "/i", str(installer), "/qn", "/norestart", "/l*v", str(log), "LAUNCHAPP=1"]
 
 
 def quiet_update(installer: Path, log: Path) -> bool:
-    """Install a newer helper with nothing shown (update_script), the script started here and
-    left running. True when it was started; the helper then quits."""
-    from . import tray
-    script = installer.with_name("update.vbs")
+    """Install a newer helper with nothing shown: msiexec started here (install_command) and
+    left running, and the helper then quits; the installer closes it if it has not closed yet,
+    puts the new one in its place and starts it. msiexec is a windowed program, so no console
+    opens. Up to 1.7.6 a VBScript run by wscript.exe did this (it waited for the helper to
+    close, ran msiexec hidden and started the helper again); Windows' own installer does all of
+    it, with no script host. True when msiexec was started."""
+    for old in ("update.vbs", "update.cmd"):                      # the scripts of before
+        installer.with_name(old).unlink(missing_ok=True)
     try:
-        installer.with_name("update.cmd").unlink(missing_ok=True)       # the script of before 1.6.15
-        script.write_text(update_script(installer, log, tray.app_exe(), settings.ROOT / "fwch.py"), encoding="utf-16")
-        subprocess.Popen(["wscript.exe", "//B", "//Nologo", str(script)], close_fds=True,
+        subprocess.Popen(install_command(installer, log), close_fds=True,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     except OSError:
         return False
     return True

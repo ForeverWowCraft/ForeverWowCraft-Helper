@@ -145,7 +145,7 @@ def _id(key) -> bool:
     return isinstance(key, str) and 0 < len(key) <= 10 and key.isascii() and key.isdigit()
 
 
-def check_scan(doc) -> str | None:
+def check_scan(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of a document anyone can send, read top to bottom
     """Why this is not a fwc-scan/1 document, or None when it is one. Everything the core
     reads of a scan is checked here, its type and its size, so that a document sent by anyone
     cannot fail where it is read (9 Nov 2026: one without scanned_at stopped the core's pull).
@@ -236,7 +236,7 @@ def _recipe_extras(row: dict) -> bool:
     return "made_level" not in row or ("made" in row and _whole(row["made_level"], 0, 100))
 
 
-def check_vendors(doc) -> str | None:
+def check_vendors(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of a document anyone can send, read top to bottom
     """Why this is not a fwc-vendors/1 document, or None when it is one."""
     if not isinstance(doc, dict) or doc.get("format") != VENDORS_FORMAT:
         return f"not a {VENDORS_FORMAT} document"
@@ -295,11 +295,13 @@ def mark_vendors(doc: dict) -> str:
 
 
 def lists_document(queue: dict[str, list[tuple[int, str]]]) -> dict:
+    """A fwc-lists/1 document of the lists, {list name: [(item id, name)]}, stamped now."""
     return {"format": LISTS_FORMAT, "generated": int(time.time()),
             "queue": {name: [[int(i), str(n)] for i, n in rows] for name, rows in queue.items()}}
 
 
 def check_lists(doc) -> str | None:
+    """What is wrong with a fwc-lists/1 document, or None when it is usable."""
     if not isinstance(doc, dict) or doc.get("format") != LISTS_FORMAT:
         return f"not a {LISTS_FORMAT} document"
     if not isinstance(doc.get("queue"), dict):
@@ -318,12 +320,14 @@ def pack(doc: dict) -> bytes:
 
 
 def unpack(data: bytes) -> dict:
+    """A JSON document from the service's bytes, gunzipped first when they are gzipped."""
     if data[:2] == b"\x1f\x8b":
         data = gzip.decompress(data)
     return json.loads(data.decode("utf-8"))
 
 
 def digest(data: bytes) -> str:
+    """The SHA-256 of the bytes, in hex."""
     return hashlib.sha256(data).hexdigest()
 
 
@@ -443,6 +447,9 @@ class Pipe:
 
     def ask(self, method: str, path: str, body: bytes | None = None, missing_ok: bool = False, packed: bool = True,
             content_type: str = "application/json"):
+        """One request to the service, its answer unpacked ({} when empty). A helper without a token registers
+        first, and again when the service no longer knows its token. A 404 is None when `missing_ok`; a 429
+        raises TooSoon, a 409 for a house with a fresh scan NotNeeded, any other error PipeError."""
         if self.registers and not self.token and path not in ("/v1/health", "/v1/register"):
             self.register()
         status, data = self.request(method, path, body, packed, content_type)
@@ -470,15 +477,19 @@ class Pipe:
         return unpack(data) if data else {}
 
     def health(self) -> dict:
+        """GET /v1/health: {"ok": true} when the service is up (no token needed)."""
         return self.ask("GET", "/v1/health")
 
     def me(self) -> dict:
+        """GET /v1/me: {"name", "trust"} of the sender this token is."""
         return self.ask("GET", "/v1/me")
 
     def senders(self) -> list[dict]:
+        """GET /v1/senders: every sender, its trust, scans, houses and when last seen (the core's token)."""
         return self.ask("GET", "/v1/senders")["senders"]
 
     def set_sender(self, name: str, trust: str, note: str = "") -> dict:
+        """PUT /v1/senders/<name>: make a sender "trusted", "public" or "blocked", with a note (the core's token)."""
         return self.ask("PUT", f"/v1/senders/{name}", json.dumps({"trust": trust, "note": note}).encode(), packed=False)
 
     def send_vendors(self, doc: dict) -> dict:
@@ -494,6 +505,7 @@ class Pipe:
         return self.ask("POST", "/v1/scans" + (f"?sender={urllib.request.quote(sender)}" if sender else ""), pack(doc))
 
     def lists(self) -> dict | None:
+        """GET /v1/lists: the fwc-lists/1 document of what the scanners should scan, None when none was set."""
         return self.ask("GET", "/v1/lists", missing_ok=True)
 
     def fresh(self) -> dict | None:
@@ -501,6 +513,7 @@ class Pipe:
         return self.ask("GET", "/v1/fresh", missing_ok=True, packed=False)
 
     def set_lists(self, doc: dict) -> dict:
+        """PUT /v1/lists: set the lists the scanners scan (the core's token)."""
         return self.ask("PUT", "/v1/lists", pack(doc))
 
     PAGE = 500          # the most the service lists in one answer
@@ -521,6 +534,7 @@ class Pipe:
             after = last
 
     def scan(self, scan_id: int) -> dict:
+        """GET /v1/scans/<id>: one scan's fwc-scan/1 document (the core's token)."""
         return self.ask("GET", f"/v1/scans/{int(scan_id)}")
 
     def vendors(self, after: int = 0) -> list[dict]:
@@ -543,7 +557,22 @@ class Pipe:
         return data
 
     def set_state(self, blob: bytes) -> dict:
+        """PUT /v1/state: put the core's inbox, zipped, for the next run wherever it runs (the core's token)."""
         return self.ask("PUT", "/v1/state", blob, packed=False, content_type="application/zip")
+
+    def site_state(self) -> bytes | None:
+        """The site the core last built, as the zip the last run put; None when none was put yet.
+        Apart from the inbox since 10 Nov 2026: the two in one request grew past what Cloudflare lets through."""
+        status, data = self.request("GET", "/v1/state/site")
+        if status == 404:
+            return None
+        if status >= 400:
+            raise PipeError(f"GET /v1/state/site: {status} {_why(data)}".strip())
+        return data
+
+    def set_site_state(self, blob: bytes) -> dict:
+        """PUT /v1/state/site: put the site the core built, zipped, beside its inbox (the core's token)."""
+        return self.ask("PUT", "/v1/state/site", blob, packed=False, content_type="application/zip")
 
     def sell(self) -> dict | None:
         """The archivist's fwc-sell/1 document (what sold, per auction house and item); None when none was put yet."""
@@ -555,6 +584,7 @@ class Pipe:
         return json.loads(gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data)
 
     def set_sell(self, doc: dict) -> dict:
+        """PUT /v1/sell: put the archivist's fwc-sell/1 document for the cloud's pass (the core's token)."""
         return self.ask("PUT", "/v1/sell", pack(doc))
 
     def report(self) -> str | None:
@@ -567,6 +597,7 @@ class Pipe:
         return data.decode("utf-8", "replace")
 
     def set_report(self, html_text: str) -> dict:
+        """PUT /v1/report: put the archivist's quality report, one HTML page (the core's token)."""
         return self.ask("PUT", "/v1/report", html_text.encode("utf-8"), packed=False, content_type="text/html; charset=utf-8")
 
     def move_blobs(self, after: str = "", limit: int = 50) -> dict:

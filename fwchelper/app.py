@@ -69,18 +69,21 @@ class App:
         self.refresh()
 
     def refresh(self) -> None:
+        """Bring the status up to date (the houses whose routes the addon has) and put its text in the icon's tooltip."""
         self.status.houses = sorted(plansmod.stamps())
         if self.tray:
             text = tray.tooltip(self.status)
             self.tray.call(lambda: self.tray.tooltip(text))
 
     def items(self) -> list:
+        """The icon's menu rows as things stand now (win.Tray asks for them each time it opens the menu)."""
         return tray.menu(self.status, self.startup_on(), settings.quiet_update())
 
     def startup_on(self) -> bool:
+        """Whether the helper starts at login."""
         return self.win.startup_on()
 
-    def chosen(self, ident: int) -> None:
+    def chosen(self, ident: int) -> None:  # noqa: C901 - menu dispatch: one branch per tray menu row
         """A menu row was picked (on the icon's thread)."""
         if ident == tray.SEND:
             self.asks["send"] = True
@@ -120,12 +123,15 @@ class App:
             self.tray.quit()
 
     def closing(self) -> None:
+        """Tell the work thread to stop, waking it from any wait (when the icon closes or Quit is picked)."""
         self.stop.set()
         self.wake.set()
         self.folder_chosen.set()
 
     # ---- the work -----------------------------------------------------------------------------
     def work(self) -> None:
+        """The work thread: the first run (game, addon, lists, routes), then the watch that sends every scan
+        the addon saves, until stopped. An error ends it in the log, never silently."""
         try:
             p = self.first_run()
             if not self.stop.is_set():
@@ -136,7 +142,7 @@ class App:
         finally:
             cli.release_watch()
 
-    def first_run(self) -> pipemod.Pipe:
+    def first_run(self) -> pipemod.Pipe:  # noqa: C901 - baseline 9 Nov 2026, to be split
         """What setup.cmd did, with nothing asked: the game, the addon, the lists, the routes."""
         print(f"{settings.NAME} Helper {__version__} started; the state is in {settings.STATE}")
         self.after_update()
@@ -252,13 +258,15 @@ class App:
 
     # ---- the update itself ----------------------------------------------------------------------
     # By itself (since 1.6.0): the installer downloaded, its SHA-256 checked against the one
-    # GitHub publishes for the release, then installed with nothing shown (win.quiet_update) and
-    # the helper started again; the new one says "updated to" once. A note of what was begun
-    # (updates/updated.json) tells the new helper to say so, or the old one, started again by
-    # the script because the install failed, to say that and not try that version by itself
-    # again (updates/failed.json): the menu's Update stays. Without a published digest, or on a
+    # GitHub publishes for the release, then installed with nothing shown (win.quiet_update:
+    # msiexec /qn, which closes this helper, and with LAUNCHAPP=1 starts the new one when it is
+    # done); the new one says "updated to" once. A note of what was begun (updates/updated.json)
+    # tells the new helper to say so, or the old one, when the install failed and the helper is
+    # started again (at the next logon, or from the Start Menu), to say that and not try that
+    # version by itself again (updates/failed.json): the menu's Update stays. Without a published digest, or on a
     # platform without a quiet install (the Mac's disk image), the update waits in the menu.
     def updates_dir(self) -> Path:
+        """The state folder's updates/: the downloaded installers and the notes of an update begun or failed."""
         return settings.STATE / "updates"
 
     def failed(self) -> str | None:
@@ -330,7 +338,7 @@ class App:
         if quiet:
             if not expected or not quietly:
                 print(f"update available: {settings.NAME} Helper {version} is out (this one is {__version__}); "
-                      + ("GitHub publishes no checksum for it, so it is not installed by itself" if not quietly is None else "it is not installed by itself here")
+                      + ("GitHub publishes no checksum for it, so it is not installed by itself" if quietly is not None else "it is not installed by itself here")
                       + f". {self.win.CLICK} and choose Update.")
                 return
             self.updates_dir().mkdir(parents=True, exist_ok=True)
@@ -362,6 +370,8 @@ def hands():
 
 
 def run() -> None:
+    """Start the app: one instance only (a second tells the first, or the player, and leaves), the log in
+    the state folder, the work on its own thread and the icon on this one until Quit."""
     win = hands()
     if not win.one_instance(MUTEX):
         # on a Mac the running helper is told to show its menu at the mouse: its icon may be out of sight

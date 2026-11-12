@@ -9,7 +9,10 @@
 -- says "vendor": the arrow leads there, and at the vendor the list docks to the merchant's
 -- window with a Buy button on each row the merchant sells: a click buys up to a stack (the
 -- game's own limit a purchase), the bags say when it is there, and the row offers the rest
--- (two things from one vendor left the second unseen, 12 Oct 2026).
+-- (two things from one vendor left the second unseen, 12 Oct 2026). A ware sold in bundles
+-- (Empty Vial, 5 a purchase) is bought in whole bundles, enough to cover what is missing, and
+-- the row says so ("Buy 15", "3 x 5"): BuyMerchantItem counts ITEMS, as the game's own
+-- stack-split box asks it (players got odd amounts when it was given bundles, 10 Nov 2026).
 --
 -- The list is the Make button's (Craft.lua, ns.craft.Shopping): the route's next step at the
 -- character's skill, less the bags. It opens by itself when the auction house opens with
@@ -28,7 +31,7 @@ local bought = {}                  -- item -> true once bought this visit: no se
 local searching                    -- the search out: { item, row, key, commodity }
 local pending                      -- the purchase under way: { item, units, row, state = "pricing" | "priced" | "buying", commodity, price, auctionID }
 local waiting                      -- a ticker, while a scan has the house
-local merchant                     -- the merchant open: item -> { index, price, stack, max, available }; nil when none is
+local merchant                     -- the merchant open: item -> { index, price, stack, per, available }; nil when none is
 local offered                      -- the list was offered at this merchant (not again on each update)
 local vending                      -- a vendor purchase made: { item, have, units }, until the bags move or a while passes
 
@@ -49,9 +52,15 @@ local function CanSearch() return C_AuctionHouse and C_AuctionHouse.MakeItemKey 
 local function Say(row, text) row.status:SetText(text) end
 local function Missing(e) return math.max(1, e.units - (e.have or 0)) end
 
--- the merchant open: what it sells by item, with the index to buy by, the price, how many a
--- purchase gives, how many purchases a click may make (the game's stack limit, as its own
--- window splits it) and how many it has (-1: no end)
+-- the merchant open: what it sells by item, with the index to buy by, the price of one
+-- purchase, how many items a purchase gives (its bundle: 5 Empty Vials), how many items one
+-- call may buy (the game's limit, GetMerchantItemMaxStack, in items, cut to whole bundles and
+-- one bundle at least) and how many it has (-1: no end).
+-- BuyMerchantItem(index, quantity) takes ITEMS: Blizzard's own merchant window opens its
+-- stack-split box at up to GetMerchantItemMaxStack items in steps of the bundle and hands the
+-- number picked to BuyMerchantItem as it is; what it can afford it counts as money over the
+-- price of ONE item (price / bundle). Given bundles, a ware sold five at a time came in odd
+-- amounts (a player, 10 Nov 2026); for a ware sold singly the two are the same.
 local function ScanMerchant()
   if not (GetMerchantNumItems and GetMerchantItemLink) then return end
   merchant = {}
@@ -60,29 +69,40 @@ local function ScanMerchant()
     local item = link and tonumber(link:match("item:(%d+)"))
     if item then
       local _, _, price, stack, available = ns.MerchantItemInfo(i)
-      stack = math.max(1, tonumber(stack) or 1)
+      stack = math.max(1, math.floor(tonumber(stack) or 1))
       local max = GetMerchantItemMaxStack and tonumber(GetMerchantItemMaxStack(i)) or 0
       merchant[item] = { index = i, price = tonumber(price) or 0, stack = stack,
-                         max = math.max(1, math.floor(max / stack)), available = tonumber(available) or -1 }
+                         per = math.max(stack, max - max % stack), available = tonumber(available) or -1 }
     end
   end
 end
 
--- the purchases a click makes of a row's item at the merchant open, and the units they give
+-- what a click buys of a row's item at the merchant open: the purchases (bundles) and the
+-- items they give. Whole bundles enough for what is missing (12 missing of a ware sold five
+-- at a time: 3 bundles, 15), no more than one call may buy (the rest on the next click, once
+-- the bags have the first), nor more than the merchant has: a limited stock is counted in
+-- items, as the call is; a stock short of one bundle is taken to be one bundle (a client
+-- counting it in purchases), which the merchant refuses if it is not, and the row takes a
+-- click again
 local function Stacks(e)
   local m = merchant and merchant[e.item]
   if not m then return 0, 0 end
-  local n = math.min(math.ceil(Missing(e) / m.stack), m.max)
-  if m.available >= 0 then n = math.min(n, m.available) end
+  local n = math.min(math.ceil(Missing(e) / m.stack), math.floor(m.per / m.stack))
+  if m.available >= 0 then
+    local can = math.floor(m.available / m.stack)
+    if can < 1 and m.available > 0 then can = 1 end
+    n = math.min(n, can)
+  end
   return n, n * m.stack
 end
 
--- a vendor's item, bought: one call, as the game's own Buy (the bags say when it is there,
--- and the list then offers the rest); the button is dead meanwhile
+-- a vendor's item, bought: one call for the items of whole bundles, as the game's own
+-- stack-split box buys (the bags say when it is there, and the list then offers the rest);
+-- the button is dead meanwhile
 local function BuyAtVendor(row, e)
   local m, n, units = merchant[e.item], Stacks(e)
   if n < 1 or not BuyMerchantItem or (vending and vending.item == e.item) then return end
-  BuyMerchantItem(m.index, n)
+  BuyMerchantItem(m.index, units)
   local v = { item = e.item, have = e.have or 0, units = units }
   vending = v
   Say(row, string.format("buying %d...", units))
@@ -465,7 +485,8 @@ function ns.RefreshShopping()
         elseif n < 1 then row.status:SetText("sold out"); row.buy:Hide()
         else
           if vending and vending.item == e.item then vending = nil end
-          row.status:SetText(ns.Money(merchant[e.item].price * n))
+          local m = merchant[e.item]                                -- the gold: the bundles at the price of one
+          row.status:SetText(m.stack > 1 and string.format("%d x %d, %s", n, m.stack, ns.Money(m.price * n)) or ns.Money(m.price * n))
           row.buy:SetText("Buy " .. units); row.buy:Show(); row.buy:Enable()
         end
       elseif merchant and e.source == "vendor" then

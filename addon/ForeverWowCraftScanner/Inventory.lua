@@ -76,7 +76,8 @@ local function House()
   end
 end
 
--- the items worth counting: everything on the scan lists, and everything a route names
+-- the items worth counting: everything on the scan lists, everything a route names, and the
+-- tools the route's recipes need with what they take (FWCS_DB.__tools: a rod in the bank is had)
 local tracked
 local function Tracked()
   if tracked then return tracked end
@@ -84,8 +85,14 @@ local function Tracked()
   for item in pairs(ns.QueuedItems()) do tracked[item] = true end
   local house = House()
   for item in pairs(house and house.items or {}) do tracked[item] = true end
+  local known = ns.ToolsKnown and ns.ToolsKnown()
+  for item, t in pairs(known and known.byItem or {}) do
+    tracked[item] = true
+    for _, u in ipairs(t.uses or {}) do tracked[u[1]] = true end
+  end
   return tracked
 end
+local function Retrack() tracked = nil end             -- a tool learned: counted from the next count on
 
 local function SlotItem(bag, slot)
   if C_Container and C_Container.GetContainerItemInfo then
@@ -126,6 +133,7 @@ Place = function(place, counts, seen)
     if ((n[1] or 0) + (n[2] or 0) + (n[3] or 0) + (n[4] or 0)) == 0 then c.items[item] = nil end
   end
   if seen then c[seen] = time() end
+  if ns.HaveChanged then ns.HaveChanged() end    -- the route with what the character has is worked out again (Tailor.lua)
 end
 
 -- How many of an item the bags hold (the bank not counted), by the client's call, new
@@ -188,6 +196,7 @@ local function NoteMailed(item, units)
   c.mailed = c.mailed or {}
   c.mailed[item] = (c.mailed[item] or 0) + (units or 1)
   c.mailedAt = time()
+  if ns.HaveChanged then ns.HaveChanged() end
 end
 
 -- The character's own auctions still up (not the sold ones: those are money in the mail), once
@@ -316,4 +325,4 @@ end)
 
 ns.inv = { Spelt = Spelt, Char = Char, House = House, Tracked = Tracked, Count = Count, CountBags = CountBags, CountBank = CountBank,
            CountMail = CountMail, NoteSkills = NoteSkills, SkillsReadable = SkillsReadable, Have = Have, PLACES = PLACES,
-           InMail = InMail, NoteMailed = NoteMailed }
+           InMail = InMail, NoteMailed = NoteMailed, Retrack = Retrack }

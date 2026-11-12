@@ -1,7 +1,6 @@
 """The vendors the addon met, read from its saved file and sent to the pipe (fwchelper/scan.py
 vendors, fwchelper/pipe.py vendors_document, fwchelper/cli.py send_vendors_once)."""
 import json
-import os
 import sys
 import tempfile
 from pathlib import Path

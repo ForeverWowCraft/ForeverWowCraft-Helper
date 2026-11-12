@@ -3,15 +3,20 @@
   The helper's installer: a per-user MSI (no administrator prompt) that puts the helper, with
   python.org's Python inside, under the user's local programs folder, makes a Start Menu entry,
   has the app start when the user logs on (a Run entry: Windows' Settings > Apps > Startup lists
-  it with a switch), and starts it when the installer is done. A newer version installed over
-  an older replaces it (the running app is closed first); the state folder is left alone, so
-  the helper keeps its name at the pipe. Built by build.py with WiX 3.14.
+  it with a switch), and starts it when the installer is done: from the finish page's tick box
+  when installed by hand, or, for the helper's own quiet update (msiexec /qn LAUNCHAPP=1,
+  fwchelper/win.py), by the execute sequence. A newer version installed over an older replaces
+  it (the running app is closed first); the state folder is left alone, so the helper keeps its
+  name at the pipe. No script of any kind runs: the custom actions are WiX's own (closing the
+  app, starting it, the licence's print button). Built by build.py with WiX 3.14.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product Id="*" Name="ForeverWowCraft Helper" Language="1033" Version="$(var.Version)" Manufacturer="ForeverWowCraft"
            UpgradeCode="7F1E5C2A-9B3D-4E6F-8A1C-2D4B6E8F0A1C">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" InstallPrivileges="limited"
-             Description="ForeverWowCraft Helper $(var.Version): sends the prices the addon records, fetches the routes it shows." />
+             Manufacturer="ForeverWowCraft"
+             Description="ForeverWowCraft Helper $(var.Version): sends the prices the addon records, fetches the routes it shows."
+             Comments="ForeverWowCraft Helper, open source (MIT): https://github.com/ForeverWowCraft/ForeverWowCraft-Helper. Installs for this user only, with no administrator." />
     <MajorUpgrade DowngradeErrorMessage="A newer ForeverWowCraft Helper is installed already." Schedule="afterInstallInitialize"
                   AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
@@ -19,6 +24,8 @@
     <Icon Id="helper.ico" SourceFile="$(var.Icon)" />
     <Property Id="ARPPRODUCTICON" Value="helper.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://foreverwowcraft.com/helper" />
+    <Property Id="ARPHELPLINK" Value="https://foreverwowcraft.com/helper" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/ForeverWowCraft/ForeverWowCraft-Helper/releases" />
     <Property Id="ARPNOREPAIR" Value="1" />     <!-- ARPNOMODIFY comes with WixUI_Minimal -->
 
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -55,6 +62,11 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <Property Id="WixShellExecTarget" Value="[ProgramMenuFolder]ForeverWowCraft Helper.lnk" />
     <CustomAction Id="StartHelper" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+    <!-- the helper's quiet update passes LAUNCHAPP=1 (fwchelper/win.py install_command): the new helper is started from
+         the Start Menu entry once the install is done; never on removal, and not for an old helper's updater, which passes none -->
+    <InstallExecuteSequence>
+      <Custom Action="StartHelper" After="InstallFinalize">LAUNCHAPP = "1" AND NOT REMOVE~="ALL"</Custom>
+    </InstallExecuteSequence>
     <UI>
       <UIRef Id="WixUI_Minimal" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="StartHelper">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>

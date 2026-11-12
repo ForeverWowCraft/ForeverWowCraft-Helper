@@ -216,6 +216,13 @@ def test_the_core_state_goes_as_a_zip_and_comes_back_as_bytes():
     assert p.state() == b"PK\x03\x04 a zip"                                     # bytes as they were, never unpacked
     assert seen[1] == ("PUT", "/v1/state", False, "application/zip")             # not gzipped on the way: a zip already
     assert seen[0][2:] == (True, "application/json")                             # what every other call sends
+    # the site the core built goes apart from the inbox, the same way (10 Nov 2026)
+    seen.clear()
+    p.kept = None
+    assert p.site_state() is None
+    assert p.set_site_state(b"PK\x03\x04 a site") == {"bytes": 11}
+    assert p.site_state() == b"PK\x03\x04 a site"
+    assert seen[:2] == [("GET", "/v1/state/site", True, "application/json"), ("PUT", "/v1/state/site", False, "application/zip")]
 
 class _Clock:
     """Time that passes only when slept, and the sleeps."""

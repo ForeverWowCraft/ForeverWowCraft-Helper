@@ -28,6 +28,7 @@ DMG_TRAILER = b"koly"                        # a .dmg ends with a 512-byte trail
 
 
 class UpdateError(Exception):
+    """A newer helper could not be had: the download failed, or what came is not an installer."""
     pass
 
 
@@ -98,6 +99,7 @@ def digest(version: str, url: str | None = None, timeout: float | None = None, f
 
 
 def sha256(path: Path) -> str:
+    """The file's SHA-256 in hex, read a megabyte at a time."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):

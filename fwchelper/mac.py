@@ -54,10 +54,12 @@ def one_instance(name: str) -> bool:
 
 # ---- starting at login ----------------------------------------------------------------------
 def agents_dir() -> Path:
+    """The user's launch agents folder, ~/Library/LaunchAgents."""
     return Path.home() / "Library" / "LaunchAgents"
 
 
 def agent_path() -> Path:
+    """The helper's launch agent there, the one that starts it at login."""
     return agents_dir() / f"{LABEL}.plist"
 
 
@@ -204,7 +206,7 @@ def browse_folder(title: str) -> Path | None:
 
 
 # ---- the icon ---------------------------------------------------------------------------------
-def _delegate_class():
+def _delegate_class():  # noqa: C901 - one AppKit delegate class, one small method per message, counted as one
     """The AppKit object the menu and the application talk to, made once AppKit is wanted."""
     import objc
     from AppKit import NSObject
@@ -260,6 +262,8 @@ class Tray:
         self.app = self.item = self.delegate = None
 
     def run(self) -> None:
+        """The menu bar on the main thread until the app quits: no Dock icon, the icon (the title FWC when the
+        image will not load), its menu built each time it opens, and a second start's word to show the menu."""
         from AppKit import (NSApplication, NSApplicationActivationPolicyAccessory, NSImage, NSMenu, NSSize, NSStatusBar,
                             NSVariableStatusItemLength)
         self.app = NSApplication.sharedApplication()
@@ -298,7 +302,7 @@ class Tray:
     def placed(self) -> None:
         """Whether macOS placed the icon: its button has a window, on a screen. Said in the log
         either way; when it was not, the player is told once how to reach the menu (the helper
-        is otherwise quiet about its icon). A newer macOS never placed the icon of a process it
+        is otherwise quiet about its icon). macOS never placed the icon of a process it
         knew by no bundle (9 Nov 2026)."""
         button = self.item.button() if self.item is not None else None
         window = button.window() if button is not None else None
@@ -345,6 +349,7 @@ class Tray:
             self.delegate.performSelectorOnMainThread_withObject_waitUntilDone_("runCall:", None, False)
 
     def tooltip(self, text: str) -> None:
+        """Set the text shown when the pointer rests on the icon."""
         if self.item is not None:
             self.item.button().setToolTip_(text)
 

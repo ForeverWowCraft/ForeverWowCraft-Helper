@@ -55,6 +55,7 @@ def _unescape(s: str) -> str:
 
 
 def tokenize(text: str):
+    """(kind, value) tokens of Lua table text, kind "num", "str", "name" or "punct", ending with ("eof", None); comments and whitespace are skipped."""
     pos = 0
     n = len(text)
     while pos < n:

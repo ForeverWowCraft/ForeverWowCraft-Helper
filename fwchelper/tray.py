@@ -74,6 +74,7 @@ def startup_on(run_value: str | None, approved: bytes | None) -> bool:
 
 
 def startup_command(exe: Path, script: Path) -> str:
+    """The command that starts the app at login (the Run value): the executable and fwch.py, quoted, then `app`."""
     return f'"{exe}" "{script}" app'
 
 
@@ -139,6 +140,7 @@ class Log:
         self.path, self.hook, self.partial, self.lock = path, hook, "", threading.Lock()
 
     def write(self, text: str) -> int:
+        """Take printed text; each line is written to the file once it is complete."""
         with self.lock:
             self.partial += text
             while "\n" in self.partial:
@@ -163,10 +165,13 @@ class Log:
                 pass
 
     def flush(self) -> None:
+        """Nothing to do: each line is written to the file as soon as it is complete."""
         pass
 
     def isatty(self) -> bool:
+        """Never a terminal: a log file."""
         return False
 
     def reconfigure(self, **kw) -> None:        # stamp_lines() asks stdout for line buffering: every line is written at once here
+        """Nothing to do: every line is written at once here already."""
         pass

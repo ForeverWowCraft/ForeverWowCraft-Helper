@@ -31,6 +31,7 @@ def for_addon(told: dict) -> dict:
 
 
 def fresh_text(told: dict) -> str:
+    """Fresh.lua's text for the pipe's answer `told`: a header, then the FWCS_FRESH table the addon reads."""
     return "\n".join([
         "-- Written by `python fwch.py fresh` (and the helper's send window, by itself) from the pipe; do not edit by hand.",
         "-- When each auction house was last scanned by anyone. See fwchelper/fresh.py.",

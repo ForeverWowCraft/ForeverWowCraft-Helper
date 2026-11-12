@@ -79,10 +79,12 @@ class ScanItem:
 
     @property
     def min_price(self) -> int | None:
+        """The lowest unit price listed, in copper; None when nothing is listed."""
         return self.listings[0][0] if self.listings else None
 
     @property
     def total(self) -> int:
+        """Units listed in all."""
         return sum(q for _, q in self.listings)
 
     def cost_for(self, n: float, scarcity: float = 0.25) -> tuple[float, float]:
@@ -105,6 +107,8 @@ class ScanItem:
 
 @dataclass
 class ScanData:
+    """One auction house's scan as the addon's saved file holds it (load_scan): each item's ladder, the
+    lowest prices over time, and the realm, faction and connected realms the house is known by."""
     items: dict[int, ScanItem]
     realm: str
     path: Path
@@ -177,10 +181,12 @@ class ScanData:
 
     @property
     def newest(self) -> int:
+        """When the most recently scanned item was scanned (0 without items)."""
         return max((it.scanned_at for it in self.items.values()), default=0)
 
     @property
     def oldest(self) -> int:
+        """When the least recently scanned item was scanned (0 without items)."""
         return min((it.scanned_at for it in self.items.values()), default=0)
 
     def age_range(self) -> str:
@@ -260,6 +266,7 @@ def flavors_present() -> list[str]:
 
 
 def addons_dir() -> Path:
+    """The game's AddOns folder: <WoW folder>/<client folder>/Interface/AddOns."""
     return wow_dir() / flavor() / "Interface" / "AddOns"
 
 
@@ -408,7 +415,7 @@ def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:
     return sorted(out, key=lambda d: (-d[3], -d[2]))
 
 
-def load_scan(path: Path | None = None, realm: str | None = None, faction: str | None = None) -> ScanData:
+def load_scan(path: Path | None = None, realm: str | None = None, faction: str | None = None) -> ScanData:  # noqa: C901 - baseline 9 Nov 2026, to be split
     """Parse the addon's SavedVariables file (newest one found when `path` is None). Of the
     datasets it holds, the one of `realm` and `faction`; left open, the most recently scanned."""
     faction = faction_named(faction)

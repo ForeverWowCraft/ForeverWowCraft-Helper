@@ -94,7 +94,7 @@ def _pairs(rows, what: str) -> str | None:
     return None
 
 
-def check_plans(doc) -> str | None:
+def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of a document anyone can send, read top to bottom
     """Why this is not a fwc-plans/1 document, or None when it is one."""
     if not isinstance(doc, dict) or doc.get("format") != PLANS_FORMAT:
         return f"not a {PLANS_FORMAT} document"
@@ -270,6 +270,7 @@ def choose(houses: list[dict], want: set[tuple[str, str]], region: str | None = 
 
 # ---- the site -----------------------------------------------------------------------------------
 def site_url() -> str:
+    """The site the routes come from: the saved FWC_SITE_URL, else settings.SITE_URL, without a trailing slash."""
     return (settings.saved("SITE_URL") or settings.SITE_URL).rstrip("/")
 
 
@@ -347,6 +348,7 @@ def houses(site: str | None = None) -> list[dict]:
 
 
 def version_tuple(s) -> tuple[int, ...]:
+    """A version as numbers to compare, at most three: "1.7.6" -> (1, 7, 6)."""
     return tuple(int(x) for x in re.findall(r"\d+", str(s))[:3])
 
 
@@ -485,4 +487,5 @@ def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], l
 
 
 def age(doc: dict) -> str:
+    """How old the scan a house's routes were planned from is, as text ("3 h ago")."""
     return scan.age_text(int(doc.get("scanned_at") or 0))

@@ -21,7 +21,7 @@ Python for this Mac's processor inside its own process on fwch.py app, so that t
 the application and macOS knows it by the bundle's identifier (installer/helper.icns is the
 icon, made from fwchelper/helper.ico by installer/icons.py). Two Pythons so that an Apple
 silicon Mac runs the helper natively: with the Intel one alone it asked for Rosetta (9 Nov 2026).
-A script launcher that started the Python left the process with no bundle, and a newer macOS
+A script launcher that started the Python left the process with no bundle, and macOS
 never placed its menu bar icon (macOS 26 or later, 9 Nov 2026); the build's check of that is
 the launcher with --identity, which prints the bundle's identifier.
 Info.plist names the bundle (com.foreverwowcraft.helper), the version, and
@@ -114,6 +114,7 @@ def sign_command(app: Path) -> list[str]:
 
 
 def compile_launcher(resources: Path, exe: Path) -> None:
+    """Compile the application's launcher to `exe` with clang, one slice for each processor joined into one file (needs clang on the Mac)."""
     if not shutil.which("clang"):
         raise SystemExit("clang is not on this Mac: the application's launcher is compiled here (xcode-select --install puts it in)")
     import tempfile
@@ -142,6 +143,7 @@ def unpack_python(url: str, sha256: str, cache: Path, into: Path) -> Path:
 
 
 def native_arch() -> str:
+    """The processor of the machine that builds, as the Pythons are named: "arm64" or "x86_64"."""
     import platform
     return "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
 
@@ -205,6 +207,7 @@ def dmg(app: Path, out: Path, ver: str) -> Path:
 
 
 def run(cmd: list[str], env: dict | None = None) -> None:
+    """Run a build tool, passing on what it prints; stop the build when it fails."""
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)
@@ -213,6 +216,7 @@ def run(cmd: list[str], env: dict | None = None) -> None:
 
 
 def main(argv=None) -> int:
+    """The command line: stage the application where --out says, then make the disk image (on a Mac); 0 when done."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     core = HELPER.parent if (HELPER.parent / "fwc.py").exists() else None
     ap.add_argument("--out", type=Path, default=(core or HELPER) / "dist", help="where the .dmg goes")

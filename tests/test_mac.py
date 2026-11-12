@@ -12,7 +12,7 @@ HELPER = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HELPER))
 sys.path.insert(0, str(HELPER / "installer"))
 
-from fwchelper import __version__, mac, settings, tray, update  # noqa: E402
+from fwchelper import __version__, mac, settings, update  # noqa: E402
 import build_mac  # noqa: E402
 
 
@@ -74,7 +74,7 @@ def test_one_instance_at_a_time_through_the_lock():
     assert mac.one_instance(r"Local\ForeverWowCraftHelper") is True
     assert (folder / "ForeverWowCraftHelper.lock").exists()
     import subprocess
-    code = f"import sys; sys.path.insert(0, {str(HELPER)!r}); from fwchelper import mac, settings; settings.STATE = __import__('pathlib').Path({str(folder)!r}); print(mac.one_instance(r'Local\\ForeverWowCraftHelper'))"
+    code = f"import sys; sys.path.insert(0, {str(HELPER)!r}); from fwchelper import mac, settings; settings.STATE = __import__('pathlib').Path({str(folder)!r}); print(mac.one_instance(r'Local\\ForeverWowCraftHelper'))"  # noqa: E501 - the program run in a child Python, kept on one line
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout.strip()
     assert out == "False", out                                                        # another process: the lock is held
 

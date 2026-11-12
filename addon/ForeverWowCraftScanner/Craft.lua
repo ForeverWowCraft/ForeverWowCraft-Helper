@@ -86,11 +86,12 @@ local function Point(v, by)
       ns.SetArrow(nil, pointed.title, false, note, pointed.profession)
     end
   elseif v.show or v.text:match("^Needs ") then     -- a tool to buy, or needs of no place: the arrow says the words
-    pointed = { title = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil }
-    ns.SetArrow(nil, v.text, false, nil, pointed.profession)
-  elseif v.spell then                          -- something to make, here: the words, under a hammer
-    pointed = { title = v.text, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, make = true }
-    ns.SetArrow(nil, v.text, false, nil, pointed.profession, "make")
+    local note = (v.using or v.bank) and v.note or nil       -- what of yours the step uses, what to take from the bank; not a buy list cut short of gold
+    pointed = { title = v.text, note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil }
+    ns.SetArrow(nil, v.text, false, note, pointed.profession)
+  elseif v.spell then                          -- something to make, here: the words, under a hammer (the note: what of yours it uses)
+    pointed = { title = v.text, note = v.note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil, make = true }
+    ns.SetArrow(nil, v.text, false, v.note, pointed.profession, "make")
   elseif not v.idle then                       -- no profession open (the overview page), or none with a route: the arrow is left be
     pointed = nil
     ns.ClearArrow()

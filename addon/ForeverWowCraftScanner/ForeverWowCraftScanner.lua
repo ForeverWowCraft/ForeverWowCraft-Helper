@@ -1542,6 +1542,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     ns.PlacesCommand()
   elseif cmd == "shop" then
     ns.ShopCommand(arg)
+  elseif cmd == "have" then
+    ns.HaveCommand(arg)
   elseif cmd == "needs" then
     ns.NeedsCommand(arg)
   elseif cmd == "debug" then
@@ -1554,7 +1556,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     if state.running then
       Print(string.format("%s running: %d/%d done", state.kind, state.done + state.skipped, state.total))
     else
-      Print(string.format("idle. %d items stored for %s%s. Commands: /fwcs full [force] | scan [list] | lists | stop | save | clear | house | bar | auto | options | reset | alert | ding | log | arrow | places | shop | needs | debug. /fwc: what your professions still need",
+      Print(string.format("idle. %d items stored for %s%s. Commands: /fwcs full [force] | scan [list] | lists | stop | save | clear | house | bar | auto | options | reset | alert | ding | log | arrow | places | shop | have | needs | debug. /fwc: what your professions still need",
         n, DatasetName(), dirty and " (unsaved: click SAVE, /fwcs save or /reload)" or ""))
     end
   end

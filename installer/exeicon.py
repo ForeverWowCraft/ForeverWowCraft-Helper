@@ -2,8 +2,14 @@
 so that Explorer, the taskbar and Task Manager show it, and a version resource names it, so
 that Settings > Apps > Startup, Task Manager's Startup page and the file's Properties say the
 helper and ForeverWowCraft, not Python and the Python Software Foundation. ctypes and the
-resource API; Windows only, but for version_info(), which is plain bytes. The installer gives a
-copy of python.org's pythonw.exe the helper's icon and name this way."""
+resource API; Windows only, but for version_info() and the PE header's helpers, which are plain
+bytes. The installer gives a copy of python.org's pythonw.exe the helper's icon and name this
+way, and first takes python.org's signature off the copy (unsign): a changed file is not what
+python.org signed, and is to say so plainly, as an unsigned file, not carry a signature that no
+longer fits it. The resource API leaves the PE header's pointer to the old signature as it was,
+so up to 1.7.6 the copy pointed at bytes that were now its icons, with its checksum stale: a
+file that looks tampered with. After the changes its checksum is set again (set_checksum). The
+pythonw.exe beside it is python.org's, signature and all, untouched."""
 from __future__ import annotations
 import ctypes
 import struct
@@ -122,6 +128,70 @@ def set_version(exe: Path, ver: str, strings: dict[str, str]) -> None:
     finally:
         if not k32.EndUpdateResourceW(handle, not done) and done:
             raise OSError(ctypes.get_last_error(), f"{exe}: the new version was not saved")
+
+
+# ---- the PE header: the signature's pointer and the checksum -----------------------------------
+SECURITY = 4                                    # IMAGE_DIRECTORY_ENTRY_SECURITY: where the signature is, as a file offset
+
+
+def _layout(data: bytes) -> tuple[int, int, int]:
+    """(the checksum's offset, the security directory entry's offset, the end of the last
+    section's bytes) of a PE file."""
+    if data[:2] != b"MZ":
+        raise ValueError("not a Windows executable")
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe:pe + 4] != b"PE\0\0":
+        raise ValueError("not a PE file")
+    sections, optional = struct.unpack_from("<H", data, pe + 6)[0], struct.unpack_from("<H", data, pe + 20)[0]
+    opt = pe + 24
+    magic = struct.unpack_from("<H", data, opt)[0]
+    directories = opt + {0x10B: 96, 0x20B: 112}[magic]
+    table = opt + optional
+    end = max(sum(struct.unpack_from("<II", data, table + 40 * i + 16)) for i in range(sections))
+    return opt + 64, directories + 8 * SECURITY, end
+
+
+def signature_entry(data: bytes) -> tuple[int, int]:
+    """(offset, size) the PE header gives for the file's signature; (0, 0) when it has none."""
+    return struct.unpack_from("<II", data, _layout(data)[1])
+
+
+def checksum(data: bytes) -> int:
+    """The PE checksum Windows computes (imagehlp's CheckSumMappedFile): the file as 16-bit
+    words, the checksum field left out, added with the carries folded back in, plus the length."""
+    at = _layout(data)[0]
+    body = data[:at] + b"\0\0\0\0" + data[at + 4:]
+    if len(body) % 2:
+        body += b"\0"
+    total = sum(struct.unpack(f"<{len(body) // 2}H", body))
+    while total >> 16:
+        total = (total & 0xFFFF) + (total >> 16)
+    return (total + len(data)) & 0xFFFFFFFF
+
+
+def unsigned(data: bytes) -> bytes:
+    """The file with its signature taken off: the signature's bytes (after the last section, as
+    Authenticode puts them) cut away and the header's entry for it zeroed, the checksum set again."""
+    at, size = signature_entry(data)
+    _, entry, end = _layout(data)
+    if size and at >= end:
+        data = data[:at]
+    out = bytearray(data)
+    struct.pack_into("<II", out, entry, 0, 0)
+    struct.pack_into("<I", out, _layout(out)[0], checksum(bytes(out)))
+    return bytes(out)
+
+
+def unsign(exe: Path) -> None:
+    """Take the exe's signature off (unsigned), before its resources are changed."""
+    exe.write_bytes(unsigned(exe.read_bytes()))
+
+
+def set_checksum(exe: Path) -> None:
+    """Set the exe's PE checksum to what its bytes are now (the resource API leaves it as it was)."""
+    data = bytearray(exe.read_bytes())
+    struct.pack_into("<I", data, _layout(data)[0], checksum(bytes(data)))
+    exe.write_bytes(bytes(data))
 
 
 def file_version(exe: Path) -> dict[str, str]:

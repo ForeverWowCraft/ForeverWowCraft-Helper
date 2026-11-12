@@ -202,6 +202,11 @@ local function BuildOptions()
       .. "stretch, as the site does when you type your level. Where none fits, the Make button and the /fwc window say so.",
       function() return saved().levelRoutes ~= false end,
       function(v) saved().levelRoutes = v; if ns.RefreshWindow then ns.RefreshWindow() end; if ns.RoutePicked then ns.RoutePicked() end end),
+    CheckBox(page, Next(54), "Use what I already have first",
+      "Where a next-best recipe of a stretch costs you less with what is in your bags, bank and mail, the Make button, the "
+      .. "shopping list, the arrow and the /fwc window use it, and say so. /fwcs have is the same switch.",
+      function() return saved().haveFirst ~= false end,
+      function(v) ns.HaveCommand(v and "on" or "off", true) end),
     CheckBox(page, Next(76), "A reminder to reload, every hour",
       "A small box at the top of the screen with a Reload now button, when there is something to save "
       .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
@@ -257,7 +262,7 @@ local function BuildOptions()
   panel.OnCommit = function() end
   panel.OnDefault = function(self)                 -- the Settings window's Defaults button: the shipped defaults again
     local s = saved()
-    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "remind" }) do s[key] = nil end
+    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "haveFirst", "remind" }) do s[key] = nil end
     self:refresh()
     Scanner().Refresh()
   end
@@ -287,5 +292,5 @@ pcall(BuildOptions)                       -- a client with neither way of regist
 function ns.OpenOptions()
   if _G.Settings and _G.Settings.OpenToCategory and ns.optionsCategory then _G.Settings.OpenToCategory(ns.optionsCategory.ID or ns.optionsCategory)
   elseif InterfaceOptionsFrame_OpenToCategory and ns.options then InterfaceOptionsFrame_OpenToCategory(ns.options); InterfaceOptionsFrame_OpenToCategory(ns.options)
-  else ns.Print("the options are: /fwcs auto | bar | log | alert | ding | arrow | shop | house | remind") end
+  else ns.Print("the options are: /fwcs auto | bar | log | alert | ding | arrow | shop | have | house | remind") end
 end

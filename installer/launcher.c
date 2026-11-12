@@ -2,7 +2,7 @@
    in this process on the helper's fwch.py app, so that the process is the application itself and
    macOS knows it by the bundle's identifier (com.foreverwowcraft.helper). A script that started
    Resources/python-<arch>/bin/python3.14 left the process a bare Python with no bundle, and a
-   newer macOS never placed its menu bar icon (reported on macOS 26 or later, 9 Nov 2026).
+   macOS never placed its menu bar icon (reported on macOS 26 or later, 9 Nov 2026).
 
    Built by installer/build_mac.py once for each processor, against that processor's Python
    (Resources/python-arm64, Resources/python-x86_64: its lib/libpython3.14.dylib, found through

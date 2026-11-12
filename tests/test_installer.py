@@ -20,8 +20,13 @@ def test_the_helpers_files_go_in_and_nothing_of_the_tests_or_the_state():
     files = {str(f).replace("\\", "/") for f in build.helper_files()}
     for name in ("fwch.py", "fwchelper/__init__.py", "fwchelper/app.py", "fwchelper/win.py", "fwchelper/helper.ico",
                  "addon/ForeverWowCraftScanner/ForeverWowCraftScanner.toc", "addon/ForeverWowCraftPlans/ForeverWowCraftPlans.toc",
-                 "README.md", "LICENSE", "send.cmd", "setup.cmd"):
+                 "README.md", "LICENSE"):
         assert name in files, name
+    # the zip's own scripts stay out of the install (nothing installed starts them); the zip, which is the
+    # repository's files, keeps them
+    assert not files & {"send.cmd", "setup.cmd", ".gitignore"}, files & {"send.cmd", "setup.cmd"}
+    assert (HELPER / "send.cmd").is_file() and (HELPER / "setup.cmd").is_file()
+    assert ".cmd" not in (HELPER / "installer" / "helper.wxs").read_text(encoding="utf-8")
     assert not any(f.startswith(("tests/", "installer/", "state/", "dist/")) or "__pycache__" in f for f in files), sorted(files)[:5]
 
 
@@ -83,6 +88,56 @@ def test_the_version_resource_names_the_helper_and_carries_the_version():
     assert "Python Software Foundation" not in build.exe_strings("1.5.0")["CompanyName"]
 
 
+def _pe(signature: bytes = b"") -> bytes:
+    """A small PE32+ file: one section of 512 bytes at 0x200, and `signature` after it, where
+    Authenticode puts one, with the security directory pointing at it."""
+    import struct
+    data = bytearray(0x400)
+    data[:2] = b"MZ"
+    struct.pack_into("<I", data, 0x3C, 0x40)
+    data[0x40:0x44] = b"PE\0\0"
+    struct.pack_into("<HH", data, 0x44, 0x8664, 1)
+    struct.pack_into("<H", data, 0x54, 240)                             # the optional header: 112 bytes, 16 directories
+    struct.pack_into("<H", data, 0x58, 0x20B)
+    data[0x58 + 240:0x58 + 248] = b".text\0\0\0"
+    struct.pack_into("<IIII", data, 0x58 + 240 + 8, 0x200, 0x1000, 0x200, 0x200)
+    data[0x200:0x400] = bytes(range(256)) * 2
+    if signature:
+        struct.pack_into("<II", data, 0x58 + 112 + 8 * 4, len(data), len(signature))
+    return bytes(data) + signature
+
+
+def test_a_changed_copy_of_a_signed_exe_says_plainly_it_is_unsigned():
+    """Up to 1.7.6 the helper's exe, a copy of python.org's pythonw.exe with the helper's icon
+    and name, kept the header's pointer to python.org's signature, which the resource API had
+    left pointing at the new icons, and a stale checksum: a file that looks tampered with.
+    exeicon.unsigned takes the signature off (its bytes and the pointer) and sets the checksum."""
+    import struct
+    import exeicon
+    plain = _pe()
+    signed = _pe(b"\x10\x00\x00\x00\x00\x02\x02\x00" + b"certificate!")
+    assert exeicon.signature_entry(signed) == (0x400, 20) and exeicon.signature_entry(plain) == (0, 0)
+    out = exeicon.unsigned(signed)
+    assert len(out) == 0x400 and exeicon.signature_entry(out) == (0, 0)
+    stored = struct.unpack_from("<I", out, 0x58 + 64)[0]
+    assert stored == exeicon.checksum(out) != 0
+    assert out == exeicon.unsigned(plain)                                # the same file as one that was never signed
+    if sys.platform == "win32":                                          # the checksum is Windows' own
+        import ctypes
+        from ctypes import wintypes as wt
+        imagehlp = ctypes.WinDLL("imagehlp")
+        buf = ctypes.create_string_buffer(out, len(out))
+        header, computed = wt.DWORD(), wt.DWORD()
+        assert imagehlp.CheckSumMappedFile(buf, len(out), ctypes.byref(header), ctypes.byref(computed))
+        assert header.value == stored and computed.value == stored
+    try:
+        exeicon.unsigned(b"not an exe" * 10)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("not an exe, and no error")
+
+
 def test_staging_lays_the_install_out(tmp=None):
     out = Path(tempfile.mkdtemp())
     cache = HELPER.parent / "dist" / "cache" if (HELPER.parent / "dist" / "cache" / embed.PYTHON_URL.rsplit("/", 1)[1]).exists() else None
@@ -100,6 +155,16 @@ def test_staging_lays_the_install_out(tmp=None):
         assert read["FileDescription"] == "ForeverWowCraft Helper" and read["CompanyName"] == "ForeverWowCraft"
         assert read["ProductVersion"] == "1.5.0" and "Python Software Foundation" in read["LegalCopyright"]
         assert exeicon.file_version(out / "stage" / "python" / "pythonw.exe")["CompanyName"] == "Python Software Foundation"
+    # the helper's exe is plainly unsigned, its checksum right; python.org's files are as python.org signed them
+    data = exe.read_bytes()
+    import exeicon
+    import struct
+    assert exeicon.signature_entry(data) == (0, 0)
+    assert struct.unpack_from("<I", data, exeicon._layout(data)[0])[0] == exeicon.checksum(data)
+    shipped = dict(embed.python_files(cache))
+    for name in ("pythonw.exe", "python.exe", "python312.dll"):
+        assert (out / "stage" / "python" / name).read_bytes() == shipped[name], name
+        assert exeicon.signature_entry(shipped[name])[1] > 0, name
 
 
 if __name__ == "__main__":

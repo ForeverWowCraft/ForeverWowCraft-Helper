@@ -13,8 +13,10 @@
 -- the panel says the character stands at, as a place for the arrow (ns.NotePlace, Places.lua:
 -- kept here, not sent); and the item-data level of the recipe scroll the route buys
 -- (ns.NoteRecipeLevel, ForeverWowCraftScanner.lua: sent with the vendors met, pooled into the
--- shared database the project means to publish). Nothing of the character. Everything the
--- addon gathers: docs/scanner-addon.md, "What the addon gathers".
+-- shared database the project means to publish); and the tools the client says the route's
+-- recipes need (an enchanter's rods) with what each tool's recipe takes (ns.LearnTools:
+-- FWCS_DB.__tools, kept on this computer for the shopping list, not sent). Nothing of the
+-- character. Everything the addon gathers: docs/scanner-addon.md, "What the addon gathers".
 
 local _, ns = ...
 local Char, House, Spelt = ns.inv.Char, ns.inv.House, ns.inv.Spelt
@@ -230,13 +232,19 @@ local function ProfessionOf(house, open)
 end
 
 -- what is in the bags of everything the route handles (the bank does not count: a craft takes
--- from the bags)
+-- from the bags), and with "Use what I already have first" (on by default) the bank too, as
+-- counted when last open: what is there is not bought again, the button sends the character
+-- for it (BankVerdict). The second table: what of it is in the bank
+local function HaveFirst() return ns.Settings().haveFirst ~= false end
 local function Bags(plan)
-  local have, seen = {}, {}
+  local have, seen, banked = {}, {}, {}
+  local bank = HaveFirst() and Char().items or nil
   local function Add(item)
     if item and not seen[item] then
       seen[item] = true
       have[item] = ns.inv.Count(item) or 0
+      local row = bank and bank[item]
+      if row and (row[2] or 0) > 0 then have[item], banked[item] = have[item] + row[2], row[2] end
     end
   end
   for _, s in ipairs(plan.steps or {}) do
@@ -247,17 +255,21 @@ local function Bags(plan)
     Add(item)
     for _, u in ipairs(how[2] or {}) do Add(u[1]) end
   end
-  return have
+  local known = ns.ToolsKnown and ns.ToolsKnown()         -- what the tools take, from the bags too
+  for _, t in pairs(known and known.made or {}) do
+    for _, u in ipairs(t.uses or {}) do Add(u[1]) end
+  end
+  return ns.OwnTools and ns.OwnTools(have) or have, banked  -- a tool is had in the bank too
 end
 
-local function N(house, item) return (ns.ItemName(item, house.items and house.items[item])) end
+local function N(house, item) return (ns.ItemName(item, house.items and house.items[item] or ns.ToolName(item))) end
 
 -- Whether a vendor sells the item: the route buys it from one (row[2]), or one sells it dearer
 -- than the house did (row[3], since 7 Nov 2026). In game the vendor is the place to get it
 -- either way: a sure, one-stop trip (a player sent to the house and a vendor for a dye came
 -- back from the vendor with no need of the house, 7 Nov 2026); the house is said to be cheaper
 local function VendorSells(plan, item)
-  local row = plan.buy and plan.buy[item]
+  local row = ns.BuyRow(plan, item)
   return row ~= nil and (row[2] == "vendor" or type(row[3]) == "number")
 end
 
@@ -272,7 +284,7 @@ end
 local function ShoppingOf(plan, nxt, tolearn)
   local out = {}
   for _, b in ipairs(nxt.buy) do
-    local row = plan.buy and plan.buy[b[1]]
+    local row = ns.BuyRow(plan, b[1])
     local have = ns.inv.Count(b[1]) or 0
     local vendor = VendorSells(plan, b[1])
     -- price: what one costs where it is got; `cheaper`: the house's price when the route found it lower there
@@ -308,7 +320,9 @@ local function Shopping()
   if not nxt or nxt.blocked then return {} end
   local out = ShoppingOf(plan, nxt, c.tolearn)
   local t = c.tool
-  if type(t) == "table" and t.item and (ns.inv.Count(t.item) or 0) == 0 then        -- the tool the step lacks, first
+  local listed = false                                      -- the walk has it already, as a tool known (Tailor.lua)
+  for _, e in ipairs(out) do if type(t) == "table" and e.item == t.item then listed = true end end
+  if type(t) == "table" and t.item and not listed and (ns.inv.Count(t.item) or 0) == 0 then        -- the tool the step lacks, first
     table.insert(out, 1, { item = t.item, units = 1, have = 0, source = t.source or "ah", price = t.price })
   end
   out.title = ns.RecipeName(nxt.step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. (nxt.capped and " (as far as the gold goes)" or "") .. ", needs"
@@ -383,6 +397,33 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
   return { text = text, note = table.concat(parts, ", "), tip = tip, shopping = shopping, place = place, profession = profession }
 end
 
+-- What the step needs that the bank holds (with "Use what I already have first"): taken from
+-- the bank before anything is bought (what is there is off the list already). `banked` is
+-- Bags' second table; the bags are walked alone to see what of it the step needs. nil when
+-- nothing waits there.
+local function BankVerdict(house, plan, nxt, banked, tip, profession)
+  if not next(banked) then return nil end
+  local bags = {}
+  for item, n in pairs(Bags(plan)) do bags[item] = n - (banked[item] or 0) end
+  local walk = ns.Tailor(plan, nxt.from, bags, nxt.to)
+  local waiting = {}
+  for item, units in pairs(walk.buy) do
+    if (banked[item] or 0) > 0 then table.insert(waiting, { item = item, units = math.min(units, banked[item]) }) end
+  end
+  if #waiting == 0 then return nil end
+  table.sort(waiting, function(a, b) if a.units ~= b.units then return a.units > b.units end return a.item < b.item end)
+  local parts = {}
+  for i, w in ipairs(waiting) do
+    if i > 3 then table.insert(parts, string.format("+%d more", #waiting - 3)); break end
+    table.insert(parts, string.format("%d %s: bank", w.units, N(house, w.item)))
+  end
+  table.insert(tip, "In your bank (as counted when it was last open):")
+  for _, w in ipairs(waiting) do table.insert(tip, string.format("  %d %s", w.units, N(house, w.item))) end
+  local text = #waiting == 1 and string.format("Take %d %s from the bank", waiting[1].units, N(house, waiting[1].item))
+    or string.format("Take from the bank: %d items", #waiting)
+  return { text = text, note = table.concat(parts, ", "), tip = tip, show = true, bank = true, profession = profession }
+end
+
 -- What the step needs that waits in the mail (seen in the inbox, or bought at the auction
 -- house this visit, which the game delivers by mail): the mailbox first, the nearest one,
 -- before anything is bought again (the user, 7 Nov 2026). nil when nothing waits.
@@ -425,8 +466,121 @@ local function NearerFirst(profession, plan, nxt, upto)
   return "trainer"
 end
 
+-- ================================================================ the tools the route needs
+-- The client says what a recipe of the open profession needs beside its reagents (a Runed
+-- Copper Rod: GetRecipeRequirements, a tool rather than a place) and what a recipe takes
+-- (GetRecipeSchematic); the routes' documents say neither. With the panel open on the route's
+-- profession, each recipe of the route is asked once a session, and each tool named is looked
+-- up once: the recipe of the profession that makes it (api.ToolRecipe), what that takes and
+-- makes, and the tools it needs in turn. Kept in FWCS_DB.__tools (Tailor.lua says how), which
+-- the route's walk reads: the shopping list then has what a tool takes before the step that
+-- needs it, unless the character has the tool (10 Nov 2026). Places (an anvil, a camp object
+-- the route makes) are not tools here. Cost: a call per recipe of the route, the first time
+-- the panel shows it in a session; a look through the profession's recipes per tool named.
+local asked, resolved = {}, {}           -- this session: the recipes asked, the tools looked up
+local function Tools()
+  FWCS_DB.__tools = FWCS_DB.__tools or {}
+  local k = FWCS_DB.__tools
+  k.spells, k.made, k.v = k.spells or {}, k.made or {}, k.v or 0
+  return k
+end
+
+-- what a recipe takes as the client's schematic has it ({ {item, units}, ... }, its basic
+-- reagents) and the item it makes; nil on a client without schematics
+local function Schematic(spell)
+  if not (C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic) then return nil end
+  local ok, s = pcall(C_TradeSkillUI.GetRecipeSchematic, spell, false)
+  if not ok or type(s) ~= "table" then return nil end
+  local basic = Enum and Enum.CraftingReagentType and Enum.CraftingReagentType.Basic
+  local uses = {}
+  for _, slot in ipairs(s.reagentSlotSchematics or {}) do
+    local r = type(slot) == "table" and type(slot.reagents) == "table" and slot.reagents[1]
+    local n = type(slot) == "table" and tonumber(slot.quantityRequired) or 0
+    if type(r) == "table" and tonumber(r.itemID) and n > 0 and (basic == nil or slot.reagentType == nil or slot.reagentType == basic) then
+      table.insert(uses, { tonumber(r.itemID), n })
+    end
+  end
+  return uses, tonumber(s.outputItemID)
+end
+
+local function Same(a, b)
+  if #a ~= #(b or {}) then return false end
+  for i = 1, #a do if a[i] ~= b[i] then return false end end
+  return true
+end
+
+-- a tool's record as words, to tell whether a look-up changed it
+local function Said(t)
+  local parts = { tostring(t.item), tostring(t.spell) }
+  for _, u in ipairs(t.uses or {}) do table.insert(parts, u[1] .. "x" .. u[2]) end
+  for _, n in ipairs(t.needs or {}) do table.insert(parts, n) end
+  return table.concat(parts, ",")
+end
+
+function ns.LearnTools(plan)
+  if not (plan and C_TradeSkillUI and C_TradeSkillUI.GetRecipeRequirements and C_TradeSkillUI.GetRecipeInfo) then return end
+  local k, changed
+  local function Resolve(name, depth)
+    local key = Spelt(name)
+    if (resolved[key] or 0) >= 3 or depth > 3 then return end
+    k = k or Tools()
+    local t = k.made[key] or { name = name }
+    local was = k.made[key] and Said(t)
+    local recipe = api.ToolRecipe(name)
+    if recipe then
+      local uses, item = Schematic(recipe.spell)
+      t.spell = recipe.spell
+      if uses and #uses > 0 then t.uses = uses end
+      t.item = item or t.item
+      local needs = {}
+      for _, r in ipairs(api.Requirements(recipe.spell)) do
+        if not r.place then table.insert(needs, r.name); Resolve(r.name, depth + 1) end
+      end
+      t.needs = #needs > 0 and needs or nil
+    end
+    t.item = t.item or api.ItemByName(name)
+    resolved[key] = t.item and 3 or (resolved[key] or 0) + 1   -- an item the client has not met yet: asked again, twice
+    k.made[key] = t
+    if Said(t) ~= was then changed = true end
+  end
+  local spells = {}
+  for _, s in ipairs(plan.steps or {}) do
+    table.insert(spells, s.spell)
+    for _, a in ipairs(s.alt or {}) do table.insert(spells, a.spell) end
+  end
+  for _, s in ipairs(plan.source and plan.source.steps or {}) do
+    for _, a in ipairs(s.alt or {}) do table.insert(spells, a.spell) end
+  end
+  for _, spell in ipairs(spells) do
+    if spell and not asked[spell] then
+      local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, spell)
+      if ok and type(info) == "table" then                  -- the client has the recipe's data: its answer counts
+        asked[spell] = true
+        local names = {}
+        for _, r in ipairs(api.Requirements(spell)) do
+          if not r.place then
+            table.insert(names, r.name)
+            Resolve(r.name, 0)
+            local t = (k or Tools()).made[Spelt(r.name)]
+            -- met with none counted: a better tool stands in for it (kept, so the list does not ask for it)
+            local stand = (r.met and t and t.item and (ns.inv.Count(t.item) or 0) == 0) or nil
+            if t and t.met ~= stand then t.met = stand; changed = true end
+          end
+        end
+        k = k or Tools()
+        if #names > 0 and not Same(names, k.spells[spell]) then k.spells[spell] = names; changed = true end   -- an empty answer never clears one
+      end
+    end
+  end
+  if changed then
+    k.v = k.v + 1
+    if ns.inv.Retrack then ns.inv.Retrack() end              -- the tools and what they take are counted from now on
+  end
+end
+
 local switched                           -- the book opened another profession: the shopping list follows
 local asideOf                            -- the note the verdict carries under the arrow (the next rank to train, the other trip)
+local usingOf                            -- "Using your 40 Briarthorn": the step's recipe chosen for what the character has
 local function VerdictOf(given)
   local house = House()
   if not house then
@@ -458,7 +612,8 @@ local function VerdictOf(given)
   end
   local skill = open.rank or Char().skills[plan.skill_line] or plan.start
   local tip = { string.format("%s route, skill %d.", ns.Title(profession), skill) }
-  local bags = Bags(plan)
+  if not given then pcall(ns.LearnTools, plan) end      -- the panel open on the route's profession: the tools its recipes need
+  local bags, banked = Bags(plan)
   local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
   if not nxt then
     return { text = string.format("Route done at skill %d", skill), tip = { tip[1], string.format("The route ends at %d.", plan.target) } }
@@ -475,6 +630,11 @@ local function VerdictOf(given)
   if nxt.step.instead then               -- the next best stands in for a recipe the character cannot learn yet
     table.insert(tip, string.format("%s stands in for %s, which asks for character level %d: about %s a skill point.",
       ns.RecipeName(nxt.step), nxt.step.instead, nxt.step.asks or 0, ns.Money(nxt.step.cpp or 0)))
+  end
+  if nxt.step.over and nxt.step.mine and #nxt.step.mine > 0 then   -- the next best costs this character less with what it has (Tailor.lua)
+    usingOf = ns.UsingText(nxt.step, function(item) return N(house, item) end)
+    table.insert(tip, string.format("%s: %s stands in for %s, about %s a skill point less for you. The box \"Use what I already have first\" in Interface > AddOns turns this off.",
+      usingOf, ns.RecipeName(nxt.step), nxt.step.over, ns.Money(nxt.step.saves or 0)))
   end
   if nxt.capped then table.insert(tip, string.format("Only as far as the gold goes (the box in the /fwc window): this step is cut at skill %d.", nxt.to)) end
   -- the next rank (Journeyman at 75, Expert at 150, Artisan at 225) can be trained from 25
@@ -608,6 +768,14 @@ local function VerdictOf(given)
           table.insert(tip, string.format("%s needs %s beside you: it is in your bags, place it at your camp.", c.what, tool))
           return { text = "Place " .. tool .. " first", tip = tip, show = true, profession = profession }
         end
+        local known = ns.ToolsKnown and ns.ToolsKnown()
+        local t = known and known.made[Spelt(tool)]
+        local titem = (t and t.item) or api.ItemByName(tool)
+        local row = titem and Char().items[titem]
+        if row and (row[2] or 0) > 0 and (ns.inv.Count(titem) or 0) == 0 then   -- had, in the bank: not made or bought again
+          table.insert(tip, string.format("%s needs %s: it is in your bank.", c.what, tool))
+          return { text = "Take " .. tool .. " from the bank first", tip = tip, show = true, profession = profession }
+        end
         if recipe and not recipe.learned then
           table.insert(tip, string.format("%s needs %s: learn it at the trainer.", c.what, tool))
           return { text = "Learn " .. recipe.name .. " first", tip = tip, learn = recipe.spell, profession = profession,
@@ -625,12 +793,21 @@ local function VerdictOf(given)
             table.insert(tip, string.format("%s needs %s, made at %s.", c.what, tool, table.concat(tneeds, ", ")))
             return { text = "Needs " .. table.concat(tneeds, ", ") .. " to make " .. recipe.name, tip = tip, place = tplace, recipe = recipe.spell, profession = profession }
           end
+          -- what the tool takes, short in the bags: bought first, on the step's list (the walk has it)
+          local short = false
+          for _, u in ipairs(t and t.uses or {}) do
+            if (ns.inv.Count(u[1]) or 0) < u[2] then short = true end
+          end
+          if short and #nxt.buy > 0 then
+            table.insert(tip, string.format("%s needs %s, made from what is on the list.", c.what, tool))
+            return MailVerdict(house, plan, nxt, step, tip, profession) or BuyVerdict(house, plan, nxt, step, tip, profession)
+          end
           table.insert(tip, string.format("%s needs %s. Click: makes one.", c.what, tool))
           return { text = "Make 1 " .. recipe.name .. " first", tip = tip, spell = recipe.spell, crafts = 1, to = nxt.to, line = plan.skill_line, profession = profession }
         end
-        local item = api.ItemByName(tool)
+        local item = titem
         if item then
-          local row = plan.buy and plan.buy[item]
+          local row = ns.BuyRow(plan, item)
           if not given then Char().tool = { item = item, name = tool, price = row and row[1] or nil, source = row and row[2] == "vendor" and "vendor" or "ah" } end
           local source = row and row[2] == "vendor" and "vendor" or "ah"
           local shopping = { { item = item, units = 1, have = 0, source = source, price = row and row[1] or nil } }
@@ -649,7 +826,10 @@ local function VerdictOf(given)
       return { text = string.format("Make %d %s", can, c.what), tip = tip, spell = c.spell, crafts = can, to = nxt.to, line = plan.skill_line, profession = profession }
     end
   end
-  -- nothing can be made from the bags: what waits in the mail, then what to buy, where
+  -- nothing can be made from the bags: what is in the bank (with "Use what I already have
+  -- first"), what waits in the mail, then what to buy, where
+  local fromBank = BankVerdict(house, plan, nxt, banked, tip, profession)
+  if fromBank then return fromBank end
   if #nxt.buy > 0 then return MailVerdict(house, plan, nxt, step, tip, profession) or BuyVerdict(house, plan, nxt, step, tip, profession) end
   if unsaid then
     table.insert(tip, "Run the helper (fwch.py plans) for a newer route.")
@@ -690,9 +870,10 @@ end
 
 -- the verdict, with its note (the next rank to train, from 25 below the cap) and the gold
 local function Verdict(given)
-  asideOf = nil
+  asideOf, usingOf = nil, nil
   local v = VerdictOf(given)
   if type(v) == "table" and asideOf then v.aside = asideOf end
+  if type(v) == "table" and usingOf and not v.rank then v.note, v.using = v.note and (usingOf .. "; " .. v.note) or usingOf, usingOf end   -- the arrow's note says it too
   if type(v) == "table" then Short(v) end
   return v
 end

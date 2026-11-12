@@ -42,6 +42,7 @@ def template(ico, px: int = MENUBAR_PX):
 
 
 def main() -> int:
+    """Write helper.icns and the menu bar's template image from helper.ico (needs Pillow); 0 when done."""
     from PIL import Image
     ico = Image.open(ICO)
     ico.convert("RGBA").save(ICNS, sizes=SIZES)

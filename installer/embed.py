@@ -38,6 +38,7 @@ def fetch(url: str, sha256: str, cache: Path, limit: int = 64 * 1024 * 1024) -> 
 
 
 def python_embed(cache: Path) -> bytes:
+    """python.org's embeddable Python archive (the zip's bytes), downloaded once into `cache` and checked against its hash."""
     return fetch(PYTHON_URL, PYTHON_SHA256, cache)
 
 

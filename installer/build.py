@@ -4,13 +4,18 @@
     python installer/build.py --out DIR         where the .msi goes (default: dist/ beside the helper, or the
                                                 core's dist/ when the helper sits in the core's checkout)
     python installer/build.py --stage-only      lay the files out and write the WiX fragment, build nothing
+    python installer/build.py --version 1.7.7   a test build under another version (CI's install test,
+                                                installer/install_check.py); a release is fwchelper's
 
-What goes in: the helper's files (fwch.py, fwchelper/, addon/, README.md, LICENSE, send.cmd,
-setup.cmd; not the tests, not this folder, nothing the helper writes), python.org's embeddable
+What goes in: the helper's files (fwch.py, fwchelper/, addon/, README.md, LICENSE; not the
+tests, not this folder, nothing the helper writes, and not send.cmd and setup.cmd, which are the
+zip's way to set up and run without the app and do nothing in an install), python.org's embeddable
 Python in python/ (installer/embed.py), and python\\ForeverWowCraft Helper.exe: pythonw.exe
 under the helper's name, with the helper's icon and a version resource that names the helper
 and ForeverWowCraft (installer/exeicon.py: what Settings > Apps > Startup and Task Manager show),
-which is what the Start Menu entry and the Run entry start. WiX 3.14's binaries are fetched once into the cache folder
+which is what the Start Menu entry and the Run entry start. That copy is unsigned, plainly: its
+python.org signature is taken off before it is changed, its header left with no pointer to one
+and its checksum right; every other file of python.org's goes in as python.org signed it. WiX 3.14's binaries are fetched once into the cache folder
 and checked against their hash, like Python; nothing is installed on the PC that builds.
 helper.wxs says what the installer does; the files fragment is written here, one component a
 folder with a registry key path, as a per-user install wants. Windows only (the resource API,
@@ -21,13 +26,14 @@ import argparse
 import hashlib
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
 import uuid
 import zipfile
 from pathlib import Path
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import quoteattr
 
 HERE = Path(__file__).resolve().parent
 HELPER = HERE.parent
@@ -39,11 +45,13 @@ EXE = f"{NAME}.exe"
 WIX_URL = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
 WIX_SHA256 = "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"
 LEAVE_OUT = {"tests", "installer", "state", "dist", "__pycache__", ".pytest_cache", ".git", ".github"}
+ZIP_ONLY = {"send.cmd", "setup.cmd", ".gitignore"}       # the zip's (and the repository's) alone: nothing in an install starts them
 KEYPATHS = r"Software\ForeverWowCraft\Helper\Files"        # where each folder's component keeps its key path
 NAMESPACE = uuid.UUID("5b0d1f3e-7a2c-4d6e-9f81-3c5a7e9b1d2f")   # the component GUIDs are made from the folder's path: stable across builds
 
 
 def version() -> str:
+    """The helper's version, read from fwchelper/__init__.py."""
     for line in (HELPER / "fwchelper" / "__init__.py").read_text(encoding="utf-8").splitlines():
         if line.startswith("__version__"):
             return line.split('"')[1]
@@ -55,7 +63,7 @@ def helper_files() -> list[Path]:
     out = []
     for p in sorted(HELPER.rglob("*")):
         rel = p.relative_to(HELPER)
-        if p.is_file() and not (set(rel.parts[:-1]) & LEAVE_OUT) and p.suffix != ".pyc":
+        if p.is_file() and not (set(rel.parts[:-1]) & LEAVE_OUT) and p.suffix != ".pyc" and rel.as_posix() not in ZIP_ONLY:
             out.append(rel)
     return out
 
@@ -78,8 +86,10 @@ def stage(where: Path, cache: Path, ver: str = "0.0.0") -> list[Path]:
     shutil.copyfile(python / "pythonw.exe", python / EXE)
     if sys.platform == "win32":
         import exeicon
+        exeicon.unsign(python / EXE)                    # a changed copy is no longer what python.org signed: said plainly, unsigned
         exeicon.set_icon(python / EXE, HELPER / "fwchelper" / "helper.ico")
         exeicon.set_version(python / EXE, ver, exe_strings(ver))
+        exeicon.set_checksum(python / EXE)
     files.append(Path("python") / EXE)
     return files
 
@@ -153,8 +163,11 @@ def wix(cache: Path) -> Path:
     return tools
 
 
-def build(out: Path, cache: Path, stage_only: bool = False) -> Path | None:
-    ver = version()
+def build(out: Path, cache: Path, stage_only: bool = False, ver: str | None = None) -> Path | None:
+    """Stage the helper's files, the WiX fragment and the license in `out`/msi, then build the .msi with
+    WiX (fetched into `cache`), under the helper's version or `ver` (a test build); returns its path, or
+    None with `stage_only`."""
+    ver = ver or version()
     work = out / "msi"
     staged = work / NAME
     files = stage(staged, cache, ver)
@@ -183,6 +196,7 @@ def build(out: Path, cache: Path, stage_only: bool = False) -> Path | None:
 
 
 def run(cmd: list[str]) -> None:
+    """Run a build tool, passing on what it prints; stop the build when it fails."""
     r = subprocess.run(cmd, capture_output=True, text=True)
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)
@@ -191,14 +205,18 @@ def run(cmd: list[str]) -> None:
 
 
 def main(argv=None) -> int:
+    """The command line: build the .msi (or only stage it) where --out says; 0 when done."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     core = HELPER.parent if (HELPER.parent / "fwc.py").exists() else None
     ap.add_argument("--out", type=Path, default=(core or HELPER) / "dist", help="where the .msi goes")
     ap.add_argument("--cache", type=Path, help="where Python and WiX are kept between builds (default: <out>/cache)")
     ap.add_argument("--stage-only", action="store_true", help="lay the files out and write the fragment; build nothing")
+    ap.add_argument("--version", help="a test build's version, e.g. 1.7.7 (CI's install test); a release is fwchelper's own")
     a = ap.parse_args(argv)
+    if a.version and not re.fullmatch(r"\d+\.\d+\.\d+", a.version):
+        raise SystemExit(f"--version {a.version}: three numbers, as 1.7.7")
     a.out.mkdir(parents=True, exist_ok=True)
-    build(a.out, a.cache or a.out / "cache", a.stage_only)
+    build(a.out, a.cache or a.out / "cache", a.stage_only, a.version)
     return 0
 
 

@@ -21,7 +21,7 @@ python fwch.py where            what was found on this PC
 python fwch.py install-addon    copy the two addons into the game (--force: over a newer scanner)
 python fwch.py status           what the saved scans hold
 python fwch.py app              the application: an icon by the clock (Windows) or in the menu bar (Mac) that does all of the below by itself
-python fwch.py send --watch     the same sending, in a window (send.cmd)
+python fwch.py send --watch     the same sending, in a window (send.cmd, in the zip)
 python fwch.py autostart        have the app start when you log in (--off undoes it)
 python fwch.py lists            fetch the lists to scan and write them into the addon
 python fwch.py plans            fetch your auction houses' routes and write them into the addon
@@ -197,8 +197,9 @@ The helper looks once a day whether a newer release is out (where the newest rel
 on GitHub redirects to; nothing of yours is sent). When one is, it updates by itself: the
 installer is downloaded into the helper's state folder, its SHA-256 checked against the one
 GitHub publishes for the release (a download that does not match is deleted, not installed),
-and installed with nothing shown (a per-user install: no administrator); the helper closes and
-is back in a moment, settings and all, and a balloon says once that it was updated. Untick
+and installed with nothing shown (Windows' own installer, msiexec, run quietly: a per-user
+install, no administrator; no script is run); the helper closes and the installer starts the
+new one, back in a moment, settings and all, and a balloon says once that it was updated. Untick
 **Update by itself** in the menu and the update waits instead: the tooltip says a newer one is
 out, a balloon says it once, and **Update to 1.6.0...** at the top of the menu installs it (the
 installer opens, closes the helper and starts it again). The quiet install's log is
@@ -267,11 +268,16 @@ and what the application bundle holds.
 
 `python installer/build.py` makes `ForeverWowCraft-Helper-<version>.msi` (on Windows: it
 fetches python.org's embeddable Python and WiX 3.14, checks both against their hashes, gives a
-copy of `pythonw.exe` the helper's name and icon, and builds). `installer/helper.wxs` says what
-the installer does: a per-user install, a Start Menu entry, the Run entry that starts the app
-at logon, "Start the helper now" at the end, and the running app closed before an upgrade or a
-removal. A release (a `v<version>` tag, a draft until the installer is on it) builds it on a Windows runner and puts it on the
-GitHub release beside the zips.
+copy of `pythonw.exe` the helper's name and icon, python.org's signature taken off that copy
+since it is changed, and builds; `send.cmd` and `setup.cmd` stay out, being the zip's).
+`installer/helper.wxs` says what the installer does: a per-user install, a Start Menu entry,
+the Run entry that starts the app at logon, "Start the helper now" at the end (or, with
+`LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
+running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
+tag, a draft until the installer is on it) builds it on a Windows runner, installs it there for
+real (`installer/install_check.py`: the released 1.7.6, this one over it as 1.7.6's updater ran
+msiexec, a build one version up over that as this updater does, then removed), and puts it on
+the GitHub release beside the zips.
 
 `python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac (one application for Apple silicon and Intel alike, a Python for each inside; an Apple silicon Mac asked for Rosetta before 1.7.0): the
 application bundle (`ForeverWowCraft Helper.app`: the helper's files, a standalone Python from

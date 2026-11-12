@@ -69,6 +69,26 @@ jobs:
           python-version: "3.12"
       - name: "The installer: Python and WiX fetched and checked, the .msi built"
         run: python installer/build.py --out dist
+      # installed for real before it is published (installer/install_check.py): the released 1.7.6, pinned by its
+      # SHA-256, then this release over it as 1.7.6's own updater ran msiexec, then a test build one version up over
+      # that as this helper's updater does (the installer starting the helper), then removed; a failure leaves the
+      # release a draft, with msiexec's logs kept for a week
+      - name: "The installer installed, upgraded, started and removed on this runner"
+        shell: bash
+        run: |
+          B=$(python -c "import sys; sys.path.insert(0, 'installer'); import build; x, y, z = map(int, build.version().split('.')); print(f'{x}.{y}.{z + 1}')" | tr -d '\r')
+          python installer/build.py --out "$RUNNER_TEMP/b" --cache dist/cache --version "$B"
+          python installer/install_check.py \
+            --old-url https://github.com/ForeverWowCraft/ForeverWowCraft-Helper/releases/download/v1.7.6/ForeverWowCraft-Helper-1.7.6.msi \
+            --old-sha256 31ffb57f704895fd676400b44fb451ac801965248941d34cf3a4c9a61514731c \
+            --new "$(ls dist/*.msi)" --newer "$RUNNER_TEMP/b/ForeverWowCraft-Helper-$B.msi" --logs "$RUNNER_TEMP/install-logs" --cache "$RUNNER_TEMP/cache"
+      - name: msiexec's logs, when the install test failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-logs
+          path: ${{ runner.temp }}/install-logs
+          retention-days: 7
       - name: On the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,7 +122,7 @@ jobs:
         run: |
           echo "/Library/Frameworks/Python.framework/Versions/3.14/bin" >> "$GITHUB_PATH"
           /Library/Frameworks/Python.framework/Versions/3.14/bin/python3 installer/build_mac.py --out dist --cache "$HOME/Library/Caches/ForeverWowCraft-build"
-      - name: "The application is the helper to macOS: its own executable runs Python, and the main bundle is the .app (a newer macOS placed no icon for a bare Python, 9 Nov 2026)"
+      - name: "The application is the helper to macOS: its own executable runs Python, and the main bundle is the .app (macOS places a menu bar icon for an app, not for a bare Python)"
         run: |
           app="dist/mac/ForeverWowCraft Helper.app"
           lipo -info "$app/Contents/MacOS/ForeverWowCraft Helper"

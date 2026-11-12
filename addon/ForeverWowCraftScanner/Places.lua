@@ -159,6 +159,23 @@ local function Seeded()
   return seeded
 end
 
+-- The special teachers (FWCS_SEED.special, by creature id: a quest or a character level first,
+-- teachers.py; Odd Child, 10 Nov 2026) are no trainer places: never noted as one, and a note
+-- made before is passed over. A note holds the name the client gave, not the id: it is matched
+-- by the seed's name, or by the client's own name for that id in the trainers kept for the
+-- helper. nil with a seed that has no list (one older than 1.7.7)
+local function SpecialNames()
+  local special = FWCS_SEED and FWCS_SEED.special
+  if type(special) ~= "table" or next(special) == nil then return nil end
+  local names, kept = {}, FWCS_DB.__trainers
+  for id, name in pairs(special) do
+    if type(name) == "string" and name ~= "" then names[name] = true end
+    local t = type(kept) == "table" and kept[id]
+    if type(t) == "table" and type(t.name) == "string" then names[t.name] = true end
+  end
+  return names
+end
+
 -- every place: the seed's and the noted ones. Made again only when a place was noted (the list
 -- was copied, some 1,700 rows, on every look for the nearest, several times a verdict)
 local all, allSeed, allMine, allN
@@ -166,8 +183,11 @@ local function All()
   local seed, mine = Seeded(), Places()
   if all and allSeed == seed and allMine == mine and allN == #mine then return all end
   local out = {}
+  local hidden = SpecialNames()
   for _, p in ipairs(seed) do table.insert(out, p) end
-  for _, p in ipairs(mine) do table.insert(out, p) end
+  for _, p in ipairs(mine) do
+    if not (hidden and p.kind == "trainer" and p.name and hidden[p.name]) then table.insert(out, p) end
+  end
   all, allSeed, allMine, allN = out, seed, mine, #mine
   return out
 end
@@ -268,13 +288,19 @@ local function NoteTrainer()
   end
   local best, n = nil, 0
   for profession, v in pairs(votes) do if v > n then best, n = profession, v end end
+  -- a special teacher is no trainer place (SpecialNames); what it teaches is still kept below
+  local id = NpcKey()
+  local special = FWCS_SEED and FWCS_SEED.special
+  local names = type(id) == "string" and SpecialNames()
+  if (type(special) == "table" and id ~= nil and special[id] ~= nil) or (names and names[id]) then
+    best, all = nil, nil                   -- the list of every place made again: a note made before is passed over by this name
+  end
   if best then Note("trainer", best, { name = Npc(), teaches = teaches, upto = ranked > 0 and ranked or (upto > 0 and upto or nil) }) end
   -- the trainer's whole list, by the creature's id, for the helper to send (nothing of the
   -- character): each service and the skill it asks for. Forever keeps the skill a recipe is
   -- taught at on the server, which the client's tables do not say, and the routes planned on
   -- vanilla's levels were wrong by it (Embossed Leather Gloves, the user, 7 Nov 2026). The
   -- union over visits: a service a filter hid this time stays from the last
-  local id = NpcKey()
   local map, x, y = Here()
   if id and map and GetTrainerServiceSkillReq then
     local asks, counts, skillName = {}, {}, nil

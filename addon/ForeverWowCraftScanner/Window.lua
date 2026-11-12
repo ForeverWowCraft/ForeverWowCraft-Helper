@@ -114,6 +114,18 @@ local function RecipeName(step)
 end
 ns.RecipeName = RecipeName
 
+-- what of the character's own a stretch's recipe uses, in words: "Using your 40 Briarthorn and
+-- 12 Mageroyal" (lower: "using your ..."); a third and more are "+N more". `name` gives an
+-- item's name (the house's English one until the client has it)
+function ns.UsingText(step, name, lower)
+  local parts = {}
+  for i, m in ipairs(step.mine or {}) do
+    if i > 2 then parts[#parts] = parts[#parts] .. string.format(" (+%d more)", #step.mine - 2); break end
+    table.insert(parts, m[2] .. " " .. name(m[1]))
+  end
+  return (lower and "using your " or "Using your ") .. table.concat(parts, " and ")
+end
+
 -- the window drawn again in a moment, once, however many changes come before then
 local due = false
 local function RedrawSoon()
@@ -647,7 +659,14 @@ local function RouteOf(house, by, profession)
   end
   local also = profession and Companion(profession, by)
   local with = WithCompanion(house, plan, also)
-  return Effective(with or plan), also, with ~= nil
+  local route = Effective(with or plan)
+  -- the recipe of each stretch that costs this character least, what it has counted (Tailor.lua):
+  -- from the skill the window plans from, as Fill below has it
+  if route and ns.UseWhatIHave then
+    local c = Char()
+    route = ns.UseWhatIHave(route, c.from[route.profession] or c.skills[route.skill_line] or route.start)
+  end
+  return route, also, with ~= nil
 end
 
 -- the plan to show: { plan, by, names, also = companion or nil, applied = whether the plan counts it }
@@ -715,13 +734,13 @@ local function Fill(house, chosen)
   local c, plan = Char(), chosen.plan
   c.profession = chosen.profession            -- once shown, it stays the one shown
   local name = house.items or {}
-  local function N(item) return (ItemName(item, name[item])) end
+  local function N(item) return (ItemName(item, name[item] or ns.ToolName(item))) end
   local rank = c.skills[plan.skill_line]
   local from = c.from[plan.profession] or rank or plan.start
   from = math.max(plan.start, math.min(from, plan.target))
   local upto = RANGE and c.upto[plan.profession] or plan.target
   upto = math.max(from, math.min(upto, plan.target))
-  local have = Have()
+  local have = ns.OwnTools(Have())            -- a tool counted as this character has it, bank and all
   -- the gold: how far it reaches, and the route cut there when asked
   local gold, wanted = "", upto
   if RANGE then
@@ -793,6 +812,11 @@ local function Fill(house, chosen)
         .. "are made beside it. Its reagents are on the list.", N(c[1]), c[2]))
     end
   end
+  -- a tool a step needs that the character lacks (an enchanter's rod): got first, its reagents on the list
+  for _, t in ipairs(mine.tools or {}) do
+    table.insert(notices, string.format("|cff33ccffA tool:|r the route needs %s from skill %d and you do not have one: %s.",
+      N(t.item), t.at, t.made and "it is made on the way, and what it takes is on the list" or "it is on the list"))
+  end
   if HelperNote() then table.insert(notices, HelperNote()) end
   SetNotice(table.concat(notices, "\n"))
 
@@ -801,7 +825,7 @@ local function Fill(house, chosen)
   elseif from >= upto then Line("Nothing between those two skills: move a slider.") end
 
   -- what to buy: everything the route would buy from here, and how much of it is still needed
-  local price = plan.buy or {}
+  local price = setmetatable({}, { __index = function(_, item) return ns.BuyRow(plan, item) end })   -- a tool's reagents too
   local function cost(item, units) return price[item] and units * price[item][1] or nil end
   local keys = Sorted(all.buy, function(item) return cost(item, mine.buy[item] or 0) or 0 end)
   for item in pairs(mine.buy) do if not all.buy[item] then table.insert(keys, item) end end
@@ -825,7 +849,9 @@ local function Fill(house, chosen)
 
   if #mine.steps > 0 then Head("Route", "", "", "Crafts", "Skill") end
   for _, s in ipairs(mine.steps) do
-    Line(RecipeName(s.step) .. (s.step.instead and ("  |cff808080instead of " .. s.step.instead .. "|r") or ""), "", "", s.crafts, s.from .. " - " .. s.to, s.step.makes and s.step.makes[1])
+    local why = s.step.instead and ("  |cff808080instead of " .. s.step.instead .. "|r")
+      or s.step.over and ("  |cff808080" .. ns.UsingText(s.step, N, true) .. ", instead of " .. s.step.over .. "|r") or ""
+    Line(RecipeName(s.step) .. why, "", "", s.crafts, s.from .. " - " .. s.to, s.step.makes and s.step.makes[1])
   end
   for _, b in ipairs(mine.blocked or {}) do                 -- nothing fits at the character's level (ns.Effective)
     Line(string.format("|cffff6060no recipe at your level for skill %d - %d: %s asks for level %s|r", b.from, b.to, RecipeName(b.step), tostring(b.step.asks or "?")))
@@ -862,7 +888,7 @@ function ns.AuctionatorImport(whole)
   local sum = { items = 0, units = 0, recipes = 0, cost = 0, unpriced = 0, english = 0 }
   if not last then return "", sum end
   local plan, out, english = last.plan, whole and last.all or last.mine, last.house.items or {}
-  local price, terms, name, foreign = plan.buy or {}, {}, {}, Foreign()
+  local price, terms, name, foreign = setmetatable({}, { __index = function(_, item) return ns.BuyRow(plan, item) end }), {}, {}, Foreign()
   local function term(item, n)
     local shown, own = ItemName(item, english[item])
     if foreign and not own then sum.english = sum.english + 1 end

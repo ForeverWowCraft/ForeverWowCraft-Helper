@@ -49,6 +49,7 @@ def strip_markup(s: str) -> str:
 
 
 def clean_item_name(s: str) -> str:
+    """An item name from an Auctionator export as the item is called: markup and a trailing " (item level)" removed."""
     return _ILVL_SUFFIX.sub("", strip_markup(s)).strip()
 
 
@@ -71,7 +72,7 @@ def parse_money(s: str) -> int | None:
     return None
 
 
-def parse_export(text: str) -> dict[str, dict]:
+def parse_export(text: str) -> dict[str, dict]:  # noqa: C901 - baseline 9 Nov 2026, to be split
     """Parse Auctionator 'Export Results' CSV (or a simple name,price CSV).
 
     Returns {item name: {"price": copper, "available": int|None}} keeping the lowest

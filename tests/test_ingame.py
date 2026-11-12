@@ -570,23 +570,34 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 11
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 12
     assert lua.eval("registered_panel == ns.options")
     # every setting is on the page (the user, 6 Nov 2026): the switches, by their getters and setters
     lua.execute("ns.options:refresh()")
-    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 12)]
+    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 13)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
-    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level" and labels[10] == "A reminder to reload, every hour"
+    assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level"
+    assert labels[10] == "Use what I already have first" and labels[11] == "A reminder to reload, every hour"
     # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
-    # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), reminder
+    # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), what I have first (10 Nov), reminder
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 12)] == [True, True, False, False, False, True, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 13)] == [True, True, False, False, False, True, True, True, True, True, True, True]
     # the Settings window's own hooks: OnRefresh reads the boxes again (OnShow never fired for a frame made at load,
     # and every box showed unticked after an update, 7 Nov 2026); OnDefault puts the shipped defaults back
-    lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false, levelRoutes = false }; ns.options:OnRefresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10, 11)] == [False, True, False, False, False]
+    lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false, levelRoutes = false, haveFirst = false }; ns.options:OnRefresh()")
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10, 11, 12)] == [False, True, False, False, False, False]
     lua.execute("ns.options:OnDefault()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 12)] == [True, True, False, False, False, True, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 13)] == [True, True, False, False, False, True, True, True, True, True, True, True]
+    assert lua.eval("FWCS_DB.__ui.haveFirst") is None
+    # "Use what I already have first": the box and /fwcs have are one switch
+    lua.execute("local b = ns.options.boxes[11]; b.GetChecked = function() return false end; b.scripts.OnClick(b)")
+    assert lua.eval("FWCS_DB.__ui.haveFirst") is False
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have on")')
+    assert lua.eval("FWCS_DB.__ui.haveFirst") is None and lua.eval("ns.options.boxes[11].get()") is True
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have")')
+    assert lua.eval("FWCS_DB.__ui.haveFirst") is False
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have")')
+    assert lua.eval("FWCS_DB.__ui.haveFirst") is None
     assert lua.eval("FWCS_DB.__ui.auto") is None and lua.eval("FWCS_DB.__ui.alts") is None
     lua.execute("local b = ns.options.boxes[9]; b.GetChecked = function() return true end; b.scripts.OnClick(b)")
     assert lua.eval("FWCS_DB.__ui.alts") is True
@@ -837,7 +848,7 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1662 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert "and 1818 that the addon came with" in lua.eval("printed[#printed - 1]")
     assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services; 0 recipe scroll(s) with the level each asks for.")
 
 
@@ -1500,6 +1511,43 @@ def test_a_trainer_that_says_how_far_it_teaches_comes_first_for_a_rank():
     assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 201))').upto == 225
 
 
+SPECIAL = 249713
+
+
+def test_a_special_teacher_is_never_a_trainer_place():
+    """The seed's special teachers (by creature id: a quest or a level first, 10 Nov 2026) are not
+    noted as trainers, and a note made before is passed over, matched by the seed's name or by the
+    client's own for that id; what such a teacher teaches is still kept for the helper as before."""
+    lua = _game()
+    lua.execute(PLACES_GAME + "FWCS_SEED.special = nil")                                # a seed older than the list, first
+    places = lambda: [dict(p) for p in lua.eval("FWCS_DB.__places").values()]  # noqa: E731
+    # an ordinary trainer noted far off, and two notes made before the list came: one by the
+    # seed's (English) name, one by a client's own name that the trainers kept give for the id
+    lua.execute('px, py = 0.50, 0.90; ns.NotePlace("trainer", "tailoring", { name = "Ordinary" }); '
+                'px, py = 0.50, 0.60; ns.NotePlace("trainer", "tailoring", { name = "Odd Child" }); '
+                'px, py = 0.50, 0.70; ns.NotePlace("trainer", "tailoring", { name = "Enfant bizarre" }); px, py = 0.50, 0.50')
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring"))').name == "Odd Child"        # a seed with no list: as before
+    lua.execute('FWCS_SEED.special = { [%d] = "Odd Child" }; ns.NotePlace("auction", "")' % SPECIAL)   # (a note: the list of every place made again)
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring"))').name == "Enfant bizarre"   # the English name passed over; the French not yet known
+    lua.execute('FWCS_DB.__trainers = { [%d] = { name = "Enfant bizarre", teaches = {} } }; ns.NotePlace("auction", "")' % SPECIAL)
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring"))').name == "Ordinary"
+    assert len(places()) == 4                                                              # passed over, not deleted
+    # met: no place noted, and its window is kept for the helper as any trainer's
+    lua.execute('FWCS_DB.__trainers = nil; px, py = 0.40, 0.50; UnitName = function() return "Enfant bizarre" end; '
+                'function UnitGUID(unit) return "Creature-0-4170-0-10-%d-000057A14C" end; '
+                'services = { "White Linen Shirt" }; skillreq = { "Tailoring" }; GetTrainerServiceSkillReq = function(i) return skillreq[i], 1 end; '
+                'Fire("TRAINER_SHOW")' % SPECIAL)
+    assert len(places()) == 4 and lua.eval('(ns.NearestPlace("trainer", "tailoring"))').name == "Ordinary"
+    t = lua.eval("FWCS_DB.__trainers[%d]" % SPECIAL)
+    assert t.name == "Enfant bizarre" and t.skill == "Tailoring" and dict(t.teaches) == {"White Linen Shirt": 1}
+    # a client with no GUID keys the teacher by its name: the seed's name says it is one
+    lua.execute('UnitGUID = nil; UnitName = function() return "Odd Child" end; px = 0.30; Fire("TRAINER_SHOW")')
+    assert len(places()) == 4 and lua.eval('FWCS_DB.__trainers["Odd Child"].skill') == "Tailoring"
+    # an ordinary trainer is noted as ever
+    lua.execute('UnitName = function() return "Thrallson" end; px = 0.20; Fire("TRAINER_SHOW")')
+    assert len(places()) == 5 and places()[4]["name"] == "Thrallson"
+
+
 # ---- what the list and the arrow serve: a profession the character has --------------------------------
 def test_the_list_and_the_arrow_serve_only_a_profession_the_character_has():
     lua = _game()
@@ -1820,13 +1868,202 @@ def test_the_shopping_list_buys_from_a_vendor_a_stack_a_click():
     assert shop("shown") is False
     lua.execute('wares = { 25 }; Fire("MERCHANT_SHOW")')
     assert shop("shown") is False
-    # one selling in bundles of five, two bundles a click: the seven missing are two bundles, ten
+    # one selling in bundles of five, ten items a call: the seven missing are two bundles, ten
+    # items, asked of the game as ten (BuyMerchantItem counts items), for two bundles' price
     lua.execute('wares = { 2324 }; GetMerchantItemInfo = function(i) return "Bleach", "tex", 25, 5, -1, true, true end; GetMerchantItemMaxStack = function() return 10 end; '
                 'Fire("MERCHANT_CLOSED"); Fire("MERCHANT_SHOW")')
-    assert shop("shown") is True and shop("rows[1].name.text") == "Bleach" and shop("rows[1].buy.text") == "Buy 10" and plain("rows[1].status.text") == "50c"
+    assert shop("shown") is True and shop("rows[1].name.text") == "Bleach" and shop("rows[1].buy.text") == "Buy 10" and plain("rows[1].status.text") == "2 x 5, 50c"
     click()
-    assert list(lua.eval("bought[3]").values()) == [1, 2]
+    assert list(lua.eval("bought[3]").values()) == [1, 10]
     lua.execute('Fire("MERCHANT_CLOSED")')
+
+
+def test_a_ware_sold_in_bundles_is_bought_in_whole_bundles_counted_in_items():
+    """BuyMerchantItem(index, quantity) counts items, as Blizzard's own stack-split box calls it: a
+    ware sold five at a time is asked for in fives, enough to cover what is missing and no more
+    bundles than that; no more than the game's limit a call (GetMerchantItemMaxStack, items) nor
+    than the merchant's stock; a ware sold singly is as before."""
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    # the step at 44 needs 14 Linen Cloth, 7 Coarse Thread and the dye; the bags have 2 cloth.
+    # The merchant sells the cloth five at a time for 1s a purchase, up to 20 items a call
+    lua.execute('''
+      C_Item.GetItemCount = GetItemCount; GetItemCount = nil
+      bought, stock, limit = {}, -1, 20
+      wares = { 2589 }
+      function GetMerchantItemInfo(i) return "Linen Cloth", "tex", 100, 5, stock, true, true end
+      function GetMerchantItemMaxStack(i) return limit end
+      function BuyMerchantItem(i, n) table.insert(bought, { i, n }) end
+      MerchantFrame = CreateFrame("Frame")
+      skill = 44
+      bags[0] = { { 2589, 2 } }
+      Fire("MERCHANT_SHOW")
+    ''')
+    shop = lambda path: lua.eval("ForeverWowCraftShop." + path)  # noqa: E731
+    plain = lambda path: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", shop(path))  # noqa: E731
+    def cloth():                                         # the cloth's row: the one with more missing comes first
+        for i in range(1, 13):
+            if shop(f"rows[{i}].entry") is not None and shop(f"rows[{i}].name.text") == "Linen Cloth":
+                return i
+    click = lambda: lua.execute(f"ForeverWowCraftShop.rows[{cloth()}].buy.scripts.OnClick(ForeverWowCraftShop.rows[{cloth()}].buy)")  # noqa: E731
+    calls = lambda: [list(r.values()) for r in lua.eval("bought").values()]  # noqa: E731
+    again = lambda: lua.execute('RunTimers(); Fire("MERCHANT_CLOSED"); Fire("MERCHANT_SHOW")')  # noqa: E731   (a purchase's wait let go)
+    # 12 missing: three bundles, 15 items, the row says so and the price is three purchases'
+    assert shop(f"rows[{cloth()}].name.text") == "Linen Cloth" and shop(f"rows[{cloth()}].need.text") == "need 14, have 2"
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 15" and plain(f"rows[{cloth()}].status.text") == "3 x 5, 3s 00c"
+    click()
+    assert calls() == [[1, 15]] and shop(f"rows[{cloth()}].buy.enabled") is False and plain(f"rows[{cloth()}].status.text") == "buying 15..."
+    # the bags have them: done, nothing more bought
+    lua.execute('bags[0] = { { 2589, 17 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert cloth() is None and calls() == [[1, 15]]
+    # the game's limit a call, 12 items: two bundles (10) a click, the rest on the next once the bags have them
+    lua.execute('bags[0] = { { 2589, 2 } }; limit = 12')
+    again()
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 10" and plain(f"rows[{cloth()}].status.text") == "2 x 5, 2s 00c"
+    click()
+    lua.execute('bags[0] = { { 2589, 12 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert shop(f"rows[{cloth()}].need.text") == "need 14, have 12" and shop(f"rows[{cloth()}].buy.text") == "Buy 5" and plain(f"rows[{cloth()}].status.text") == "1 x 5, 1s 00c"
+    click()
+    assert calls() == [[1, 15], [1, 10], [1, 5]]
+    # a limit under one bundle (or none said): one bundle a call
+    lua.execute('bags[0] = { { 2589, 2 } }; limit = 0')
+    again()
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 5"
+    # a limited stock, counted in items: 10 left are two bundles; 3 left (short of a bundle) one,
+    # which a merchant counting in items refuses (the row takes a click again); none left, sold out
+    lua.execute('limit = 20; stock = 10')
+    again()
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 10"
+    lua.execute('stock = 3')
+    again()
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 5"
+    lua.execute('stock = 0')
+    again()
+    assert shop(f"rows[{cloth()}].status.text") == "sold out" and shop(f"rows[{cloth()}].buy.shown") is False
+    # a ware sold singly: what is missing, one call, the price of each
+    lua.execute('stock = -1; GetMerchantItemInfo = function(i) return "Linen Cloth", "tex", 20, 1, -1, true, true end')
+    again()
+    assert shop(f"rows[{cloth()}].buy.text") == "Buy 12" and plain(f"rows[{cloth()}].status.text") == "2s 40c"
+    lua.execute('bought = {}')
+    click()
+    assert calls() == [[1, 12]]
+    lua.execute('Fire("MERCHANT_CLOSED")')
+
+
+ENCHANTER = '''
+  -- an enchanter at 1: the profession window on Enchanting, whose route's one step (Enchant Bracer,
+  -- 7418, a Strange Dust a craft) needs a Runed Copper Rod, which a recipe of the profession (7421)
+  -- makes of a Copper Rod (a vendor's) and a Strange Dust
+  eskill = 1
+  function GetNumSkillLines() return 3 end
+  function GetSkillLineInfo(i)
+    if i == 1 then return "Professions", true end
+    if i == 2 then return "Tailoring", false, false, skill end
+    return "Enchanting", false, false, eskill
+  end
+  C_Item.GetItemCount = GetItemCount; GetItemCount = nil
+  Enum.CraftingReagentType = { Basic = 1 }
+  rodmet = false
+  names = { [7418] = "Enchant Bracer - Minor Health", [7421] = "Runed Copper Rod" }
+  learned = { [7418] = true, [7421] = true }
+  reqs = { [7418] = function() return { { name = "Runed Copper Rod", met = rodmet, type = 0 } } end }
+  crafted = {}
+  C_TradeSkillUI = {
+    GetBaseProfessionInfo = function() return { professionID = 333, professionName = "Enchanting", skillLevel = eskill } end,
+    GetRecipeInfo = function(id) return { recipeID = id, name = names[id], learned = learned[id] or false } end,
+    GetRecipeRequirements = function(id) return reqs[id] and reqs[id]() or {} end,
+    GetAllRecipeIDs = function() return { 7418, 7421 } end,
+    GetRecipeSchematic = function(id)
+      if id == 7421 then return { outputItemID = 6218, reagentSlotSchematics = {
+        { reagents = { { itemID = 6217 } }, quantityRequired = 1, reagentType = 1 },
+        { reagents = { { itemID = 10940 } }, quantityRequired = 1, reagentType = 1 } } } end
+    end,
+    CraftRecipe = function(id, n) table.insert(crafted, { id, n }) end, StopRecipeRepeat = function() end,
+  }
+  ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+  -- a merchant met once sells the Copper Rod, 1s 24c
+  known[6217] = "Copper Rod"                -- the client's name of the Copper Rod
+  FWCS_DB.__vendors = { ["Creature-0-1-1-1-3346"] = { name = "Kithas", items = { [6217] = { price = 124, stack = 1, n = -1, usable = true } } } }
+'''
+
+
+def test_the_shopping_list_has_what_a_tool_the_route_needs_takes_unless_it_is_had():
+    """The route's documents do not say a recipe needs a tool (an enchanter's rod); the client
+    does, with the profession open, and what the tool's recipe takes. The shopping lists (the
+    step's, at the house and vendors, and the /fwc window's) then have the Copper Rod (a vendor's)
+    and the dust it takes, once, before the step, and not when the character has the rod, in the
+    bags or in the bank (a player's list left the rod out, 10 Nov 2026)."""
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute(ENCHANTER)
+    # the panel opened: the route's recipes asked once, the rod's recipe looked up
+    lua.execute('Fire("TRADE_SKILL_SHOW")')
+    tools = lua.eval("FWCS_DB.__tools")
+    assert list(tools.spells[7418].values()) == ["Runed Copper Rod"]
+    rod = tools.made["runedcopperrod"]
+    assert rod.item == 6218 and rod.spell == 7421 and [list(u.values()) for u in rod.uses.values()] == [[6217, 1], [10940, 1]]
+    # the step's list: the 59 dust of the step and the one of the rod, and the Copper Rod from a vendor
+    entries = lambda: {e.item: dict(e) for e in lua.eval("ns.craft.Shopping()").values() if lupa.lua_type(e) == "table"}  # noqa: E731
+    got = entries()
+    assert got[10940]["units"] == 60 and got[10940]["source"] == "ah"
+    assert got[6217]["units"] == 1 and got[6217]["source"] == "vendor" and got[6217]["price"] == 124
+    assert 6218 not in got                                                  # made, not bought
+    # with the panel's button: the bags hold nothing, so the first thing is to buy, the rod's needs with the step's
+    tip = [re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Buy from a vendor (1) and the auction house (1)"
+    assert "  1 Copper Rod (have 0), about 1s 24c, from a vendor" in tip and "  60 Strange Dust (have 0), about 30s 00c, at the auction house" in tip
+    # the /fwc window: the rod's needs on its list, the rod made on the way, and a word that says so
+    lua.execute('FWCS_DB.__chars["Stonespine|Thrallson"].picked = "enchanting"; ns.ToggleWindow()')
+    text = re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", lua.eval("AllText()"))
+    assert "A tool: the route needs" in text and "from skill 1 and you do not have one: it is made on the way, and what it takes is on the list." in text
+    # the dust and the rod's reagents in the bags, the rod not: the rod first, as something made on the way
+    lua.execute('bags[0] = { { 10940, 60 }, { 6217, 1 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Make 1 Runed Copper Rod" and lua.eval("ForeverWowCraftMake.verdict.spell") == 7421
+    # the step's reagents in the bags, the rod's Copper Rod not: bought first (not "make one", which would fail)
+    lua.execute('bags[0] = { { 10940, 60 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Buy 1 Copper Rod from a vendor"
+    # the rod in the bags: nothing of it on any list, and the step is made
+    lua.execute('rodmet = true; bags[0] = { { 10940, 59 }, { 6218, 1 } }; Fire("BAG_UPDATE_DELAYED")')
+    got = entries()
+    assert 6217 not in got and 6218 not in got
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Make 59 Enchant Bracer - Minor Health"
+    lua.execute('bags[0] = { { 6218, 1 } }; Fire("BAG_UPDATE_DELAYED")')
+    got = entries()
+    assert got[10940]["units"] == 59 and 6217 not in got
+    # the rod in the bank: had, so not on the list; at the step, taken from the bank
+    lua.execute('rodmet = false; bags[0] = {}; bank[6218] = 1; Fire("BANKFRAME_OPENED"); RunTimers(); Fire("BANKFRAME_CLOSED"); bank[6218] = nil; RunTimers()')
+    assert list(lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].items[6218]').values())[1] == 1
+    got = entries()
+    assert 6217 not in got and got[10940]["units"] == 59
+    lua.execute('bags[0] = { { 10940, 59 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert lua.eval("ForeverWowCraftMake.verdict.text") == "Take Runed Copper Rod from the bank first"
+
+
+def test_a_tool_is_got_once_and_again_only_after_a_later_tools_recipe_takes_it():
+    """The walk of the route gets each tool once, before the first step that needs it; one that
+    a later tool's recipe takes as a reagent (a rod made from an earlier rod) is gone, and got
+    again for a step after that needs it. A tool had in `have` is not got; one taken from it is
+    counted as used."""
+    lua = _game(saved='''
+      FWCS_DB = { __tools = { v = 1,
+        spells = { [2963] = { "Runed Copper Rod" }, [2393] = { "Runed Silver Rod" }, [2385] = { "Runed Copper Rod", "Runed Silver Rod" } },
+        made = { runedcopperrod = { item = 6218, name = "Runed Copper Rod", spell = 7421, uses = { { 6217, 1 }, { 10940, 1 } } },
+                 runedsilverrod = { item = 6339, name = "Runed Silver Rod", spell = 7795, uses = { { 6338, 1 }, { 6218, 1 } } } } } }
+    ''')
+    out = _tailor(lua, 1, {})
+    assert out["make"][6218] == 2 and out["make"][6339] == 1            # the copper rod again for the vests, the first one in the silver
+    assert out["buy"][6217] == 2 and out["buy"][10940] == 2 and out["buy"][6338] == 1
+    assert [dict(t)["item"] for t in lua.eval('ns.Tailor(FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"], 1, {}).tools').values()] == [6218, 6339, 6218]
+    assert 6218 not in out["sell"] and 6339 not in out["sell"]           # held, not left to sell
+    # the copper rod had: the silver rod takes it, and the vests' is made
+    out = _tailor(lua, 1, {6218: 1})
+    assert out["make"][6218] == 1 and out["buy"][6217] == 1 and out["used"][6218] == 1
+    # both had: nothing of either
+    out = _tailor(lua, 1, {6218: 1, 6339: 1})
+    assert 6218 not in out["make"] and 6339 not in out["make"] and 6217 not in out["buy"] and 6338 not in out["buy"]
+    # from 51 on, only the vests: both rods, the copper one twice (once into the silver)
+    out = _tailor(lua, 51, {})
+    assert out["make"][6218] == 2 and out["make"][6339] == 1
 
 
 def test_the_shopping_list_buys_at_the_auction_house_a_click_and_a_confirm_each():
@@ -2073,6 +2310,117 @@ def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_s
     assert lua.eval("runs") > 0                                                                       # the pass held back, run once it is over
     lua.execute('runs = 0; Fire("PLAYER_REGEN_ENABLED")')
     assert lua.eval("runs") == 0                                                                      # and only what was owed
+
+
+WOOL, BELT, CAPE = 2592, 4309, 2570
+
+
+def _owned_doc():
+    """The document with a next-best for the shirts and the vests that takes Wool Cloth (40c at the house)."""
+    doc = document()
+    plan = doc["plans"]["tailoring-trainer"]
+    plan["buy"][str(WOOL)] = [40, "ah"]
+    plan["steps"][1]["alt"] = [{"recipe": "Linen Belt", "spell": 3915, "uses": [[WOOL, 3], [THREAD, 1]], "makes": [BELT, 1], "per": [1] * 10,
+                                "crafts": 10, "at": [40, 50, 60, 70], "cpp": 900, "buy": [WOOL, THREAD], "craft": []}]
+    plan["steps"][2]["alt"] = [{"recipe": "Woolen Cape", "spell": 3916, "uses": [[WOOL, 2], [THREAD, 1]], "makes": [CAPE, 1], "per": [1.333] * 9,
+                                "crafts": 12, "at": [45, 55, 65, 75], "cpp": 1200, "buy": [WOOL, THREAD], "craft": []}]
+    doc["items"].update({str(WOOL): "Wool Cloth", str(BELT): "Linen Belt", str(CAPE): "Woolen Cape"})
+    return doc
+
+
+def test_what_the_character_has_chooses_among_the_stretchs_recipes():
+    """"Use what I already have first" (10 Nov 2026: a player's farmed herbs were skipped for the auction
+    house's). Among a stretch's recipe and its next-best, the one that costs this character least out of
+    pocket, owned reagents free, stands in: the Make button, the tooltip, the arrow's note, the shopping
+    list and the /fwc window follow it. At 44 the shirts (7 crafts) cost 381.5c with nothing in hand
+    (bolts made of 60c of cloth, 10c thread, 25c bleach, less 40.5c a shirt); the belts 910c (3 wool at
+    40c and a thread, worth nothing): the route's. With 20 thread in the bags the shirts come to 311.5c."""
+    lua = _game(_owned_doc())
+    lua.execute('''
+      learned = { [2963] = true, [2393] = true, [2385] = true, [3915] = true, [3916] = true }
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function() return {} end, CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      UnitLevel = function() return 30 end
+      skill = 44; bags[0] = { { 2320, 20 } }; money = 100000
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    text = lambda: strip(lua.eval("ForeverWowCraftMake.verdict.text"))  # noqa: E731
+    tips = lambda: [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]  # noqa: E731
+    route = lambda n: lua.eval(f'ns.RouteFor("tailoring").steps[{n}].recipe')  # noqa: E731
+    plain = 'FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"]'
+
+    def bags(wool):
+        lua.execute(f'bags[0] = {{ {{ 2320, 20 }}, {{ 2592, {wool} }} }}; Fire("BAG_UPDATE_DELAYED")')
+
+    # nothing of the belts' owned: the route as planned, the very same table
+    assert route(2) == "White Linen Shirt" and route(3) == "Brown Linen Vest"
+    assert lua.eval(f'ns.RouteFor("tailoring") == {plain}') and "Using your" not in " ".join(tips())
+    # 21 wool: the belts cost 0c of the shirts' 311.5c; the Make button makes them and says why
+    bags(21)
+    assert route(2) == "Linen Belt" and text() == "Make 7 Linen Belt"
+    assert "Using your 21 Wool Cloth and 7 Coarse Thread: Linen Belt stands in for White Linen Shirt, about 45c a skill point less for you." \
+        " The box \"Use what I already have first\" in Interface > AddOns turns this off." in tips()
+    assert lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].arrow.note') == "Using your 21 Wool Cloth and 7 Coarse Thread"
+    # the same stack is not spent twice: the vests' next-best (2 wool a craft) finds none left after the belts
+    assert route(3) == "Brown Linen Vest"
+    # past the shirts, the 21 wool go to the capes (240c: 3 wool to buy, against 840c of vests)
+    lua.execute('skill = 51; Fire("CHAT_MSG_SKILL")')
+    assert route(3) == "Woolen Cape" and lua.eval('#ns.RouteFor("tailoring").steps[3].mine') == 2
+    lua.execute('skill = 44; Fire("CHAT_MSG_SKILL")')
+    # the tie margin: the larger of 10c a point (70c) and 5% of 381.5c. 15 wool: the belts 240c, 71.5c under; 14: 280c, 31.5c under
+    bags(15)
+    assert route(2) == "Linen Belt"
+    bags(14)
+    assert route(2) == "White Linen Shirt"
+    # a partial cover: 18 of the 21 wool; 6 belts from the bags, and the list buys the 3 wool short, nothing of the shirts
+    bags(18)
+    assert route(2) == "Linen Belt" and text() == "Make 6 Linen Belt"
+    shopping = lua.eval("ns.craft.Shopping()")
+    assert sorted((shopping[i].item, shopping[i].units - shopping[i].have) for i in range(1, len(shopping) + 1)) == [(WOOL, 3)]
+    assert strip(shopping.title) == "Linen Belt, skill 44 to 51, needs"
+    # the /fwc window: the step says so, and the totals are the belts' (3 wool, 120c; the vests' 72 cloth, 2160c)
+    lua.execute("ns.ToggleWindow()")
+    shown = strip(lua.globals().AllText())
+    assert "Linen Belt  using your 18 Wool Cloth and 7 Coarse Thread, instead of White Linen Shirt" in shown, shown
+    assert "To buy: 22s 80c" in shown
+    # what is in the bank counts too, and the button sends the character for it before anything is bought
+    lua.execute('bags[0] = { { 2320, 20 } }; FWCS_DB.__chars["Stonespine|Thrallson"].items[2592] = { 0, 21, 0, 0 }; ns.HaveChanged(); Fire("TRADE_SKILL_SHOW")')
+    assert route(2) == "Linen Belt" and text() == "Take 21 Wool Cloth from the bank"
+    assert lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].arrow.note') == "Using your 21 Wool Cloth and 7 Coarse Thread; 21 Wool Cloth: bank"
+    lua.execute('FWCS_DB.__chars["Stonespine|Thrallson"].items[2592] = nil; ns.HaveChanged()')
+    # a next-best the character's level cannot learn is not chosen, whatever is owned
+    bags(21)
+    lua.execute(f'{plain}.steps[2].alt[1].level = 40; ns.HaveChanged()')
+    assert route(2) == "White Linen Shirt"
+    lua.execute(f'{plain}.steps[2].alt[1].level = nil; ns.HaveChanged()')
+    assert route(2) == "Linen Belt"
+    # nor one learned above the stretch's start, or a scroll not owned that the gold does not reach
+    lua.execute(f'{plain}.steps[2].alt[1].at[1] = 45; ns.HaveChanged()')
+    assert route(2) == "White Linen Shirt"
+    lua.execute(f'{plain}.steps[2].alt[1].at[1] = 40; {plain}.steps[2].alt[1].learn = {{ 6001, 200000 }}; ns.HaveChanged()')
+    assert route(2) == "White Linen Shirt"
+    lua.execute(f'{plain}.steps[2].alt[1].learn = nil; ns.HaveChanged()')
+    # the setting off: today's route, the very same table, and the bank is not the button's
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have off"); Fire("TRADE_SKILL_SHOW")')
+    assert lua.eval(f'ns.RouteFor("tailoring") == {plain}') and route(2) == "White Linen Shirt"
+    assert "Using your" not in " ".join(tips()) and text() == "Buy from a vendor (1) and the auction house (1)"
+    assert lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].arrow.note') == "7 Bleach: vendor, 14 Linen Cloth: AH"
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have on")')
+    assert route(2) == "Linen Belt"
+    # worked out again only when something changed: not per call, and not in a fight
+    walks = lua.eval("ns.haveWalks")
+    for _ in range(5):
+        route(2)
+    assert lua.eval("ns.haveWalks") == walks
+    lua.execute('InCombatLockdown = function() return true end; bags[0] = { { 2320, 20 } }; Fire("BAG_UPDATE_DELAYED")')
+    assert route(2) == "Linen Belt" and lua.eval("ns.haveWalks") == walks             # the last answer stands in the fight
+    lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
+    assert route(2) == "White Linen Shirt" and lua.eval("ns.haveWalks") == walks + 1
 
 
 if __name__ == "__main__":
