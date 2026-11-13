@@ -5,10 +5,10 @@ helper on it (CI's hosted runner): per-user installs, no administrator, as a pla
 
 1. the old release (downloaded, its SHA-256 checked) installed quietly: its files and the Run
    entry there, and no helper started (a quiet install by hand starts none)
-2. A over it as the old release's own quiet update ran msiexec (up to 1.7.6: a VBScript ran
-   `msiexec /i <msi> /qn /norestart /l*v <log>`, no LAUNCHAPP, and started the helper itself):
-   the log says it succeeded, the files are A's, the zip-only scripts are not there, and the
-   installer started no helper (the old script does that)
+2. A over it as a quiet install with no LAUNCHAPP (how a hand-run msiexec does it, and how
+   1.7.6's updater did: a VBScript ran `msiexec /i <msi> /qn /norestart /l*v <log>` and started
+   the helper itself): the log says it succeeded, the files are A's, the zip-only scripts are
+   not there, and the installer started no helper
 3. B over A as this helper's quiet update does (fwchelper/win.py install_command: LAUNCHAPP=1):
    the installer starts the helper, exactly one, and it is still running moments later, the new
    helper's log saying it started
@@ -136,7 +136,7 @@ def steps(old: Path, new: Path, newer: Path, logs: Path) -> None:  # noqa: C901 
     time.sleep(5)
     check(helpers() == [], "no helper started")
 
-    print("2. A over it, as the old helper's quiet update ran msiexec (no LAUNCHAPP)", flush=True)
+    print("2. A over it, a quiet install with no LAUNCHAPP (as 1.7.6's update ran msiexec)", flush=True)
     log = logs / "2-old-updater.log"
     check(msiexec(["msiexec", "/i", str(new), "/qn", "/norestart", "/l*v", str(log)]) == 0 and log_says_done(log), "installed, the log says so")
     check("def install_command(" in (INSTALLED / "fwchelper" / "win.py").read_text(encoding="utf-8"), "the helper's files are A's")
@@ -144,9 +144,9 @@ def steps(old: Path, new: Path, newer: Path, logs: Path) -> None:  # noqa: C901 
     data = EXE.read_bytes()
     check(exeicon.signature_entry(data) == (0, 0), "A's exe has no stale signature pointer")
     check(exeicon.file_version(EXE).get("FileVersion") == product_version(new), f"the exe is A's ({product_version(new)})")
-    check(run_value() == command, "the Run entry is the same command, the one the old script starts")
+    check(run_value() == command, "the Run entry is the same command, the one the old install made")
     time.sleep(5)
-    check(helpers() == [], "the installer started no helper (the old script starts it)")
+    check(helpers() == [], "the installer started no helper (without LAUNCHAPP it starts none)")
 
     print("3. B over A, as this helper's quiet update does (LAUNCHAPP=1)", flush=True)
     nowhere(True)

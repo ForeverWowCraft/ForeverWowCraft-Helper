@@ -36,6 +36,7 @@ local function Widget()
     if key == "RegisterEvent" then return function(s, event)
       if event == "NO_SUCH_EVENT" or event == "PLAYERBANKSLOTS_CHANGED" then error("unknown event " .. event) end
       s.events[event] = true end end
+    if key == "UnregisterEvent" then return function(s, event) s.events[event] = nil end end
     if key == "Show" then return function(s) local was = s.shown; s.shown = true; if not was and s.scripts.OnShow then s.scripts.OnShow(s) end end end
     if key == "Hide" then return function(s) s.shown = false end end
     if key == "Disable" then return function(s) s.enabled = false end end
@@ -131,7 +132,7 @@ end
 '''
 
 
-def _game(doc=None, saved=None):
+def _game(doc=None, saved=None, routes=None):
     """A Lua with the stand-in game and the addon loaded as the .toc says, the character logged in.
     `saved`: Lua run before the files, as the saved file the game reads in."""
     lua = lupa.LuaRuntime()
@@ -145,7 +146,7 @@ def _game(doc=None, saved=None):
     for name in files:
         if name == "Queue.lua":
             continue                                    # the stand-in has a short one
-        source = plans.plans_text([doc or document()], "test") if name == "Plans.lua" else (ADDON / name).read_text(encoding="utf-8")
+        source = plans.plans_text([doc or document()], "test", routes=routes) if name == "Plans.lua" else (ADDON / name).read_text(encoding="utf-8")
         lua.globals().Load(name, source)
     lua.execute('Fire("PLAYER_LOGIN"); Fire("PLAYER_ENTERING_WORLD", true); RunTimers()')
     return lua
@@ -435,14 +436,14 @@ def test_the_focus_button_turns_between_the_profit_and_the_skill_up_route():
     doc["focus"] = [["profit", "Profit"], ["skill", "Skill-up"]]
     lua = _game(doc)
     lua.execute('SlashCmdList.FOREVERWOWCRAFT("")')
-    assert lua.eval("ForeverWowCraftFocus.shown") and lua.eval("ForeverWowCraftFocus.text") == "[  ] skill-up"
+    assert lua.eval("ForeverWowCraftFocus.shown") and lua.eval("ForeverWowCraftFocus.text") == "Mode: |cffffd100Profit|r"
     assert lua.eval("ns.Settings().variant") == "trainer"
     # no button chooses the recipes any more: every route may buy them (2 Nov 2026)
     assert lua.eval("ForeverWowCraftVariant") is None
     # the click moves the arrow, the Make button and the shopping list at once (Craft.lua's pass, not its next tick)
     lua.execute("repointed = 0; ns.ReloadShopping = function() repointed = repointed + 1 end")
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
-    assert lua.eval("ForeverWowCraftFocus.text") == "|cff40ff40[x]|r skill-up" and lua.eval("ns.Settings().variant") == "trainer-skill"
+    assert lua.eval("ForeverWowCraftFocus.text") == "Mode: |cffffd100Skill-up|r" and lua.eval("ns.Settings().variant") == "trainer-skill"
     assert lua.eval("repointed") == 1
     lua.execute("ForeverWowCraftFocus.scripts.OnClick(ForeverWowCraftFocus)")
     assert lua.eval("ns.Settings().variant") == "trainer" and lua.eval("repointed") == 2
@@ -534,7 +535,7 @@ def test_a_character_of_a_house_without_routes_is_told_what_to_do():
     lua = _game(document(house="elsewhere--alliance", realm="Elsewhere", faction="Alliance"))
     lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("plan")')
     text = lua.eval("AllText()")
-    assert "No routes for this character's auction house yet." in text and "The helper sees a new character at its first reload" in text
+    assert "No routes for this character's auction house yet." in text and "The helper sees a new character at its" in text
     # the way on is a button: a secure one that runs /reload (the game lets no addon call ReloadUI)
     assert lua.eval("ForeverWowCraftWindowReload.shown") is True and lua.eval('ForeverWowCraftWindowReload.attributes.macrotext') == "/reload"
     # a realm no house lists is of its house by its name (the helper fetched the region's houses before it saw the character)
@@ -570,24 +571,24 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 12
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 13
     assert lua.eval("registered_panel == ns.options")
     # every setting is on the page (the user, 6 Nov 2026): the switches, by their getters and setters
     lua.execute("ns.options:refresh()")
-    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 13)]
+    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 14)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
     assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level"
-    assert labels[10] == "Use what I already have first" and labels[11] == "A reminder to reload, every hour"
+    assert labels[10] == "Use what I already have first" and labels[11] == "A reminder to reload, every hour" and labels[12] == "Cooking: Fishing only"
     # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
     # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), what I have first (10 Nov), reminder
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 13)] == [True, True, False, False, False, True, True, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 14)] == [True, True, False, False, False, True, True, True, True, True, True, True, False]
     # the Settings window's own hooks: OnRefresh reads the boxes again (OnShow never fired for a frame made at load,
     # and every box showed unticked after an update, 7 Nov 2026); OnDefault puts the shipped defaults back
     lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false, levelRoutes = false, haveFirst = false }; ns.options:OnRefresh()")
     assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10, 11, 12)] == [False, True, False, False, False, False]
     lua.execute("ns.options:OnDefault()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 13)] == [True, True, False, False, False, True, True, True, True, True, True, True]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 14)] == [True, True, False, False, False, True, True, True, True, True, True, True, False]
     assert lua.eval("FWCS_DB.__ui.haveFirst") is None
     # "Use what I already have first": the box and /fwcs have are one switch
     lua.execute("local b = ns.options.boxes[11]; b.GetChecked = function() return false end; b.scripts.OnClick(b)")
@@ -848,7 +849,7 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1818 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert "and 1877 that the addon came with" in lua.eval("printed[#printed - 1]")
     assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services; 0 recipe scroll(s) with the level each asks for.")
 
 
@@ -1511,6 +1512,161 @@ def test_a_trainer_that_says_how_far_it_teaches_comes_first_for_a_rank():
     assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 201))').upto == 225
 
 
+def _two_trainers(lua, rows, here=(0.50, 0.50)):
+    """The seed's places set to `rows` (tailoring trainers a few yards apart), the player at `here`."""
+    lua.execute("UnitFactionGroup = function() return 'Alliance' end; "
+                "FWCS_SEED.places = %s; px, py = %s, %s; ns.NotePlace('auction', '')" % (rows, here[0], here[1]))
+
+
+# Stormwind's two leatherworkers (the owner, 11 Nov 2026): one teaches ranks to 75 and recipes to 50,
+# the other ranks to 150 and recipes to 150, a few yards apart; a recipe learned at 70 is the second's
+OWNER_ROWS = ('{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Near", 75, 50 }, '
+              '{ 1453, 0.50, 0.51, "trainer", "tailoring", "Far", 150, 150 } }')
+
+
+def test_a_recipe_is_taught_by_a_trainer_that_teaches_so_far():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    def name(*a):
+        found = lua.eval("(ns.NearestPlace(%s))" % ", ".join(a))
+        return found.name if found else None
+    _two_trainers(lua, OWNER_ROWS)
+    # the owner's case: a rank at 70 fits both (the lower band comes first), a recipe learned at 70 is the far one's
+    assert name('"trainer", "tailoring", nil, 70') == "Near"                            # the rank: as before
+    assert name('"trainer", "tailoring", nil, 70, 70') == "Far"                         # the recipe: not the one that teaches to 50
+    assert name('"trainer", "tailoring", nil, 70, 51') == "Far" and name('"trainer", "tailoring", nil, 70, 50') == "Near"
+    assert name('"trainer", "tailoring", nil, nil, 70') == "Far"                        # no rank asked (the third path's call)
+    # within the near one's reach the nearer wins, whichever band it is: the far one is nearer from there
+    lua.execute("px, py = 0.50, 0.55")
+    assert name('"trainer", "tailoring", nil, 40, 40') == "Far" and name('"trainer", "tailoring", nil, 40') == "Near"
+    lua.execute("px, py = 0.50, 0.50")
+    assert name('"trainer", "tailoring", nil, 40, 40') == "Near"
+    # no recipe level known: today's choice, the lower band
+    assert name('"trainer", "tailoring", nil, 70, nil') == "Near"
+    # a seed older than the reach (no eighth value): today's choice for every recipe
+    _two_trainers(lua, '{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Near", 75 }, { 1453, 0.50, 0.51, "trainer", "tailoring", "Far", 150 } }')
+    assert name('"trainer", "tailoring", nil, 70, 70') == "Near" and lua.eval('FWCS_SEED.places[1][8]') is None
+    # a newer seed read by the code before it (rank only, the eighth value ignored): the rank choice is unchanged
+    assert name('"trainer", "tailoring", nil, 70') == "Near"
+    # one trainer without a reach beside one that has: the one with a reach too low is the last resort
+    _two_trainers(lua, '{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Known low", 75, 50 }, { 1453, 0.50, 0.60, "trainer", "tailoring", "Unknown", 150 } }')
+    assert name('"trainer", "tailoring", nil, 70, 70') == "Unknown"
+    # all of them too low: still one to go to, the nearest
+    _two_trainers(lua, '{ { 1453, 0.50, 0.60, "trainer", "tailoring", "Low far", 75, 50 }, { 1453, 0.50, 0.51, "trainer", "tailoring", "Low near", 75, 40 } }')
+    assert name('"trainer", "tailoring", nil, 70, 70') == "Low near"
+
+
+def test_a_trainer_seen_teaching_the_recipe_is_the_one_asked_for():
+    lua = _game()
+    # the shipped seed's trainer rows are safe for an older reader, which looks at the seventh value (a number, else a vendor's
+    # items or a quest giver's faction) and at no eighth before 1.8.0: rank reach, reach and spell ids sit where it expects or past it
+    assert lua.eval('''(function()
+      local n, spelled = 0, 0
+      for _, r in ipairs(FWCS_SEED.places) do
+        if r[4] == "trainer" then
+          if type(r[7]) ~= "number" and r[7] ~= nil then return -1 end
+          if type(r[8]) ~= "number" and r[8] ~= nil then return -2 end
+          if r[9] ~= nil then
+            if type(r[9]) ~= "table" then return -3 end
+            for _, id in ipairs(r[9]) do if type(id) ~= "number" then return -4 end end
+            spelled = spelled + 1
+          end
+          n = n + 1
+        end
+      end
+      return spelled > 0 and n or 0
+    end)()''') > 100
+    lua.execute(PLACES_GAME)
+
+    def name(*a):
+        found = lua.eval("(ns.NearestPlace(%s))" % ", ".join(a))
+        return found.name if found else None
+    rows = ('{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Near", 150, 150, { 11, 12 } }, '
+            '{ 1453, 0.50, 0.60, "trainer", "tailoring", "Far", 150, 150, { 12, 13 } }, '
+            '{ 1453, 0.50, 0.52, "trainer", "tailoring", "Unlisted", 150, 150 } }')
+    _two_trainers(lua, rows)
+    assert name('"trainer", "tailoring", nil, 70, 70, 13') == "Far"          # only the far one is seen teaching 13
+    assert name('"trainer", "tailoring", nil, 70, 70, 12') == "Near"         # both teach 12: the nearer
+    assert name('"trainer", "tailoring", nil, 70, 70, 99') == "Near"         # nobody known to: the reach, then the nearer (Rule A)
+    assert name('"trainer", "tailoring", nil, 70, 70') == "Near" and name('"trainer", "tailoring", nil, 70, 70, nil') == "Near"
+    # a teacher is asked whatever its rank band (ranks to 75, the recipe at 140 beyond its rank reach)
+    _two_trainers(lua, '{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Rank 75", 75, 150, { 5 } }, { 1453, 0.50, 0.51, "trainer", "tailoring", "Other", 150, 150 } }')
+    assert name('"trainer", "tailoring", nil, 120, 120, 5') == "Rank 75"
+    assert name('"trainer", "tailoring", nil, 120, 120') == "Other"          # without the spell: the band that fits
+    # the seed's row read by the code with no spells: the same rows without the ninth value
+    _two_trainers(lua, '{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Rank 75", 75, 150 }, { 1453, 0.50, 0.51, "trainer", "tailoring", "Other", 150, 150 } }')
+    assert name('"trainer", "tailoring", nil, 120, 120, 5') == "Other"
+
+
+def test_the_trainers_window_gives_the_players_own_note_a_reach():
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute('GetTrainerServiceSkillReq = function(i) return skillreq[i], levels[i] end')
+    # a rank training among the services is no recipe: its skill is not the reach
+    lua.execute('levels = { 40, 125, 240 }; services = { "Brown Linen Vest", "White Linen Shirt", "Expert Tailoring" }; '
+                'skillreq = { "Tailoring", "Tailoring", "Tailoring" }; px, py = 0.5, 0.5; Fire("TRAINER_SHOW")')
+    p = lua.eval('(ns.NearestPlace("trainer", "tailoring"))')
+    assert p.reach == 125 and p.upto == 225
+    # a visit with the list filtered shows fewer recipes: the reach is the union, it does not fall
+    lua.execute('levels = { 40, 240 }; services = { "Brown Linen Vest", "Expert Tailoring" }; skillreq = { "Tailoring", "Tailoring" }; Fire("TRAINER_SHOW")')
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring"))').reach == 125
+    # and a note with that reach is passed over for a recipe above it, as the seed's is
+    lua.execute("UnitFactionGroup = function() return 'Alliance' end; "
+                "FWCS_SEED.places = { { 1453, 0.50, 0.90, 'trainer', 'tailoring', 'Seeded', 150, 150 } }; ns.NotePlace('auction', '')")
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 100, 100))').name == "Thrallson"
+    assert lua.eval('(ns.NearestPlace("trainer", "tailoring", nil, 100, 130))').name == "Seeded"
+
+
+def test_the_learn_verdict_points_at_a_trainer_that_teaches_the_recipe():
+    """The owner's case through the verdict (11 Nov 2026): the arrow for "Learn ... first" goes to the
+    nearest trainer that may teach the recipe, not the lower band whose recipes stop short of it."""
+    lua = _game()
+    lua.execute(PLACES_GAME)
+    lua.execute('''
+      crafted, learned, reqs = {}, { [2963] = true, [2393] = true, [2385] = false }, {}
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function(id) return reqs[id] or {} end,
+        CraftRecipe = function(id, n) table.insert(crafted, { id, n }) end,
+        StopRecipeRepeat = function() end,
+      }
+      selected = 2393
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button"),
+                                            SchematicForm = { GetRecipeInfo = function() return { recipeID = selected } end } } }
+      skill = 51
+      bags[0] = { { 2996, 36 }, { 2320, 12 } }
+      map = 1411                           -- Orgrimmar side: the character is the stand-in game's Horde
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    step = lua.eval('ForeverWowCraftMake.verdict.text')
+    assert step == "Learn Brown Linen Vest first"
+    lua.execute('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].at = { 50, 55, 65, 75 }')      # the vests are learned at 50 (a step of the route says so)
+    learn = lua.eval('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].at[1]')
+    frm = lua.eval('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].from')
+
+    def points_at(rows):
+        lua.execute("FWCS_SEED.places = %s; px, py = 0.50, 0.50; ns.NotePlace('auction', ''); Fire('BAG_UPDATE_DELAYED')" % rows)
+        return lua.eval("ForeverWowCraftMake.verdict.tip")[len(lua.eval("ForeverWowCraftMake.verdict.tip"))].split(": ")[-1].split(",")[0]
+    # the near one's recipes stop below the one to learn, the far one's reach it, ranks to 75 and 150 both fit the step
+    assert frm <= 75
+    short, enough = learn - 1, learn
+    near_first = '{ { 1411, 0.50, 0.51, "trainer", "tailoring", "Near", 75, %d }, { 1411, 0.50, 0.55, "trainer", "tailoring", "Far", 150, %d } }'
+    assert points_at(near_first % (short, enough)) == "Far"
+    assert points_at(near_first % (enough, enough)) == "Near"                       # within its reach: the nearer
+    assert points_at('{ { 1411, 0.50, 0.51, "trainer", "tailoring", "Near", 75 }, { 1411, 0.50, 0.55, "trainer", "tailoring", "Far", 150 } }') == "Near"   # an older seed: as before
+    # both reach the level, only the farther is seen teaching this very recipe (the seed's ninth value, spell ids): it is the one
+    spell = lua.eval('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].spell')
+    both = '{ { 1411, 0.50, 0.51, "trainer", "tailoring", "Near", 75, 150, { 111 } }, { 1411, 0.50, 0.55, "trainer", "tailoring", "Far", 150, 150, { %d, 222 } } }'
+    assert points_at(both % spell) == "Far"
+    assert points_at(both % 333) == "Near"                                          # none known to teach it: the reach, then the nearer
+    # a trainer that teaches it with no rank reach or recipe reach to speak of still wins (nil reach, unsaid rank)
+    assert points_at('{ { 1411, 0.50, 0.51, "trainer", "tailoring", "Near", 75, 150 }, { 1411, 0.50, 0.55, "trainer", "tailoring", "Far", nil, nil, { %d } } }' % spell) == "Far"
+    # the step has no spell id: Rule A as before
+    lua.execute('FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].spell = nil')
+    assert points_at(both % spell) == "Near"
+
+
 SPECIAL = 249713
 
 
@@ -1786,6 +1942,8 @@ def test_a_snapshot_already_answered_is_read_on_after_the_house_closes():
     assert lua.eval("ForeverWowCraftScannerSave.attributes.macrotext") == "/reload" and lua.eval("ForeverWowCraftScannerSave.attributes.type") == "macro"
     assert said("the snapshot was read after the auction house closed: that works")
     assert said("snapshot finished") and not said("aborted")
+    # the line says what was seen (600 auctions, one queued item priced), not the list's size
+    assert said("snapshot finished") and said("600 auctions read, 1 of ") and said(" route items priced.") and not said("items recorded")
     # the list gone with the window (the client cleared it): the reading stops and says so, nothing recorded
     lua.execute('''
       Fire("AUCTION_HOUSE_SHOW")
@@ -2421,6 +2579,266 @@ def test_what_the_character_has_chooses_among_the_stretchs_recipes():
     assert route(2) == "Linen Belt" and lua.eval("ns.haveWalks") == walks             # the last answer stands in the fight
     lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
     assert route(2) == "White Linen Shirt" and lua.eval("ns.haveWalks") == walks + 1
+
+
+BOUGHT_SCROLL_GAME = """
+      learned, reqs = { [2963] = true, [2393] = true, [2385] = false }, {}
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function(id) return reqs[id] or {} end,
+        CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      local doc = FWCS_PLANS["stonespine--horde"]
+      doc.plans["tailoring-trainer"].steps[3].learn = { 6000, 500 }
+      doc.plans["tailoring-trainer"].buy[6000] = { 500, "ah" }
+      doc.items[6000] = "Pattern: Brown Linen Vest"
+      skill = 51
+      bags[0] = { { 2996, 36 }, { 2320, 6 } }          -- 6 of the 12 thread: the other 6 are to buy
+      Fire("TRADE_SKILL_SHOW")
+"""
+
+
+SEED_MAILBOX = (1411, 0.1298, 0.6389)           # the first of the seed's mailboxes (Seed.lua)
+
+
+def _bought_scroll(mailbox=True):
+    """The vests' step, its recipe a scroll the route buys at the house; a mailbox met 50 yd south."""
+    lua = _game()
+    lua.execute(PLACES_GAME + BOUGHT_SCROLL_GAME)
+    if mailbox:
+        lua.execute('px, py = 0.50, 0.55; Fire("MAIL_SHOW"); Fire("MAIL_CLOSED"); px, py = 0.50, 0.50')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    text = lambda: strip(lua.eval("ForeverWowCraftMake.verdict.text"))  # noqa: E731
+    tip = lambda: [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]  # noqa: E731
+    return lua, text, tip
+
+
+def _inbox(lua, items):
+    lua.execute("mail[1] = %s; Fire('MAIL_SHOW'); Fire('MAIL_INBOX_UPDATE'); RunTimers(); Fire('MAIL_CLOSED'); Fire('TRADE_SKILL_LIST_UPDATE')"
+                % ("{ " + ", ".join("{ %d, %d }" % i for i in items) + " }" if items else "nil"))
+
+
+def test_a_recipe_bought_and_in_the_mail_sends_the_arrow_to_the_mailbox():
+    lua, text, tip = _bought_scroll()
+    shopping = lambda: [e for e in lua.eval("ns.craft.Shopping()").values() if lupa.lua_type(e) == "table"]  # noqa: E731
+    assert text() == "Buy the recipe for Brown Linen Vest first" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "auction"
+    assert any(e["recipe"] for e in shopping())
+    # bought, noted as mailed: the mailbox (the nearest known), and the recipe is not offered again
+    lua.execute("ns.inv.NoteMailed(6000, 1); Fire('TRADE_SKILL_LIST_UPDATE')")
+    assert text() == "Collect Pattern: Brown Linen Vest from the mailbox" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "mailbox"
+    assert lua.eval("ForeverWowCraftMake.verdict.note") == "Pattern: Brown Linen Vest: mailbox" and lua.eval("ForeverWowCraftMake.verdict.learn") == 2385
+    assert "Then learn the recipe from it." in tip() and "The arrow points at the nearest: Mailbox, 50 yd." in tip()
+    assert "1 more item to buy after the mailbox." in tip()                       # the thread
+    assert not any(e["recipe"] for e in shopping())
+    # the scroll and the thread both in the mail: one verdict naming both
+    lua.execute("ns.inv.NoteMailed(2320, 6); Fire('TRADE_SKILL_LIST_UPDATE')")
+    assert text() == "Collect from the mailbox: 2 items"
+    assert lua.eval("ForeverWowCraftMake.verdict.note") == "Pattern: Brown Linen Vest: mailbox, 6 Coarse Thread: mailbox"
+    assert "  Pattern: Brown Linen Vest" in tip() and "  6 Coarse Thread" in tip() and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "mailbox"
+    # only the thread in the mail: the recipe is still to buy first
+    lua.execute("ns.inv.Char().mailed = { [2320] = 6 }; Fire('TRADE_SKILL_LIST_UPDATE')")
+    assert text() == "Buy the recipe for Brown Linen Vest first"
+    # the inbox seen without the scroll: the note is cleared and the verdict is the seller's again
+    lua.execute("ns.inv.Char().mailed = nil; ns.inv.NoteMailed(6000, 1); Fire('TRADE_SKILL_LIST_UPDATE')")
+    assert text() == "Collect Pattern: Brown Linen Vest from the mailbox"
+    _inbox(lua, [])
+    assert lua.eval("ns.inv.Char().mailed") is None and text() == "Buy the recipe for Brown Linen Vest first"
+    # seen in the inbox: the same words; taken into the bags: the existing verdict (the bags' count decides)
+    _inbox(lua, [(6000, 1)])
+    assert text() == "Collect Pattern: Brown Linen Vest from the mailbox"
+    lua.execute("bags[0][3] = { 6000, 1 }")
+    _inbox(lua, [])
+    assert text() == "Learn Brown Linen Vest: use Pattern: Brown Linen Vest in your bags" and not any(e["recipe"] for e in shopping())
+
+
+def test_a_bought_recipe_with_no_mailbox_known_still_says_to_collect_it():
+    lua, text, tip = _bought_scroll(mailbox=False)
+    lua.execute("ns.inv.NoteMailed(6000, 1); Fire('TRADE_SKILL_LIST_UPDATE')")
+    assert text() == "Collect Pattern: Brown Linen Vest from the mailbox" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "mailbox"
+    assert tip()[-1] == "No mailbox seen yet: open a mailbox, and the arrow points there from then on."
+    assert lua.eval("ns.NearestPlace('mailbox')") is None
+    # the mailboxes the addon comes with are known too: none on this map (the seed has none in Stormwind), so the
+    # nearest through the world, said as another place
+    lua.execute("FWCS_SEED.places = seedplaces; Fire('TRADE_SKILL_LIST_UPDATE')")
+    p, d, here = lua.eval("ns.NearestPlace('mailbox')")
+    assert p.kind == "mailbox" and here is False
+    assert tip()[-1].startswith("The nearest seen is in ") and "Mailbox" in tip()[-1]
+    # and on a map that has one, the arrow points at it
+    lua.execute("map = %d; px, py = %f, %f; Fire('TRADE_SKILL_LIST_UPDATE')" % (SEED_MAILBOX[0], SEED_MAILBOX[1], SEED_MAILBOX[2]))
+    assert tip()[-1].startswith("The arrow points at the nearest: Mailbox")
+
+
+def test_a_purchase_by_hand_at_the_house_is_noticed_once():
+    saved = """
+      auctions = { [77] = { itemKey = { itemID = 6000 }, buyoutAmount = 500, bidAmount = 100, quantity = 1 } }
+      C_AuctionHouse.GetAuctionInfoByID = function(id) return auctions[id] end
+      C_AuctionHouse.PlaceBid = function() end
+      C_AuctionHouse.StartCommoditiesPurchase = function() end
+      C_AuctionHouse.ConfirmCommoditiesPurchase = function() end
+    """
+    lua = _game(saved=saved)
+    mailed = lambda item: lua.eval(f"ns.inv.InMail({item})")  # noqa: E731
+    # a commodity, confirmed by hand: counted when the house says it went through, once
+    lua.execute("C_AuctionHouse.StartCommoditiesPurchase(2589, 20); C_AuctionHouse.ConfirmCommoditiesPurchase(2589, 20)")
+    assert mailed(2589) == 0
+    lua.execute('Fire("COMMODITY_PURCHASE_SUCCEEDED"); Fire("COMMODITY_PURCHASE_SUCCEEDED")')
+    assert mailed(2589) == 20
+    # a failed one, and one the house closed on: nothing
+    lua.execute('C_AuctionHouse.ConfirmCommoditiesPurchase(2320, 5); Fire("COMMODITY_PURCHASE_FAILED"); Fire("COMMODITY_PURCHASE_SUCCEEDED")')
+    lua.execute('C_AuctionHouse.ConfirmCommoditiesPurchase(2320, 5); Fire("AUCTION_HOUSE_CLOSED"); Fire("COMMODITY_PURCHASE_SUCCEEDED")')
+    assert mailed(2320) == 0
+    # an item auction: a plain bid is not a purchase; the buyout is, counted once at the completed event
+    lua.execute('C_AuctionHouse.PlaceBid(77, 200); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    assert mailed(6000) == 0
+    lua.execute("C_AuctionHouse.PlaceBid(77, 500)")
+    assert mailed(6000) == 0
+    lua.execute('Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    assert mailed(6000) == 1
+    # a buyout the house closed on, or an auction the client cannot name: nothing
+    lua.execute('C_AuctionHouse.PlaceBid(77, 500); Fire("AUCTION_HOUSE_CLOSED"); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77); '
+                'C_AuctionHouse.PlaceBid(78, 500); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 78)')
+    assert mailed(6000) == 1
+    # a client without GetAuctionInfoByID: the addon loads and an item buyout is not noticed
+    lua = _game(saved="C_AuctionHouse.PlaceBid = function() end")
+    lua.execute('C_AuctionHouse.PlaceBid(77, 500); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    assert lua.eval("ns.inv.InMail(6000)") == 0
+
+
+def test_the_buy_button_and_the_hooks_do_not_count_a_purchase_twice():
+    saved = """
+      C_AuctionHouse.MakeItemKey = function(item) return { itemID = item } end
+      C_AuctionHouse.GetItemKeyInfo = function(key) return { isCommodity = true } end
+      C_AuctionHouse.IsThrottledMessageSystemReady = function() return true end
+      C_AuctionHouse.SendSearchQuery = function(key) end
+      C_AuctionHouse.GetNumCommoditySearchResults = function(item) return item == 2589 and 3 or 0 end
+      C_AuctionHouse.GetCommoditySearchResultInfo = function(item, i) return { quantity = 20 } end
+      C_AuctionHouse.StartCommoditiesPurchase = function() end
+      C_AuctionHouse.ConfirmCommoditiesPurchase = function() end
+      C_AuctionHouse.PlaceBid = function() end
+    """
+    lua = _game(saved=saved)
+    lua.execute(PLACES_GAME)
+    lua.execute('''
+      C_Item.GetItemCount = GetItemCount; GetItemCount = nil
+      AuctionHouseFrame = CreateFrame("Frame")
+      skill = 44
+      bags[0] = { { 2589, 4 } }
+      Fire("AUCTION_HOUSE_SHOW")
+      Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 2589)
+    ''')
+    click = lambda: lua.execute("ForeverWowCraftShop.rows[1].buy.scripts.OnClick(ForeverWowCraftShop.rows[1].buy)")  # noqa: E731
+    click()
+    lua.execute('Fire("COMMODITY_PRICE_UPDATED", 35, 350)')
+    click()
+    lua.execute('Fire("COMMODITY_PURCHASE_SUCCEEDED")')
+    assert lua.eval("ns.inv.InMail(2589)") == 10                 # the 10 missing, once: not 20
+    # by hand afterwards: counted as well, on top
+    lua.execute('C_AuctionHouse.ConfirmCommoditiesPurchase(2589, 3); Fire("COMMODITY_PURCHASE_SUCCEEDED")')
+    assert lua.eval("ns.inv.InMail(2589)") == 13
+
+
+def test_a_purchase_by_hand_is_noticed_without_get_auction_info_by_id():
+    """The item of an auction id from the item last searched, its results read for the id and the buyout."""
+    saved = """
+      results = { [6000] = { { auctionID = 77, buyoutAmount = 500, quantity = 1 }, { auctionID = 78, buyoutAmount = 0, quantity = 1 } } }
+      C_AuctionHouse.GetNumItemSearchResults = function(key) return #(results[key.itemID] or {}) end
+      C_AuctionHouse.GetItemSearchResultInfo = function(key, i) return results[key.itemID][i] end
+      C_AuctionHouse.PlaceBid = function() end
+    """
+    lua = _game(saved=saved)
+    mailed = lambda: lua.eval("ns.inv.InMail(6000)")  # noqa: E731
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("debug"); Fire("AUCTION_HOUSE_SHOW")')
+    # the item page opened (the client's search), a plain bid and a bid on an auction with no buyout: nothing
+    lua.execute("C_AuctionHouse.SendSearchQuery({ itemID = 6000 }, {}, false)")
+    lua.execute('C_AuctionHouse.PlaceBid(77, 200); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    lua.execute('C_AuctionHouse.PlaceBid(78, 500); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 78)')
+    assert mailed() == 0
+    lua.execute("C_AuctionHouse.PlaceBid(77, 500)")
+    lua.execute('Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    assert mailed() == 1
+    assert "a purchase by hand noticed (results): 1 x item 6000" in lua.eval("printed[#printed]")
+    # the item key learned from the search results event instead of the query hook; an auction not in the results: nothing
+    lua.execute('results[6001] = { { auctionID = 90, buyoutAmount = 9, quantity = 1 } }; Fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = 6001 })')
+    lua.execute('C_AuctionHouse.PlaceBid(77, 500); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77)')
+    assert mailed() == 1
+    lua.execute('C_AuctionHouse.PlaceBid(90, 9); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 90)')
+    assert lua.eval("ns.inv.InMail(6001)") == 1
+
+
+def test_the_systems_line_for_a_won_auction_notes_a_purchase_once():
+    """Neither the info call nor the item's results known: the game's own line, in any language."""
+    saved = 'ERR_AUCTION_WON_S = "Ihr habt eine Auktion gewonnen: %s"; C_AuctionHouse.PlaceBid = function() end'
+    lua = _game(saved=saved)
+    lua.execute('FWCS_PLANS["stonespine--horde"].items[6000] = "Pattern: Brown Linen Vest"; ns.inv.Retrack()')
+    mailed = lambda item=6000: lua.eval(f"ns.inv.InMail({item})")  # noqa: E731
+    link = "|cff0070dd|Hitem:6000::::::::60:::::|h[Pattern: Brown Linen Vest]|h|r"
+    line = lambda text: lua.execute(f'Fire("CHAT_MSG_SYSTEM", "{text}")')  # noqa: E731
+    # the house not yet opened: no chat listened to
+    line("Ihr habt eine Auktion gewonnen: " + link)
+    assert mailed() == 0
+    lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("debug"); Fire("AUCTION_HOUSE_SHOW")')
+    line("Ihr habt eine Auktion gewonnen: |cffffffff|Hitem:12345::::::::60:::::|h[Something Else]|h|r")      # an item the route does not track
+    line("You won an auction for " + link)                                                                      # another language's line
+    line("Ein anderer Satz " + link)
+    assert mailed() == 0
+    line("Ihr habt eine Auktion gewonnen: " + link)
+    assert mailed() == 1 and "a purchase by hand noticed (system line): 1 x item 6000" in lua.eval("printed[#printed]")
+    line("Ihr habt eine Auktion gewonnen: " + link)                                                              # the same line again, at once
+    assert mailed() == 1
+    # the hook's event after the line, or the Buy button's: not counted again
+    lua.execute('ns.inv.NoteMailed(6000, 1); ns.inv.NoteMailed(6000, 1)')
+    assert mailed() == 1
+    # the house closed: the chat is let go after a while
+    lua.execute('Fire("AUCTION_HOUSE_CLOSED"); RunTimers(); ns.inv.Char().mailed = nil')
+    line("Ihr habt eine Auktion gewonnen: " + link)
+    assert mailed() == 0
+    # the English line, from the client's own string, with its full stop
+    lua = _game(saved='ERR_AUCTION_WON_S = "You won an auction for %s."; C_AuctionHouse.PlaceBid = function() end')
+    lua.execute('FWCS_PLANS["stonespine--horde"].items[6000] = "Pattern: Brown Linen Vest"; ns.inv.Retrack(); Fire("AUCTION_HOUSE_SHOW")')
+    lua.execute(f'Fire("CHAT_MSG_SYSTEM", "You won an auction for {link}.")')
+    assert lua.eval("ns.inv.InMail(6000)") == 1
+
+
+def test_the_recipe_bought_by_hand_goes_from_the_mailbox_to_the_bags_to_learned():
+    saved = """
+      auctions = { [77] = { itemKey = { itemID = 6000 }, buyoutAmount = 500, quantity = 1 } }
+      C_AuctionHouse.GetAuctionInfoByID = function(id) return auctions[id] end
+      C_AuctionHouse.PlaceBid = function() end
+    """
+    lua = _game(saved=saved)
+    lua.execute(PLACES_GAME + BOUGHT_SCROLL_GAME)
+    lua.execute('px, py = 0.50, 0.55; Fire("MAIL_SHOW"); Fire("MAIL_CLOSED"); px, py = 0.50, 0.50')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s)  # noqa: E731
+    text = lambda: strip(lua.eval("ForeverWowCraftMake.verdict.text"))  # noqa: E731
+    tip = lambda: [strip(line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]  # noqa: E731
+    assert text() == "Buy the recipe for Brown Linen Vest first"
+    # bought by hand at the house (a buyout): the mailbox
+    lua.execute('Fire("AUCTION_HOUSE_SHOW"); C_AuctionHouse.PlaceBid(77, 500); Fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 77); Fire("AUCTION_HOUSE_CLOSED"); Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Collect Pattern: Brown Linen Vest from the mailbox" and lua.eval("ForeverWowCraftMake.verdict.place[1]") == "mailbox"
+    # collected: in the bags, the inbox seen empty: use it, no place
+    lua.execute("bags[0][3] = { 6000, 1 }")
+    _inbox(lua, [])
+    assert text() == "Learn Brown Linen Vest: use Pattern: Brown Linen Vest in your bags" and lua.eval("ForeverWowCraftMake.verdict.place") is None
+    assert "Pattern: Brown Linen Vest is in your bags: use it to learn the recipe." in tip() and lua.eval("ForeverWowCraftMake.mode") == "Learn"
+    assert lua.eval("ForeverWowCraftMake.verdict.learn") == 2385
+    # short of the level the scroll asks for: the level text, not "use it"
+    lua.execute('UnitLevel = function() return 30 end; FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].learn = { 6000, 500, 50 }; Fire("BAG_UPDATE_DELAYED")')
+    assert text() == "Needs level 50 for Brown Linen Vest"
+    lua.execute('UnitLevel = nil; FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"].steps[3].learn = { 6000, 500 }; Fire("BAG_UPDATE_DELAYED")')
+    assert text().startswith("Learn Brown Linen Vest: use")
+    # learned (the scroll used up): the step goes on to the making
+    lua.execute('learned[2385] = true; bags[0][3] = nil; Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert not text().startswith("Learn") and not text().startswith("Buy the recipe") and not text().startswith("Collect Pattern")
+
+
+def test_a_recipe_scroll_in_the_bank_is_taken_from_it():
+    lua, text, tip = _bought_scroll()
+    lua.execute('bank[6000] = 1; Fire("BANKFRAME_OPENED"); RunTimers(); Fire("BANKFRAME_CLOSED"); bank[6000] = nil; RunTimers(); Fire("TRADE_SKILL_LIST_UPDATE")')
+    assert text() == "Take Pattern: Brown Linen Vest from the bank" and lua.eval("ForeverWowCraftMake.verdict.place") is None
+    assert lua.eval("ForeverWowCraftMake.verdict.learn") == 2385 and "In your bank (as counted when it was last open):" in tip()
+    assert not any(e["recipe"] for e in lua.eval("ns.craft.Shopping()").values() if lupa.lua_type(e) == "table")
 
 
 if __name__ == "__main__":

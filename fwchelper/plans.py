@@ -60,6 +60,37 @@ quietly, when the helper is not installed or has not run for days). It takes fro
 route what the character has, in the game: nothing of what a character has is sent anywhere. Which houses are fetched is told from the characters the
 addon has seen (FWCS_DB.__chars) and the auction houses it has scanned.
 
+The fishing route (since 1.8.0). Cooking has one more route, "Fishing only", which levels with fish the
+player catches, a vendor's goods and a vendor's recipe scrolls and nothing from the auction house. It is the
+same for every house of a faction, so the site keeps one copy in each Alliance or Horde house's folder,
+`extra/cooking-fishing.ingame.json` (the house's entry in houses.json says `"fishing": true`), and it is NOT
+in ingame.json: a helper or an addon from before reads any buy source but "vendor" as the auction house.
+The helper fetches it once for a faction and writes it into Plans.lua as a second global,
+
+    FWCS_ROUTES = {["Alliance"] = <a plan as above, with the names of its items>, ...}
+
+which no earlier addon reads. The plan has "kind": "fishing", buy rows with the source "catch" (the fish; the
+price is a weight, not copper), "catch" {fish: [[zone, chance], ...]} (the Classic-era world's zones),
+"sold_by" {scroll: where}, "names" {item: name} and "notes" [[skill, text, kind], ...].
+
+What the window says when it is empty (since 1.8.0). Two more globals, written after everything above, so that
+the text before them is what it was, and which no earlier addon reads:
+
+    FWCS_SITE = { at = <time>, houses = { {"uspve", "Alliance"}, {"uspve", "Horde"}, ... } }
+
+the auction houses the site lists with routes for the addon (houses.json, `"ingame": true`) as the addon compares
+them (`spelt` of the house's "realm" field, so Inventory.lua's Ruled() finds its house in it) and the faction, and
+when the helper looked. With it the window tells a house the site has but this file lacks (reload) from one the site
+has no routes for. A file an earlier helper wrote has none: the next look adds it (`touch` does, with no fetch).
+
+    FWCS_PLANS_PROBLEM = { at = <time>, kind = "reach" | "update" | "unusable" }
+
+there only while the last look for routes failed: "reach" (the site could not be read), "update" (its routes need a
+newer helper), "unusable" (it served what could not be used). Nothing else of the error is written (no address, no
+text, no path). The next look that works (`write` or `touch`) removes it. With no kept Plans.lua yet, a failed first
+look writes a minimal one (the comment lines, the stamp, `FWCS_PLANS = {}` and the problem), and the next look
+fetches all the same.
+
 Times are unix seconds, money is copper.
 """
 from __future__ import annotations
@@ -78,15 +109,37 @@ from .scan import FACTIONS
 
 PLANS_FORMAT = "fwc-plans/1"
 PLANS_GLOBAL = "FWCS_PLANS"
+SITE_GLOBAL = "FWCS_SITE"         # the houses the site lists with routes for the addon (since 1.8.0)
+PROBLEM_GLOBAL = "FWCS_PLANS_PROBLEM"      # there only while the last look failed (since 1.8.0)
+ROUTES_GLOBAL = "FWCS_ROUTES"     # the routes that are one for a whole faction, beside FWCS_PLANS (since 1.8.0): {"Alliance": a plan, ...}
+FISHING_FILE = "extra/cooking-fishing.ingame.json"      # in a house's folder on the site; its entry in houses.json says "fishing": true
 CHARS = "__chars"                 # in the addon's saved variable: what each character has
 UNASKED_HOUSES = 8                # with no character seen yet, every house is fetched when there are at most this many
 
 
 class PlansError(Exception):
-    """The site could not be read, or what it has is not usable."""
+    """The site could not be read, or what it has is not usable. `kind` says which, for the addon's window
+    (FWCS_PLANS_PROBLEM): "reach" (not reachable, an HTTP error, too large, not JSON), "update" (the site's routes
+    need a newer helper), "unusable" (anything else)."""
+
+    def __init__(self, message: str, kind: str = "unusable"):
+        super().__init__(message)
+        self.kind = kind
 
 
 # ---- the document -----------------------------------------------------------------------------
+def _digits(key) -> bool:
+    """Whether a key is an id: one to ten ASCII digits. "²" passes str.isdigit and int() refuses it, and so does a
+    number of thousands of digits."""
+    s = str(key)
+    return 0 < len(s) <= 10 and s.isascii() and s.isdigit()
+
+
+def _whole(x) -> int:
+    """A time from a document: the number when it is one, else 0 (a string or a list there must not stop the look)."""
+    return int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else 0
+
+
 def _pairs(rows, what: str) -> str | None:
     if not isinstance(rows, list) or any(not (isinstance(r, list) and len(r) == 2 and isinstance(r[0], int)
                                               and isinstance(r[1], int) and r[1] > 0) for r in rows):
@@ -94,7 +147,7 @@ def _pairs(rows, what: str) -> str | None:
     return None
 
 
-def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of a document anyone can send, read top to bottom
+def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of the site's document, which goes into the game as Lua, read top to bottom
     """Why this is not a fwc-plans/1 document, or None when it is one."""
     if not isinstance(doc, dict) or doc.get("format") != PLANS_FORMAT:
         return f"not a {PLANS_FORMAT} document"
@@ -105,7 +158,7 @@ def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guar
     if not isinstance(doc.get("realms"), list) or any(not isinstance(r, str) for r in doc["realms"]):
         return "no realms"
     items = doc.get("items")
-    if not isinstance(items, dict) or any(not str(k).isdigit() or not isinstance(v, str) for k, v in items.items()):
+    if not isinstance(items, dict) or any(not _digits(k) or not isinstance(v, str) for k, v in items.items()):
         return "items is not {item id: name}"
     if not isinstance(doc.get("plans"), dict):
         return "no plans"
@@ -137,16 +190,40 @@ def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guar
             if not all(known(i) for i in used):
                 return f"{name} names an item that items does not"
         for item, how in (plan.get("made") or {}).items():
-            if not (str(item).isdigit() and isinstance(how, list) and len(how) in (2, 3) and isinstance(how[0], int) and how[0] > 0
+            if not (_digits(item) and isinstance(how, list) and len(how) in (2, 3) and isinstance(how[0], int) and how[0] > 0
                     and _pairs(how[1], "") is None and (len(how) == 2 or isinstance(how[2], int))):
                 return f"plan {key!r}: made[{item}] is not [units, [[item, units], ...], spell]"
         for item, row in (plan.get("buy") or {}).items():
-            if not (str(item).isdigit() and isinstance(row, list) and len(row) in (2, 3) and isinstance(row[0], (int, float))
+            if not (_digits(item) and isinstance(row, list) and len(row) in (2, 3) and isinstance(row[0], (int, float))
                     and (len(row) == 2 or isinstance(row[2], (int, float)))):
                 return f"plan {key!r}: buy[{item}] is not [copper, source]"
         for item, each in (plan.get("sell") or {}).items():
-            if not (str(item).isdigit() and isinstance(each, (int, float))):
+            if not (_digits(item) and isinstance(each, (int, float))):
                 return f"plan {key!r}: sell[{item}] is not copper"
+    return None
+
+
+def check_route(plan) -> str | None:
+    """Why this is not the fishing route's plan (extra/cooking-fishing.ingame.json), or None when it is: a plan as
+    check_plans reads it, kind "fishing", with the names of its items and what the addon reads besides."""
+    if not isinstance(plan, dict) or plan.get("kind") != "fishing":
+        return "not a fishing route"
+    names = plan.get("names")
+    if not isinstance(names, dict) or any(not _digits(k) or not isinstance(v, str) for k, v in names.items()):
+        return "names is not {item id: name}"
+    problem = check_plans({"format": PLANS_FORMAT, "house": "fishing", "realms": [], "items": names, "plans": {"cooking-fishing": plan}})
+    if problem:
+        return problem
+    catch, sold, notes = plan.get("catch"), plan.get("sold_by"), plan.get("notes")
+    if not isinstance(catch, dict) or any(not _digits(k) or not isinstance(v, list) or any(
+            not (isinstance(z, list) and len(z) == 2 and isinstance(z[0], str) and isinstance(z[1], (int, float))) for z in v)
+            for k, v in catch.items()):
+        return "catch is not {fish: [[zone, chance], ...]}"
+    if not isinstance(sold, dict) or any(not _digits(k) or not isinstance(v, str) for k, v in sold.items()):
+        return "sold_by is not {scroll: where}"
+    if not isinstance(notes, list) or any(not (isinstance(n, list) and len(n) in (2, 3) and isinstance(n[0], int) and isinstance(n[1], str)
+                                                         and (len(n) == 2 or isinstance(n[2], str))) for n in notes):
+        return "notes is not [[skill, text, kind], ...]"
     return None
 
 
@@ -258,7 +335,7 @@ def choose(houses: list[dict], want: set[tuple[str, str]], region: str | None = 
     `region` (scan.portal: "US" has US PvE, US PvP, ...), so that /fwc has routes at the very
     first login instead of an empty window and two reloads (players kept reporting the blank
     window, 9 Nov 2026); or all of them when there are few. More than UNASKED_HOUSES, none."""
-    listed = [h for h in houses if h.get("ingame")]          # a site from before it had routes for the addon says nothing
+    listed = [h for h in houses if h.get("ingame")]          # the houses with routes for the addon (`ingame` is absent on a site from before them)
     if want:
         return [h for h in listed if is_of(h, want)]
     if region:
@@ -294,17 +371,17 @@ def get(url: str) -> dict:
         with urllib.request.urlopen(req, timeout=settings.PIPE_TIMEOUT) as r:
             data = r.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as e:
-        raise PlansError(f"{url}: {e.code}") from e
+        raise PlansError(f"{url}: {e.code}", "reach") from e
     except OSError as e:
-        raise PlansError(f"{url} could not be reached ({e})") from e
+        raise PlansError(f"{url} could not be reached ({e})", "reach") from e
     try:
         if data[:2] == b"\x1f\x8b":
             data = gzip.GzipFile(fileobj=io.BytesIO(data)).read(MAX_BYTES + 1)      # unpacked only this far
         if len(data) > MAX_BYTES:
-            raise PlansError(f"{url} is too large ({len(data) // 1024} kB)")
+            raise PlansError(f"{url} is too large ({len(data) // 1024} kB)", "reach")
         return json.loads(data.decode("utf-8"), parse_constant=_no_constant)
-    except (OSError, ValueError) as e:
-        raise PlansError(f"{url} is not JSON") from e
+    except (OSError, ValueError, RecursionError) as e:          # RecursionError: JSON nested deeper than Python follows
+        raise PlansError(f"{url} is not JSON", "reach") from e
 
 
 # How often the watch looks, as the site last said (houses.json "helper", since 1.7.2), so that
@@ -344,7 +421,8 @@ def houses(site: str | None = None) -> list[dict]:
     INTERVALS.clear()
     INTERVALS.update(hints(doc))
     rules = doc.get("rules") if isinstance(doc.get("rules"), list) else []      # the name rules, on every house for by_rule
-    return [dict(h, rules=rules) for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])]
+    return [dict(h, rules=rules) for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])
+            and isinstance(h.get("faction", ""), str)]
 
 
 def version_tuple(s) -> tuple[int, ...]:
@@ -360,11 +438,36 @@ def fetch(house: dict, site: str | None = None) -> dict:
     needs = doc.get("needs_helper") if isinstance(doc, dict) else None
     if isinstance(needs, str) and version_tuple(needs) > version_tuple(__version__):
         raise PlansError(f"{house['key']}: the site's routes need helper {needs} or newer, and this is {__version__}: "
-                         "update the helper (the new zip, or git pull), then run this again")
+                         "update the helper (the new zip, or git pull), then run this again", "update")
     problem = check_plans(doc)
     if problem:
         raise PlansError(f"{house['key']}: what the site has is not usable: {problem}")
     return doc
+
+
+def fetch_route(house: dict, site: str | None = None) -> dict:
+    """The fishing route a house's folder holds (its houses.json entry says "fishing": true), as the addon takes it."""
+    plan = get(f"{site or site_url()}/data/{house['key']}/{FISHING_FILE}")
+    problem = check_route(plan)
+    if problem:
+        raise PlansError(f"{house['key']}: the fishing route is not usable: {problem}")
+    return plan
+
+
+def routes_for(chosen: list[dict], site: str | None = None, have: dict | None = None) -> dict:
+    """{faction: the fishing route} for the chosen houses that have one: fetched once a faction, from the first house of it
+    that lists one. A route that cannot be read is left out (the houses' routes are still written): `have`, the routes
+    the kept file holds, stands in for it."""
+    out = {}
+    for h in chosen:
+        faction = h.get("faction", "")
+        if h.get("fishing") is True and faction in FACTIONS and faction not in out:
+            try:
+                out[faction] = fetch_route(h, site)
+            except PlansError:
+                if faction in (have or {}):
+                    out[faction] = have[faction]
+    return out
 
 
 # ---- Plans.lua ------------------------------------------------------------------------------------
@@ -384,7 +487,7 @@ def lua(value, indent: int = 0) -> str:
             raise ValueError("a number that is not finite")
         return repr(round(value, 4)) if value != int(value) else str(int(value))
     if isinstance(value, str):
-        clean = "".join(ch for ch in value if ch >= " " or ch == "\n")                    # no control characters
+        clean = "".join(ch for ch in value if (ch >= " " or ch == "\n") and not "\ud800" <= ch <= "\udfff")     # no control characters, no lone surrogates
         return '"' + clean.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("|", "||") + '"'
     if isinstance(value, (list, tuple)):
         return "{" + ",".join(lua(v, indent) for v in value) + "}"
@@ -392,7 +495,7 @@ def lua(value, indent: int = 0) -> str:
         pad = " " * (indent + 1)
         rows = []
         for k, v in value.items():
-            key = f"[{int(k)}]" if isinstance(k, int) or str(k).isdigit() else f"[{lua(str(k))}]"
+            key = f"[{int(k)}]" if isinstance(k, int) or _digits(k) else f"[{lua(str(k))}]"
             rows.append(f"{pad}{key}={lua(v, indent + 1)},")
         return "{\n" + "\n".join(rows) + "\n" + " " * indent + "}" if rows else "{}"
     raise TypeError(f"no Lua for {type(value).__name__}")
@@ -405,17 +508,40 @@ def for_addon(doc: dict) -> dict:
     return out
 
 
-def plans_text(docs: list[dict], site: str, written: int | None = None) -> str:
+def site_list(listed: list[dict]) -> list[list[str]]:
+    """The auction houses the site lists with routes for the addon, as the addon compares them: [[spelt realm, faction], ...],
+    from houses.json (`ingame` true). A house of no faction is left out: no character is of it."""
+    found = {(spelt(str(h.get("realm") or "")), h["faction"]) for h in listed if h.get("ingame") and h.get("faction") in FACTIONS}
+    return [list(x) for x in sorted(found) if x[0]]
+
+
+def site_line(houses: list[list[str]], at: int | None = None) -> str:
+    """The FWCS_SITE line (one line: `touch` replaces it as a line)."""
+    return f"{SITE_GLOBAL} = {{ at = {int(at if at is not None else time.time())}, houses = {lua(houses)} }}"
+
+
+def problem_line(kind: str, at: int | None = None) -> str:
+    """The FWCS_PLANS_PROBLEM line: when, and which of "reach", "update", "unusable"; nothing else of the error."""
+    return f"{PROBLEM_GLOBAL} = {{ at = {int(at if at is not None else time.time())}, kind = {lua(kind)} }}"
+
+
+def plans_text(docs: list[dict], site: str, written: int | None = None, routes: dict | None = None,
+               site_houses: list[list[str]] | None = None) -> str:
     """Plans.lua for these documents: the routes, and when they were written (the addon tells
     from it whether the helper runs). Nothing else: until 1.5.6 a helper run from a checkout
     of the repository added FWCS_DEV = true, which showed the addon's scanner bar, and a copy
     of that file in front of a player showed it to them (6 Nov 2026). The bar is a switch in
-    the game now, nothing a file says."""
+    the game now, nothing a file says. `routes` ({faction: the fishing route}) is written as a second global
+    after the first, and `site_houses` (`site_list`) as FWCS_SITE after that; with neither the text is what it
+    was before 1.8.0, byte for byte, and with either everything up to the new global is that text."""
+    now = int(written if written is not None else time.time())
     return "\n".join([
         f"-- Written by `python fwch.py plans` from {site}; do not edit by hand.",
         "-- The routes of your characters' auction houses, for the /fwc window. See fwchelper/plans.py.",
-        f"{PLANS_GLOBAL}_WRITTEN = {int(written if written is not None else time.time())}",
-        f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs}), ""])
+        f"{PLANS_GLOBAL}_WRITTEN = {now}",
+        f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs}),
+        *([f"{ROUTES_GLOBAL} = " + lua(routes)] if routes else []),
+        *([site_line(site_houses, now)] if site_houses is not None else []), ""])
 
 
 def kept_file() -> Path:
@@ -428,38 +554,85 @@ def installed_file() -> Path:
     return scan.plans_addon_dir() / "Plans.lua"
 
 
+_held_memo: dict[str, tuple] = {}     # path -> (scan.file_version, what held gave): one entry a file
+
+
+def held(path: Path | None = None) -> tuple[dict[str, int], dict]:
+    """({house: when its routes were made}, {faction: the fishing route}) of a Plans.lua (the kept one by default).
+    A file is read again only once it has changed: every line of the app's log asks (the tooltip), and a read
+    of a large Plans.lua took half a second."""
+    path = path or kept_file()
+    version = scan.file_version(path)
+    memo = _held_memo.get(str(path))
+    if version is not None and memo and memo[0] == version:
+        return dict(memo[1][0]), dict(memo[1][1])
+    try:
+        data = luatable.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return {}, {}
+    plans, routes = data.get(PLANS_GLOBAL) or {}, data.get(ROUTES_GLOBAL) or {}
+    found = ({str(k): int(v.get("generated") or 0) for k, v in plans.items() if isinstance(v, dict)} if isinstance(plans, dict) else {},
+             {str(k): v for k, v in routes.items() if isinstance(v, dict)} if isinstance(routes, dict) else {})
+    if version is not None:
+        _held_memo[str(path)] = (version, found)
+    return dict(found[0]), dict(found[1])
+
+
 def stamps(path: Path | None = None) -> dict[str, int]:
     """{house: when its routes were made} of a Plans.lua (the kept one by default)."""
-    path = path or kept_file()
-    try:
-        held = luatable.parse(path.read_text(encoding="utf-8")).get(PLANS_GLOBAL) or {}
-    except (OSError, SyntaxError):
-        return {}
-    return {str(k): int(v.get("generated") or 0) for k, v in held.items() if isinstance(v, dict)} if isinstance(held, dict) else {}
+    return held(path)[0]
 
 
-def write(docs: list[dict], site: str) -> list[Path]:
+def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: list[list[str]] | None = None) -> list[Path]:
     """Write Plans.lua: the helper's own copy, and the installed addon's when it is installed."""
-    text = plans_text(docs, site)
+    text = plans_text(docs, site, routes=routes, site_houses=site_houses)
     targets = [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else [])
     for t in targets:
-        t.parent.mkdir(parents=True, exist_ok=True)
-        t.write_text(text, encoding="utf-8")
+        scan.write_whole(t, text)
     return targets
 
 
 _STAMP = re.compile(rf"^{PLANS_GLOBAL}_WRITTEN = \d+$", re.M)
+_SITE_LINE = re.compile(rf"^{SITE_GLOBAL} = .*\n?", re.M)
+_PROBLEM_LINE = re.compile(rf"^{PROBLEM_GLOBAL} = .*\n?", re.M)
 
 
-def touch() -> None:
+def _retouch(text: str, site_houses: list[list[str]] | None, kind: str | None) -> str:
+    """The text with the stamp at now, the problem line as `kind` says (None: none) and FWCS_SITE as `site_houses` says (None:
+    as it is, or none). Both one-line globals come last, the site's first; the routes are left as they are."""
+    now = int(time.time())
+    kept = _SITE_LINE.search(text)
+    body = _PROBLEM_LINE.sub("", _SITE_LINE.sub("", _STAMP.sub(f"{PLANS_GLOBAL}_WRITTEN = {now}", text, count=1)))
+    body = body if body.endswith("\n") else body + "\n"
+    tail = [site_line(site_houses, now)] if site_houses is not None else [kept.group(0).rstrip("\n")] if kept else []
+    return body + "".join(line + "\n" for line in tail + ([problem_line(kind, now)] if kind else []))
+
+
+def touch(site_houses: list[list[str]] | None = None) -> None:
     """Move the written-at stamp of the Plans.lua files to now, leaving the routes as they are:
-    the addon tells from it that the helper is running. A file without the stamp (from an
-    older helper) is left alone."""
+    the addon tells from it that the helper is running. A look that worked also clears the problem line, and
+    `site_houses` (`site_list`) sets FWCS_SITE, added when the file (an earlier helper's) has none. A file without
+    the stamp (from an older helper) is left alone."""
     for t in [kept_file()] + ([installed_file()] if installed_file().is_file() else []):
         try:
             text = t.read_text(encoding="utf-8")
             if _STAMP.search(text):
-                t.write_text(_STAMP.sub(f"{PLANS_GLOBAL}_WRITTEN = {int(time.time())}", text, count=1), encoding="utf-8")
+                scan.write_whole(t, _retouch(text, site_houses, None))
+        except OSError:
+            pass
+
+
+def note_problem(kind: str) -> None:
+    """Record that the last look for routes failed (`kind`, as PlansError has it): one line in the kept Plans.lua and the
+    installed one, the stamp moved (the helper ran), the routes as they are. With no Plans.lua yet, a minimal one."""
+    for t in [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else []):
+        try:
+            try:
+                text = t.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                text = plans_text([], site_url())
+            if _STAMP.search(text):                          # a file with no stamp is not one of ours to edit
+                scan.write_whole(t, _retouch(text, None, kind))
         except OSError:
             pass
 
@@ -467,23 +640,34 @@ def touch() -> None:
 def refresh(site: str | None = None, force: bool = False) -> tuple[list[dict], list[Path]]:
     """Fetch the routes of the characters' auction houses and write them into the addon, when
     the site has something newer than what was written (or `force`). Returns (the documents
-    now written, the files written): no files when nothing was new."""
-    site = site or site_url()
+    now written, the files written): no files when nothing was new. A look that fails with a
+    PlansError is recorded in the addon's files (`note_problem`) and raised."""
+    try:
+        return _refresh(site or site_url(), force)
+    except PlansError as e:
+        note_problem(e.kind)
+        raise
+
+
+def _refresh(site: str, force: bool) -> tuple[list[dict], list[Path]]:
     want = wanted()
-    chosen = choose(houses(site), want, None if want else scan.portal())
-    have = stamps()
-    current = {h["key"]: int(h.get("generated") or 0) for h in chosen}
+    listed = houses(site)
+    chosen = choose(listed, want, None if want else scan.portal())
+    have, kept_routes = held()
+    current = {h["key"]: _whole(h.get("generated")) for h in chosen}
     missing = installed_file().parent.is_dir() and not installed_file().exists()
-    if not force and not missing and current == have:
-        touch()                                         # the addon still sees that the helper runs
+    wants = {h.get("faction") for h in chosen if h.get("fishing") is True} & set(FACTIONS)      # a faction's fishing route the kept file lacks (written by an older helper)
+    seen = site_list(listed)
+    if not force and not missing and current == have and wants <= set(kept_routes):
+        touch(seen)                                     # the addon still sees that the helper runs, and which houses the site lists
         return [], []
     docs = [fetch(h, site) for h in chosen]
     for d, h in zip(docs, chosen):                      # as houses.json has it, so that "nothing new" is told from it alone
-        d["generated"] = int(h.get("generated") or d.get("generated") or 0)
+        d["generated"] = _whole(h.get("generated")) or _whole(d.get("generated"))
         mine = by_rule(h, want)                         # a realm of the house by its name: into the list the addon finds its house by
         if mine:
             d["realms"] = sorted({*(d.get("realms") or []), *mine})
-    return docs, write(docs, site)
+    return docs, write(docs, site, routes_for(chosen, site, kept_routes), seen)
 
 
 def age(doc: dict) -> str:

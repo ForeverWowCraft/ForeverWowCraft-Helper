@@ -173,11 +173,15 @@ class App:
                 step()
             except (SystemExit, pipemod.PipeError, plansmod.PlansError) as e:
                 print(f"{what} not fetched: {e}")
+            except Exception as e:  # noqa: BLE001 - a document nobody foresaw: said, and the watch tries again at its interval
+                cli.failed(what, e)
         try:
             me = p.me()
             print(f"This helper sends as {me['name']} ({me['trust']}).")
         except pipemod.PipeError as e:
             print(f"the pipe could not be reached: {e}")
+        except Exception as e:  # noqa: BLE001 - an answer nobody foresaw must not keep the watch from starting
+            cli.failed("the look at this helper's name", e)
         self.refresh()
         return p
 
@@ -191,7 +195,7 @@ class App:
                       else "The game is running: log out to the character screen and back in (or restart it), so that it finds the new addon.")
             self.looked_addon = time.time()
             return True
-        except SystemExit as e:
+        except (SystemExit, OSError) as e:             # OSError: a file the game holds, a folder not ours to write
             print(f"addon not installed: {e}")
             self.looked_addon = time.time()
             return False

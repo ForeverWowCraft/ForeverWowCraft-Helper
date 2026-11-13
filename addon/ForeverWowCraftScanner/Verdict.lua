@@ -12,16 +12,14 @@
 -- WHAT THIS FILE GATHERS: with the profession panel open, a crafting station (an anvil, a forge)
 -- the panel says the character stands at, as a place for the arrow (ns.NotePlace, Places.lua:
 -- kept here, not sent); and the item-data level of the recipe scroll the route buys
--- (ns.NoteRecipeLevel, ForeverWowCraftScanner.lua: sent with the vendors met, pooled into the
--- shared database the project means to publish); and the tools the client says the route's
+-- (ns.NoteRecipeLevel, ForeverWowCraftScanner.lua: sent with the vendors met, pooled with other
+-- players' to know the level each recipe is gated at); and the tools the client says the route's
 -- recipes need (an enchanter's rods) with what each tool's recipe takes (ns.LearnTools:
 -- FWCS_DB.__tools, kept on this computer for the shopping list, not sent). Nothing of the
 -- character. Everything the addon gathers: docs/scanner-addon.md, "What the addon gathers".
 
 local _, ns = ...
 local Char, House, Spelt = ns.inv.Char, ns.inv.House, ns.inv.Spelt
-
-local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
 
 -- ================================================================ the next thing to make
 -- The first step of the route with crafts left at `skill`, walked on its own with `have` =
@@ -286,13 +284,17 @@ local function ShoppingOf(plan, nxt, tolearn)
   for _, b in ipairs(nxt.buy) do
     local row = ns.BuyRow(plan, b[1])
     local have = ns.inv.Count(b[1]) or 0
-    local vendor = VendorSells(plan, b[1])
+    local catch = ns.Catches(plan, b[1])                 -- a fish of the fishing route: caught, not bought
+    local vendor = not catch and VendorSells(plan, b[1])
     -- price: what one costs where it is got; `cheaper`: the house's price when the route found it lower there
-    local price = row and ((vendor and type(row[3]) == "number") and row[3] or row[1]) or nil
+    local price = row and not catch and ((vendor and type(row[3]) == "number") and row[3] or row[1]) or nil
     local cheaper = (row and vendor and type(row[3]) == "number" and row[1] < row[3]) and row[1] or nil
-    table.insert(out, { item = b[1], units = b[2] + have, have = have, source = vendor and "vendor" or "ah", price = price, cheaper = cheaper })
+    table.insert(out, { item = b[1], units = b[2] + have, have = have, source = catch and "catch" or vendor and "vendor" or "ah", price = price, cheaper = cheaper })
   end
-  if tolearn and tolearn.spell == nxt.spell and (ns.inv.Count(tolearn.item) or 0) == 0 then
+  -- the recipe is not offered again while it waits in the mail (bought by hand or with the Buy button) or the bank
+  local banked = tolearn and (ns.inv.Char().items[tolearn.item] or {})[2] or 0
+  if tolearn and tolearn.spell == nxt.spell and (ns.inv.Count(tolearn.item) or 0) == 0 and banked == 0
+     and not (ns.inv.InMail and (ns.inv.InMail(tolearn.item) or 0) > 0) then
     table.insert(out, 1, { item = tolearn.item, units = 1, have = 0, source = VendorSells(plan, tolearn.item) and "vendor" or "ah", price = tolearn.cost, recipe = true })
   end
   return out
@@ -358,30 +360,44 @@ local RANK_EARLY = 25                      -- the next rank is taught from this 
 local function BuyVerdict(house, plan, nxt, step, tip, profession)
   local shopping = ShoppingOf(plan, nxt)
   shopping.title = ns.RecipeName(step) .. ", skill " .. nxt.from .. " to " .. nxt.to .. (nxt.capped and " (as far as the gold goes)" or "") .. ", needs"
-  local ah, vendor = {}, {}
-  for _, e in ipairs(shopping) do table.insert(e.source == "vendor" and vendor or ah, e) end
+  local ah, vendor, catch = {}, {}, {}
+  for _, e in ipairs(shopping) do table.insert(e.source == "catch" and catch or e.source == "vendor" and vendor or ah, e) end
   -- the vendor first: the sure trip (what it sells never runs out; the house may have sold out)
   local text
   if #vendor == 1 and #ah == 0 then text = string.format("Buy %d %s from a vendor", vendor[1].units - vendor[1].have, N(house, vendor[1].item))
   elseif #vendor > 0 and #ah == 0 then text = string.format("Buy from a vendor: %d items", #vendor)
   elseif #ah == 1 and #vendor == 0 then text = string.format("Buy %d %s at the auction house", ah[1].units - ah[1].have, N(house, ah[1].item))
-  elseif #vendor == 0 then text = string.format("Buy at the auction house: %d items", #ah)
-  else text = string.format("Buy from a vendor (%d) and the auction house (%d)", #vendor, #ah) end
+  elseif #vendor == 0 and #ah > 0 then text = string.format("Buy at the auction house: %d items", #ah)
+  elseif #ah > 0 then text = string.format("Buy from a vendor (%d) and the auction house (%d)", #vendor, #ah)
+  elseif #catch == 0 then text = "Buy at the auction house: 0 items" end
+  -- the fish of the fishing route are caught: "Catch 45 Raw Longjaw Mud Snapper", after what a vendor sells when there is some
+  if #catch > 0 then
+    local fish = #catch == 1 and string.format("%d %s", catch[1].units - catch[1].have, N(house, catch[1].item)) or string.format("%d kinds of fish", #catch)
+    text = text and (text .. ", and catch " .. fish) or ("Catch " .. fish)
+  end
   table.insert(tip, "Needs:")
   for _, e in ipairs(shopping) do
-    table.insert(tip, string.format("  %d %s (have %d)%s, %s", e.units - e.have, N(house, e.item), e.have,
-      e.price and (", about " .. ns.Money(e.price * (e.units - e.have))) or "",
-      e.source == "vendor" and ("from a vendor" .. (e.cheaper and string.format(" (the auction house had it for %s each)", ns.Money(e.cheaper)) or ""))
-        or "at the auction house"))
+    if e.source == "catch" then
+      local where = ns.CatchSpots(plan, e.item)
+      table.insert(tip, string.format("  %d %s (have %d): catch%s", e.units - e.have, N(house, e.item), e.have, where and (", " .. where) or ""))
+    else
+      table.insert(tip, string.format("  %d %s (have %d)%s, %s", e.units - e.have, N(house, e.item), e.have,
+        e.price and (", about " .. ns.Money(e.price * (e.units - e.have))) or "",
+        e.source == "vendor" and ("from a vendor" .. (e.cheaper and string.format(" (the auction house had it for %s each)", ns.Money(e.cheaper)) or ""))
+          or "at the auction house"))
+    end
   end
+  if #catch > 0 then table.insert(tip, ns.CATCH_NOTE) end
   table.insert(tip, "Click: the shopping list.")
-  -- the note under the arrow: each item and where it is got, the vendor's first (the user, 7 Nov 2026)
+  -- the note under the arrow: each item and where it is got, the vendor's first (the user, 7 Nov 2026); a fish: its zones
   local parts, ordered = {}, {}
   for _, e in ipairs(vendor) do table.insert(ordered, e) end
   for _, e in ipairs(ah) do table.insert(ordered, e) end
+  for _, e in ipairs(catch) do table.insert(ordered, e) end
   for i, e in ipairs(ordered) do
     if i > 3 then table.insert(parts, string.format("+%d more", #ordered - 3)); break end
-    table.insert(parts, string.format("%d %s: %s", e.units - e.have, N(house, e.item), e.source == "vendor" and "vendor" or "AH"))
+    table.insert(parts, string.format("%d %s: %s", e.units - e.have, N(house, e.item),
+      e.source == "catch" and (ns.CatchSpots(plan, e.item, true) or "catch") or e.source == "vendor" and "vendor" or "AH"))
   end
   -- the arrow: the nearest of the sources, a vendor seen or seeded selling a vendor item or the
   -- auctioneer; a vendor item nobody was seen selling leaves the house to point at
@@ -393,8 +409,13 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
   end
   for _, e in ipairs(vendor) do consider(Seller(plan, e.item)) end
   if #ah > 0 then consider({ "auction", nil, nil, "Auctioneer" }) end
-  local place = best or (#vendor > 0 and Seller(plan, vendor[1].item)) or Seller(plan, ah[1].item)
-  return { text = text, note = table.concat(parts, ", "), tip = tip, shopping = shopping, place = place, profession = profession }
+  local place = best or (#vendor > 0 and Seller(plan, vendor[1].item)) or (#ah > 0 and Seller(plan, ah[1].item)) or nil
+  local v = { text = text, note = table.concat(parts, ", "), tip = tip, shopping = shopping, place = place, profession = profession }
+  if not place then       -- only fish to catch: nothing to walk to, the arrow says the words and the zones (it knows no map for a fishing zone)
+    v.show, v.catch = true, true
+    table.insert(tip, #tip, "No arrow for fishing: the zones above are the Classic-era world's names, and the addon has no spot to point at. Fish where you can.")
+  end
+  return v
 end
 
 -- What the step needs that the bank holds (with "Use what I already have first"): taken from
@@ -426,39 +447,71 @@ end
 
 -- What the step needs that waits in the mail (seen in the inbox, or bought at the auction
 -- house this visit, which the game delivers by mail): the mailbox first, the nearest one,
--- before anything is bought again (the user, 7 Nov 2026). nil when nothing waits.
-local function MailVerdict(house, plan, nxt, step, tip, profession)
+-- before anything is bought again (the user, 7 Nov 2026). `scroll`: the recipe the route buys
+-- for this step, named with the rest when it waits there too (a bought recipe is mailed like
+-- anything else). nil when nothing waits.
+local function MailVerdict(house, plan, nxt, step, tip, profession, scroll)
   if not ns.inv.InMail then return nil end
   local waiting, rest = {}, 0
+  if scroll and (ns.inv.Count(scroll) or 0) == 0 and (ns.inv.InMail(scroll) or 0) > 0 then
+    table.insert(waiting, { item = scroll, units = 1, recipe = true })
+  end
   for _, b in ipairs(nxt.buy) do
     local n = ns.inv.InMail(b[1]) or 0
     if n > 0 then table.insert(waiting, { item = b[1], units = math.min(n, b[2]) }) else rest = rest + 1 end
   end
   if #waiting == 0 then return nil end
+  local function Name(w) return w.recipe and N(house, w.item) or string.format("%d %s", w.units, N(house, w.item)) end
   local parts = {}
   for i, w in ipairs(waiting) do
     if i > 3 then table.insert(parts, string.format("+%d more", #waiting - 3)); break end
-    table.insert(parts, string.format("%d %s: mailbox", w.units, N(house, w.item)))
+    table.insert(parts, Name(w) .. ": mailbox")
   end
   table.insert(tip, "In the mail (seen in the inbox, or bought at the auction house):")
-  for _, w in ipairs(waiting) do table.insert(tip, string.format("  %d %s", w.units, N(house, w.item))) end
+  for _, w in ipairs(waiting) do table.insert(tip, "  " .. Name(w)) end
   if rest > 0 then table.insert(tip, string.format("%d more item%s to buy after the mailbox.", rest, rest == 1 and "" or "s")) end
-  local text = #waiting == 1 and string.format("Collect %d %s from the mailbox", waiting[1].units, N(house, waiting[1].item))
+  if waiting[1].recipe then table.insert(tip, "Then learn the recipe from it.") end
+  local text = #waiting == 1 and ("Collect " .. Name(waiting[1]) .. " from the mailbox")
     or string.format("Collect from the mailbox: %d items", #waiting)
   return { text = text, note = table.concat(parts, ", "), tip = tip, place = { "mailbox", nil, nil, "Mailbox" }, profession = profession }
+end
+
+-- The recipe scroll the route buys, once it is had somewhere: in the bags it is used (the
+-- recipe is learned from it; no place, nothing to walk to); in the mail or the bank it is
+-- fetched first. nil when it is nowhere: it is to be bought.
+local function ScrollVerdict(house, plan, nxt, step, tip, profession, scroll)
+  local name = N(house, scroll)
+  local v
+  if (ns.inv.Count(scroll) or 0) > 0 then
+    table.insert(tip, string.format("%s is in your bags: use it to learn the recipe.", name))
+    v = { text = string.format("Learn %s: use %s in your bags", ns.RecipeName(step), name), tip = tip, profession = profession, show = true }
+  elseif ns.inv.InMail and (ns.inv.InMail(scroll) or 0) > 0 then
+    v = MailVerdict(house, plan, nxt, step, tip, profession, scroll)
+  elseif ((ns.inv.Char().items[scroll] or {})[2] or 0) > 0 then
+    table.insert(tip, "In your bank (as counted when it was last open):")
+    table.insert(tip, "  " .. name)
+    v = { text = string.format("Take %s from the bank", name), note = name .. ": bank", tip = tip, show = true, bank = true, profession = profession }
+  end
+  if v then v.learn = nxt.spell end
+  return v
 end
 
 -- A recipe to learn and reagents to buy are two trips: the nearer one first. The house, when
 -- it is open, or nearer than the trainer, or on this map when the trainer is not; the trainer
 -- otherwise, and when there is nothing to buy or no seller known (running between the house
 -- and the trainer ate the time, 12 Oct 2026)
-local function NearerFirst(profession, plan, nxt, upto)
+local function NearerFirst(profession, plan, nxt, upto, need, spell)
   if #nxt.buy == 0 then return "trainer" end
+  local first                                             -- a fish is caught, not bought: no seller to compare with
+  for _, b in ipairs(nxt.buy) do
+    if not ns.Catches(plan, b[1]) then first = b[1]; break end
+  end
+  if not first then return "trainer" end
   if ns.scanner and ns.scanner.Open() then return "buy" end
-  local seller = Seller(plan, nxt.buy[1][1])
+  local seller = Seller(plan, first)
   local s, sd, shere = ns.NearestPlace(seller[1], seller[2], seller[3])
   if not s then return "trainer" end
-  local t, td, there = ns.NearestPlace("trainer", profession, nil, upto)
+  local t, td, there = ns.NearestPlace("trainer", profession, nil, upto, need, spell)
   if not t then return "buy" end
   if shere and not there then return "buy" end
   if there and not shere then return "trainer" end
@@ -627,14 +680,18 @@ local function VerdictOf(given)
       or string.format("Needs level %s for %s", tostring(nxt.asks or "?"), ns.RecipeName(nxt.step))       -- no next best to fall back on: the recipe's own words
     return { text = text, tip = tip, profession = profession, show = true }
   end
+  local fishing = plan.kind == "fishing"  -- the fishing route's costs are weights, not copper: no money wording for them
   if nxt.step.instead then               -- the next best stands in for a recipe the character cannot learn yet
-    table.insert(tip, string.format("%s stands in for %s, which asks for character level %d: about %s a skill point.",
-      ns.RecipeName(nxt.step), nxt.step.instead, nxt.step.asks or 0, ns.Money(nxt.step.cpp or 0)))
+    table.insert(tip, fishing and string.format("%s stands in for %s, which asks for character level %d.", ns.RecipeName(nxt.step), nxt.step.instead, nxt.step.asks or 0)
+      or string.format("%s stands in for %s, which asks for character level %d: about %s a skill point.",
+        ns.RecipeName(nxt.step), nxt.step.instead, nxt.step.asks or 0, ns.Money(nxt.step.cpp or 0)))
   end
   if nxt.step.over and nxt.step.mine and #nxt.step.mine > 0 then   -- the next best costs this character less with what it has (Tailor.lua)
     usingOf = ns.UsingText(nxt.step, function(item) return N(house, item) end)
-    table.insert(tip, string.format("%s: %s stands in for %s, about %s a skill point less for you. The box \"Use what I already have first\" in Interface > AddOns turns this off.",
-      usingOf, ns.RecipeName(nxt.step), nxt.step.over, ns.Money(nxt.step.saves or 0)))
+    table.insert(tip, fishing and string.format("%s: %s stands in for %s, with fewer fish to catch for you. The box \"Use what I already have first\" in Interface > AddOns turns this off.",
+        usingOf, ns.RecipeName(nxt.step), nxt.step.over)
+      or string.format("%s: %s stands in for %s, about %s a skill point less for you. The box \"Use what I already have first\" in Interface > AddOns turns this off.",
+        usingOf, ns.RecipeName(nxt.step), nxt.step.over, ns.Money(nxt.step.saves or 0)))
   end
   if nxt.capped then table.insert(tip, string.format("Only as far as the gold goes (the box in the /fwc window): this step is cut at skill %d.", nxt.to)) end
   -- the next rank (Journeyman at 75, Expert at 150, Artisan at 225) can be trained from 25
@@ -661,6 +718,9 @@ local function VerdictOf(given)
       place = { "quest", profession, nil, up.quest }
       table.insert(tip, string.format("No trainer teaches %s: the quest %s gives it, from %s. It asks for skill %d and character level %d.", what, up.quest, up.where, up.needs, up.level))
       if young then table.insert(tip, string.format("You are level %d: the quest is offered from level %d.", mine, up.level)) end
+      for _, n in ipairs(plan.notes or {}) do         -- the route's own word on the quest (the fishing route: what it asks for that is not fished)
+        if n[1] == up.needs then table.insert(tip, n[2]) end
+      end
     end
     if skill >= cap - 1 then
       table.insert(tip, skill >= cap
@@ -677,8 +737,8 @@ local function VerdictOf(given)
   -- nearer of the trainer and the house comes first, the other as a note under the arrow
   if api.Learned(nxt.spell) == false then
     local learn = step.learn
-    local trainer = { "trainer", profession, nil, ns.Title(profession) .. " trainer", step.from }
-    if not learn and NearerFirst(profession, plan, nxt, step.from) == "buy" then
+    local trainer = { "trainer", profession, nil, ns.Title(profession) .. " trainer", step.from, step.at and step.at[1], nxt.spell }     -- [5] the rank to train, [6] the skill the recipe is learned at (a trainer seen to teach none so high comes last), [7] its spell (a trainer seen to teach it only)
+    if not learn and NearerFirst(profession, plan, nxt, step.from, trainer[6], trainer[7]) == "buy" then
       table.insert(tip, "The house is nearer: buy first, then learn the recipe at the trainer.")
       local v = BuyVerdict(house, plan, nxt, step, tip, profession)
       asideOf = { text = "Then learn " .. ns.RecipeName(step) .. " at the trainer", place = trainer }
@@ -694,15 +754,26 @@ local function VerdictOf(given)
       Char().tolearn = nil
       return { text = string.format("Needs level %d for %s", need, ns.RecipeName(step)), tip = tip, profession = profession, show = true }
     end
-    table.insert(tip, learn and string.format("The route buys the recipe, %s, for %s: a pattern sold or dropped, not a trainer's.", N(house, learn[1]), ns.Money(learn[2]))
+    -- the scroll the route buys, had already: in the mail, the bank or the bags (bought by hand or
+    -- with the Buy button): fetched or used, not bought again; the level gate above applies first
+    local had = learn and ScrollVerdict(house, plan, nxt, step, tip, profession, learn[1])
+    if had then Char().tolearn = { spell = nxt.spell, item = learn[1], cost = learn[2] }; return had end
+    local sold = fishing and learn and plan.sold_by and plan.sold_by[learn[1]]       -- the fishing route's recipes are a vendor's
+    table.insert(tip, learn and string.format("The route buys the recipe, %s, for %s: %s.", N(house, learn[1]), ns.Money(learn[2]),
+      sold and ("sold by " .. sold) or fishing and "sold by a vendor" or "a pattern sold or dropped, not a trainer's")
       or "The trainer teaches it.")
     Char().tolearn = learn and { spell = nxt.spell, item = learn[1], cost = learn[2] } or nil
     local shopping = learn and ShoppingOf(plan, nxt, Char().tolearn) or nil
     if shopping then shopping.title = ns.RecipeName(step) .. ": the recipe, and what the step needs" end
     if not learn and #nxt.buy > 0 then
       local buy = BuyVerdict(house, plan, nxt, step, {}, profession)
-      asideOf = { text = "Then " .. buy.text:sub(1, 1):lower() .. buy.text:sub(2), place = buy.place }
-      table.insert(tip, "The trainer is nearer; the needs come after (the arrow's note).")
+      local then_ = "Then " .. buy.text:sub(1, 1):lower() .. buy.text:sub(2)
+      if buy.place then
+        asideOf = { text = then_, place = buy.place }
+        table.insert(tip, "The trainer is nearer; the needs come after (the arrow's note).")
+      else                                  -- only fish to catch: nowhere to point at, the tooltip says what comes after
+        table.insert(tip, then_ .. ".")
+      end
     end
     -- "Buy the recipe" for a pattern the route buys: "Learn" read as the trainer's to a player
     -- who then looked for Red Linen Vest there (the user, 7 Nov 2026)
@@ -742,7 +813,7 @@ local function VerdictOf(given)
       if c.onway then table.insert(tip, string.format("First, on the way: %d %s.", c.onway, c.what)) end
       if api.Learned(c.spell) == false then
         table.insert(tip, "The trainer teaches it.")
-        return { text = "Learn " .. c.what .. " first", tip = tip, place = { "trainer", profession, nil, ns.Title(profession) .. " trainer" } }
+        return { text = "Learn " .. c.what .. " first", tip = tip, place = { "trainer", profession, nil, ns.Title(profession) .. " trainer", nil, c.spell == nxt.spell and nxt.step.at and nxt.step.at[1] or nil, c.spell } }
       end
       local needs, place, tools = {}, nil, {}
       for _, r in ipairs(api.Requirements(c.spell)) do
@@ -779,7 +850,7 @@ local function VerdictOf(given)
         if recipe and not recipe.learned then
           table.insert(tip, string.format("%s needs %s: learn it at the trainer.", c.what, tool))
           return { text = "Learn " .. recipe.name .. " first", tip = tip, learn = recipe.spell, profession = profession,
-                   place = { "trainer", profession, nil, ns.Title(profession) .. " trainer" } }
+                   place = { "trainer", profession, nil, ns.Title(profession) .. " trainer", nil, nil, recipe.spell } }
         end
         if recipe then
           local tneeds, tplace = {}, nil
@@ -851,7 +922,7 @@ local function Short(v)
   local cost, unknown, farm = 0, false, {}
   for _, e in ipairs(v.shopping) do
     local n = e.units - (e.have or 0)
-    if n > 0 then
+    if n > 0 and e.source ~= "catch" then                   -- a fish is caught: it costs no gold
       if e.price then cost = cost + e.price * n else unknown = true end
       if e.source ~= "vendor" and not e.recipe then table.insert(farm, string.format("%d %s", n, N(House() or {}, e.item))) end
     end
@@ -882,5 +953,5 @@ api.IsPlace = IsPlace
 -- whether the book opened another profession since last asked (the shopping list follows it)
 local function Switched() local s = switched; switched = false; return s end
 
-ns.verdict = { Verdict = Verdict, Bags = Bags, Shopping = Shopping, api = api, NoteStations = NoteStations, Selected = Selected, N = N, Switched = Switched }
-ns.craft = { Verdict = Verdict, Bags = Bags, Shopping = Shopping }
+ns.verdict = { Verdict = Verdict, api = api, NoteStations = NoteStations, Selected = Selected, Switched = Switched }
+ns.craft = { Shopping = Shopping }

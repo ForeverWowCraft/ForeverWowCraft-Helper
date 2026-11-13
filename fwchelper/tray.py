@@ -120,13 +120,27 @@ def balloon(line: str) -> tuple[str, str] | None:
 # The game keeps its saved variables under WTF\Account\<account id>#1\...: the id is the player's
 # Battle.net account, and the helper names that file in its lines ("not sent: ... holds no scan
 # data yet"). It is not for a log that is opened from the menu and pasted for help: the folder's
-# name is replaced before a line is written (the user, 6 Nov 2026: no personal data leaking).
+# name is replaced before a line is written (the owner, 6 Nov 2026: no personal data leaking). So is the home
+# folder, which names the Windows or Mac user: the state folder, the installer's log and a traceback are under it.
 ACCOUNT_FOLDER = re.compile(r"([\\/])Account([\\/])[^\\/\s]+")
 
 
-def redact(line: str) -> str:
-    """The line with the game account's folder name replaced by <account>."""
-    return ACCOUNT_FOLDER.sub(r"\1Account\2<account>", line)
+def home_folder(home: str) -> re.Pattern | None:
+    """The home folder as a pattern: either slash between its parts, any case on Windows, and not a longer name
+    that starts the same (C:\\Users\\Ann is not C:\\Users\\Anna). None for a home too short to be a person's."""
+    parts = [p for p in re.split(r"[\\/]+", home) if p]
+    if len(parts) < 2:
+        return None
+    lead = r"[\\/]+" if home[:1] in "\\/" else ""                  # /Users/ann, not Users/ann after a slash left behind
+    return re.compile(lead + r"[\\/]+".join(re.escape(p) for p in parts) + r"(?![^\\/\s\"'),;:])", re.I if sys.platform == "win32" else 0)
+
+
+def redact(line: str, home: str | None = None) -> str:
+    """The line with the game account's folder name replaced by <account>, and the home folder (`home`, else this
+    user's), which names the Windows or Mac user, by ~."""
+    line = ACCOUNT_FOLDER.sub(r"\1Account\2<account>", line)
+    pattern = home_folder(str(Path.home()) if home is None else home)
+    return pattern.sub("~", line) if pattern else line
 
 
 class Log:

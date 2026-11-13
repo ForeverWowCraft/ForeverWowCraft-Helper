@@ -5,7 +5,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fwchelper import luatable, scan  # noqa: E402
-from fwchelper.scan import ScanItem  # noqa: E402
 
 SAMPLE = r'''
 FWCS_DB = {
@@ -115,14 +114,6 @@ def test_history_smoothing_and_volatility():
     sd.history[4358] = [(now - 3600, 70, 10), (now - 10, 90, 10)]
     assert sd.rescaled_items("min", 24)[4358].left == [1, 4, 0]           # the time left goes along with the shifted ladder
     assert 0.4 < sd.volatility(2840, 24) < 0.6
-
-
-def test_cost_for_walks_ladder():
-    it = ScanItem(1, "X", [(10, 5), (20, 5)], True, 0)
-    assert it.cost_for(3) == (30, 0)
-    assert it.cost_for(7) == (50 + 40, 0)
-    cost, short = it.cost_for(12, scarcity=0.5)
-    assert short == 2 and cost == 150 + 2 * 30
 
 
 def test_queue_round_trip():

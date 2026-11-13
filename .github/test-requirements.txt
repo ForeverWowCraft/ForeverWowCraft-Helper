@@ -1,0 +1,8 @@
+# The tests' packages, pinned by version and hash (tools/publish_helper.py in the project says how they were got).
+# pip install --require-hashes --only-binary=:all: -r .github/test-requirements.txt
+lupa==2.8 \
+    --hash=sha256:097e7d0f1719a88020b67c82e05d53d7973c166952393afcecfd8434c7e19a15 \
+    --hash=sha256:7bb223ee8f72d0dc076b0d65296ee72f1c69450f9d2fed5315f7707d98c4a03d
+pillow==12.3.0 \
+    --hash=sha256:f0606c8bf2cdefea14a43530f7657cbbb7ecf1c4222512492ef4a4434a9501ec \
+    --hash=sha256:300557495eb45ebb8aec96c2da9c4be642fbf7cd937278b4013ba894ea8eb0eb

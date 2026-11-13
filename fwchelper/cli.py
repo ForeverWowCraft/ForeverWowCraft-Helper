@@ -17,8 +17,8 @@ kept in the state folder (settings.STATE: identity.json). Nothing has to be set 
 WHAT IS SENT, WHEN (everything the addon gathers: docs/scanner-addon.md, "What the addon
 gathers"): `send` (and the app, which runs `send --watch`) sends a scan after the player saved
 one in game, and the merchants, trainers and recipe scrolls the player met when they changed
-(send_vendors_once), to the project's pipe, pooled with other players' into one shared database
-that the project means to publish openly. pipe.py says what each document holds and what is
+(send_vendors_once), to the project's pipe, pooled with other players' to price the routes and
+to know Forever's vendors, trainers and recipes. pipe.py says what each document holds and what is
 never in one. Besides, the helper only reads: the lists and the freshness from the pipe, the
 routes from the site (asked for by the auction house, nothing else), and new versions of itself.
 """
@@ -30,6 +30,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from . import __version__, pipe as pipemod, plans as plansmod, scan, settings, tray
@@ -194,7 +195,8 @@ def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = Non
     # fresh scan of already is not sent (and is not asked for again: the next SAVE is new)
     newest = None if again else freshmod.not_needed(fresh, doc["realm"], doc.get("faction", ""), doc["scanned_at"])
     if newest:
-        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(newest)}; nothing sent. The pipe wants one a quarter hour.")
+        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(newest)}; nothing sent, and nothing needs doing "
+              f"(the pipe says a scan stays fresh for {freshmod.fresh_minutes(fresh)} minutes).")
         noted()
         return False
     try:
@@ -203,8 +205,8 @@ def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = Non
         print(f"{sd.dataset}: not taken yet ({e}). It goes with the next scan.")
         return False
     except pipemod.NotNeeded as e:
-        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(e.newest) if e.newest else 'a moment ago'}; nothing sent. "
-              "The pipe wants one a quarter hour.")
+        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(e.newest) if e.newest else 'a moment ago'}; nothing sent, "
+              "and nothing needs doing.")
         noted()
         return False
     noted()
@@ -279,31 +281,68 @@ def wait_text(seconds: float) -> str:
     return f"{seconds / 60:g} min" if seconds >= 60 else f"{seconds:g} s"
 
 
+def failed(what: str, e: BaseException) -> None:
+    """A step of the watch that failed for a reason nobody foresaw (a document the site or the pipe should never
+    serve): one line with what it was, the traceback after it for the log, and the watch goes on to try again at
+    its next interval. Before 1.8.0 such an error ended the watch, and with it the look for a newer helper."""
+    print(f"{what} failed: {type(e).__name__}: {e}")
+    print(traceback.format_exc())
+
+
+def survive(what: str, do, *args, **kw):
+    """`do(*args, **kw)`, or None when it raises anything but an ending (Ctrl+C, SystemExit): said by `failed`."""
+    try:
+        return do(*args, **kw)
+    except Exception as e:  # noqa: BLE001 - whatever it was, the watch and the update check must go on
+        failed(what, e)
+        return None
+
+
+_vendors_done: tuple | None = None      # the saved file's version (scan.file_version) whose sightings were last sent, or found sent
+
+
 def send_vendors_once(p, path: Path | None = None) -> bool:
     """Send the vendors and trainers the addon has seen (scan.vendors, scan.trainers) and the
     levels the recipe scrolls asked for (scan.recipes), when they changed since they were last
     sent: one document, the union of every sighting, kept at the pipe per helper. Returns
-    whether anything was sent."""
+    whether anything was sent. A saved file unchanged since its sightings were last dealt with
+    is not read again (three reads of a 6 MB file took 5 s and 200 MB, every ten minutes); a
+    send that failed is tried again."""
+    global _vendors_done
     file = path or (scan.find_saved_variables() or [None])[0]
+    version = scan.file_version(file) if file else None
+    if version is not None and version == _vendors_done:
+        return False
     seen = scan.vendors(file) if file and file.suffix == ".lua" else {}
     met = scan.trainers(file) if file and file.suffix == ".lua" else {}
     asked = scan.recipes(file) if file and file.suffix == ".lua" else {}
     if not seen and not met and not asked:
+        _vendors_done = version
         return False
     doc = pipemod.vendors_document(seen, met, asked)
     mark = pipemod.mark_vendors(doc)
     sent = json.loads(_sent_file().read_text(encoding="utf-8")) if _sent_file().exists() else {}
     if sent.get("__vendors") == mark:
+        _vendors_done = version
         return False
     answer = p.send_vendors(doc)
     settings.STATE.mkdir(parents=True, exist_ok=True)
     sent["__vendors"] = mark
     _sent_file().write_text(json.dumps(sent), encoding="utf-8")
+    _vendors_done = version
     print(f"vendors sent: {len(doc['vendors'])} seen, {sum(len(v['items']) for v in doc['vendors'].values())} wares"
           + (f"; {len(met)} trainer(s), {sum(len(t['teaches']) for t in met.values())} services" if met else "")
           + (f"; {len(asked)} recipe scroll(s) with the level each asks for" if asked else "")
           + ("" if answer.get("new", True) else " (the pipe had them)"))
     return True
+
+
+def send_vendors_step(p, path: Path | None) -> None:
+    """The watch's send of the vendors met: a refusal or a pipe out of reach is one line, and tried again later."""
+    try:
+        send_vendors_once(p, path)
+    except (SystemExit, pipemod.PipeError) as e:
+        print(f"vendors not sent: {e}")
 
 
 def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,  # noqa: C901, PLR0912 - baseline 9 Nov 2026, to be split
@@ -325,16 +364,13 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
             wanted = asks.pop("plans", False)
             if wanted or time.time() - looked >= plansmod.plans_every():      # the routes the addon shows: newer ones, now and then
                 looked = time.time()
-                plans(quiet=True, again=wanted)
+                survive("routes", plans, quiet=True, again=wanted)
             if time.time() - freshened >= plansmod.fresh_every():   # when each house was last scanned, for the addon's box
                 freshened = time.time()
-                told = freshen(p, quiet=True) or told
+                told = survive("freshness", freshen, p, quiet=True) or told
             if time.time() - vendored >= settings.VENDORS_EVERY:  # the vendors met, when they changed
                 vendored = time.time()
-                try:
-                    send_vendors_once(p, path)
-                except (SystemExit, pipemod.PipeError) as e:
-                    print(f"vendors not sent: {e}")
+                survive("vendors", send_vendors_step, p, path)
             found = [path] if path else scan.find_saved_variables()
             try:
                 stamp = (found[0], found[0].stat().st_mtime, found[0].stat().st_size) if found else None
@@ -349,10 +385,12 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
                 try:
                     send_once(p, path, realm, faction, again=asked, fresh=told)
                     failures = 0
-                except (SystemExit, pipemod.PipeError) as e:
+                except (SystemExit, Exception) as e:  # noqa: BLE001 - a scan file nobody foresaw is tried again like a refusal
                     failures += 1
                     wait = retry_wait(failures)
-                    if not isinstance(e, Refused):           # those were reported one by one
+                    if not isinstance(e, (SystemExit, pipemod.PipeError)):
+                        failed("the send", e)
+                    elif not isinstance(e, Refused):           # those were reported one by one
                         print(f"not sent: {e}")
                     print(f"trying again in {wait_text(wait)}")
                     last = None                      # try again at the look after the wait

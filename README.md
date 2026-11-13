@@ -2,18 +2,19 @@
 
 The addon for World of Warcraft: Forever, and the small program that runs beside the game.
 Together they show you, in game, what your professions still need, less what you already have
-(`/fwc`), and they record what the auction house lists and send it on, which is where the prices
-come from.
+(`/fwc`), and they record what the auction house lists and send it on: the site prices an
+auction house from players' scans, or from Blizzard's official auction data when nobody has
+scanned it lately.
 
 It is plain Python 3.10+ with nothing to install, and a WoW addon. MIT licence. Questions and
-help: the Discord, <https://discord.gg/XPt2JUCxAg>. What is sent and what is not: [The pipe](#the-pipe)
+help: the Discord, <https://discord.gg/XPt2JUCxAg>. What is sent and what is not: [What is sent](#what-is-sent)
 below, and <https://www.foreverwowcraft.com/privacy>.
 
 ## What it does
 
 | | |
 |---|---|
-| **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code). At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Nothing of yours is sent: only prices and the merchants and trainers you visit |
+| **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code). At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Nothing of yours is sent: only prices and the merchants and trainers you visit ([every field](#what-is-sent)) |
 | **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon. On Windows and on the Mac |
 
 ```
@@ -21,10 +22,13 @@ python fwch.py where            what was found on this PC
 python fwch.py install-addon    copy the two addons into the game (--force: over a newer scanner)
 python fwch.py status           what the saved scans hold
 python fwch.py app              the application: an icon by the clock (Windows) or in the menu bar (Mac) that does all of the below by itself
+python fwch.py send             send the saved scans not sent yet, once (--again: send them even so)
 python fwch.py send --watch     the same sending, in a window (send.cmd, in the zip)
 python fwch.py autostart        have the app start when you log in (--off undoes it)
 python fwch.py lists            fetch the lists to scan and write them into the addon
 python fwch.py plans            fetch your auction houses' routes and write them into the addon
+                                (--again: write them even when the site has nothing newer)
+python fwch.py whoami           the name this helper sends under, and whether it is trusted
 python fwch.py fresh            when each auction house was last scanned by anyone; the addon waits while that is fresh
                                 ("the site's routes need helper X or newer": unzip the new helper over this one)
 ```
@@ -50,7 +54,8 @@ python fwch.py fresh            when each auction house was last scanned by anyo
 Point at the icon for how things stand: what was last sent, how many auction houses have
 routes, or what is wrong. Its menu: **Send prices now**; **Fetch routes now**; **Choose the
 game folder**; **Open the log**; **Start with Windows**, ticked when it does (Windows' own
-Settings > Apps > Startup has the same switch); **Help**; **Quit**. A balloon comes only when
+Settings > Apps > Startup has the same switch); **Update by itself**, ticked when it does, and
+**Check for an update now** (see [Updating](#updating)); **Help**; **Quit**. A balloon comes only when
 something needs you: the game not found, the addon not installed, prices that could not be
 sent, a `/reload` or a log-out the addon needs. Everything the helper does is in its log, with the date and time at the start of
 every line: `%LOCALAPPDATA%\ForeverWowCraft\Helper\helper.log`. The same folder holds the
@@ -109,12 +114,16 @@ realm and faction, from your own skill on:
 The row of buttons at the top is the professions, as on the site: the one shown is blue, the
 ones you do not have are grey (their whole route shows, from the trainer on). **Also** under
 them is a second profession to count, as the site's "also have": your other profession by
-itself, or the one you pick. Then the recipes a route may use (a trainer's only, or also
-recipes bought from the auction house when they pay off), what the route is **for** (profit:
-what you make is sold at the auction house, and the route is the cheapest once it is; skill-up:
-nothing is listed, what you make goes to a vendor, and the route is the cheapest per skill point
-net of that), and whether your **other characters** of the same auction house and faction count
-too (they do unless switched off, since 1.6.13): their things as they were when each last played
+itself, or the one you pick. Every route may use recipes bought from the auction house when they
+pay off. The **Mode** button names what the route is for, and a click changes it: **Profit**
+(what you make is sold at the auction house, and the route is the cheapest once it is),
+**Skill-up** (nothing is listed, what you make goes to a vendor, and the route is the cheapest
+per skill point net of that), and for cooking, once the helper has written your faction's
+fishing route, **Fishing only** (cooking from the fish you catch, a vendor's goods and a vendor's
+recipes, nothing from the auction house; where the fish are caught is the Classic-era world's
+data). Pointing at the button lists the modes with the one in use marked; Fishing only is kept
+for the character (since 1.8.0). Then whether your **other characters** of the same auction
+house and faction count too (they do unless switched off, since 1.6.13): their things as they were when each last played
 with the addon. Point at a row to see who has how many, and where. **Auctionator** gives the
 shopping list as an Auctionator import string to copy: what is left to buy, or everything
 from nothing. The skill slider plans a part of the route, from one end to the other, as the
@@ -126,6 +135,20 @@ an amount you type (`12g 40s`, or `12` for gold) and Enter; the summary says how
 route it goes, at the route's prices for what is still to buy, and with the box beside it
 ticked the list and the Auctionator import stop there. Selling what you make on the way gets
 some of it back, so you will get a little further than it says.
+
+When the window has no route to show, it says why and the next step (since 1.8.0): the Plans
+addon switched off (where the game lets an addon switch it on, **Switch on and reload** does
+both in one click), no helper on this PC, a helper that could not fetch the routes or is too old
+for them, a character the helper has not seen yet (**Reload now**), or an auction house the site
+has no routes for, and why.
+
+Interface, AddOns, ForeverWowCraft has two switches for the route itself, both on unless
+unticked. **Routes for my level**: a recipe whose scroll asks for a higher character level than
+yours is swapped for the next best recipe of that stretch, as the site does when you type your
+level; where none fits, the Make button and the window say so. **Use what I already have
+first**: where a next-best recipe of a stretch costs you less with what is in your bags, bank
+and mail, the Make button, the shopping list, the arrow and the window use it, and say so
+(`/fwcs have` is the same switch).
 
 **In the profession panel**, beside every recipe, what making one comes to: what it sells for
 at the auction house after the house's cut, less what its reagents cost, at the prices of the
@@ -148,19 +171,24 @@ they come in a moment, English until then, and the Auctionator box says when som
 The window's own words stay English.
 
 The routes come from the site: the helper fetches those of your characters' auction houses
-(every ten minutes while the helper runs, at once from the menu's "Fetch routes now", or `python fwch.py plans`) and writes them into the
+(now and then while the helper runs, at once from the menu's "Fetch routes now", or `python fwch.py plans`) and writes them into the
 addon, which reads them at the next `/reload` or login (saving prices reloads too). The first
 time, the helper does not know your characters yet: log in once, `/reload`, and the routes are
 there after the next. An auction house nobody has saved has no routes; saving it (below) makes them.
 How often the helper looks is what the site tells it (in `houses.json`, since 1.7.2), so it can
-be changed for everyone at once without a new helper; ten minutes for the routes and half an hour
-for the scan times until it says otherwise.
+be changed for everyone at once without a new helper.
 
-One scan of an auction house in ten minutes is all the site needs, however many play there, so
-the pipe takes one and refuses the rest as not needed; the helper sends none it would refuse
-("not needed: ... was scanned by someone 4 min ago"), and every half hour writes into the
-addon (`Fresh.lua`) when each house was last scanned, so that the addon records nothing while
-a scan is not needed.
+The addon reminds you to reload (Interface, AddOns: **A reminder to reload, every hour**, on
+unless unticked): a small box at the top of the screen with a **Reload now** button, at most once
+an hour and only when there are prices to save, something noted since the last reload, or routes
+the helper fetched since. Never in combat, nor while the auction house, a merchant or a
+profession window is open; **Later** puts it off an hour.
+
+One fresh scan of an auction house is all the site needs, however many play there, so the pipe
+takes one and refuses the rest as not needed while it counts that one fresh; the pipe says how
+long that is. The helper sends none it would refuse ("not needed: ... was scanned by someone 4
+min ago"), and now and then, as often as the site says, writes into the addon (`Fresh.lua`) when
+each house was last scanned, so that the addon records nothing while a scan is not needed.
 
 Everything the helper writes into the game (the routes, the lists, the freshness) goes into a
 second, tiny addon, **ForeverWowCraft Plans**, which `install-addon` puts beside the scanner and
@@ -172,11 +200,11 @@ in place, and `--force` puts its own in anyway.
 
 Open the auction house. A small button at its top right says where things stand: **Scanning...**
 while the addon reads the house (it does so by itself when the house opens and it can, once
-every 15 minutes, and not while someone else saved the house in the last ten minutes), **Prices
+every 15 minutes, and not while the pipe has a fresh scan of the house from someone else), **Prices
 in m:ss** while it waits, and a lit **Save Prices** when there is something to save, with a short
 sound once. Click it: the interface reloads, which is what makes the game write the prices to
-disk, and the helper sends them within seconds. Nothing leaves the PC
-without that click. Point at the button for what it is doing; Interface, AddOns, ForeverWowCraft
+disk, and the helper sends them within seconds. No prices leave the PC before the game writes
+them: at that click, a `/reload` or a log-out. Point at the button for what it is doing; Interface, AddOns, ForeverWowCraft
 has the switches (the scan by itself, the sound, and the scanner's own bar with FULL, SCAN and
 SAVE for running scans by hand; `/fwcs` lists the commands).
 
@@ -201,7 +229,7 @@ and installed with nothing shown (Windows' own installer, msiexec, run quietly: 
 install, no administrator; no script is run); the helper closes and the installer starts the
 new one, back in a moment, settings and all, and a balloon says once that it was updated. Untick
 **Update by itself** in the menu and the update waits instead: the tooltip says a newer one is
-out, a balloon says it once, and **Update to 1.6.0...** at the top of the menu installs it (the
+out, a balloon says it once, and `Update to <version>...` at the top of the menu installs it (the
 installer opens, closes the helper and starts it again). The quiet install's log is
 `updates\install.log` in the state folder; one that failed is said once, and that version then
 waits in the menu. **Check for an update now** in the menu asks GitHub at once instead of
@@ -230,22 +258,67 @@ saves the game folder.
 
 ## The pipe
 
-Scans go out and lists come back as two small JSON documents, `fwc-scan/1` and `fwc-lists/1`,
-over HTTP. `fwchelper/pipe.py` describes both and the requests. Anything that speaks them can
-be at the other end.
+Scans and sightings go out and lists come back as small JSON documents, `fwc-scan/1`,
+`fwc-vendors/1` and `fwc-lists/1`, over HTTPS, gzipped. `fwchelper/pipe.py` describes them and
+the requests. Anything that speaks them can be at the other end.
 
-What is sent: the realm's name and your character's faction, and for each item its name, when
-it was scanned, and the prices and quantities listed. Nothing about you, your characters or
-who listed what. The name the helper sends under is random, and says nothing about you.
+### What is sent
 
-What is not sent: what your characters have. Their bags, banks and skills are counted in the
-game, kept in the addon's saved file on your PC, and used there. The helper reads from that
-file only which realms and factions your characters are of, to know whose routes to fetch
-from the site, and fetching them tells the site nothing but which auction houses.
+The helper builds everything it sends from the addon's saved file, and sends it to the
+project's pipe, where it is pooled with other players' to price the routes and to know
+Forever's vendors, trainers and recipes. Three requests send something:
 
-The pipe holds every sender to a pace: a scan of an auction house every five minutes, which is
-more often than the game lets anyone scan. What a new sender sends is used where it agrees
-with what others saw of the same auction house.
+* **Registering**, the first time the helper talks to the pipe: the helper's version, nothing
+  else. The pipe answers with a random name and a token, which the helper keeps
+  (`identity.json`) and sends with every request to the pipe after that. The name says nothing
+  about you.
+* **A price scan** (`fwc-scan/1`), once the game has written the saved file (**Save Prices**, a
+  `/reload` or a log-out), for each auction house in it that was not sent yet: the auction
+  house's realm and faction, the time of its newest item, and the helper's version. For each
+  item the addon finished: its id, its name as your game names it, when it was read, whether
+  that was a full read of the house, and its auctions as a price ladder (unit price, stack size, how many auctions of that price and size,
+  and the time-left band: short, medium, long, very long). Not who listed them. And, so that the
+  site can name the house: `realm_names`, every realm the characters of this game account have
+  logged in on with the addon, each as the game spells it with and without spaces, and
+  `connected`, the realms the game says share this auction house. For the routes' prices.
+* **Sightings** (`fwc-vendors/1`), when they changed since they were last sent: one document of
+  every sighting the addon has kept, with the helper's version.
+  * Each merchant whose window you opened: its creature id and name, the map and the spot where
+    your character stood as the window opened, when, your character's faction and the game
+    client's build. For each of its wares: the item, its price as asked of your character (after
+    any reputation discount), its stack size, how many were in stock, whether the game let your
+    character buy it, what it costs besides gold (an item or a currency, and how many), and when.
+  * Each trainer whose window you opened: its creature id and name, the map and the spot where
+    your character stood, when, your character's faction, the client's build, the profession it
+    teaches, and each thing it teaches with the skill it asks for.
+  * Recipe scrolls: a scroll's minimum level from the game's item data, and when a number last
+    changed; and, when you brought up the scroll's tooltip, each "Requires Level" line on it with
+    its place on the tooltip, the item the recipe makes and that item's level. The item-data level is
+    also read for the scrolls an auction scan records and a route buys.
+
+  For who sells which recipe and reagent on Forever, and at what price; the skill Forever's
+  trainers teach each recipe at; and the level a recipe asks for.
+
+Every request also names the helper and its version (`ForeverWowCraft-helper/<version>`), and,
+as with any request on the internet, the server sees the address it comes from.
+
+What is fetched: from the pipe, the lists of items to scan and when each auction house was last
+scanned; from the site, the list of its auction houses and then the routes of your characters'
+auction houses (so the site learns which auction houses you play on; before the addon has seen a
+character, those of your game's region when there are few); from GitHub, once a day, whether a
+newer helper is out, and its installer when one is.
+
+What is not sent: none of the documents has a place for your character names, your account name,
+your user name on the PC, gold, bags, bank, mail, skills, chat or guild. What your characters have
+is counted in the game, kept in the addon's saved file on your PC (`__chars`), and used there; the
+helper uses it only to know whose routes to fetch (which realms and factions your characters are
+of) and to list your characters in `python fwch.py status`, on your screen. The places the arrow
+points to and the addon's settings stay on your PC too. The one position sent is the spot where
+your character stood when it opened a merchant's or a trainer's window.
+
+The pipe holds every sender to a pace that it sets, and tells one that sends too soon to wait;
+the scan then goes with the next one. What a new sender sends is used where it agrees with what
+others saw of the same auction house.
 
 When the pipe refuses a scan or is down, the helper keeps the scan and tries again: after half
 a minute the first time, then twice as long each time, up to every quarter hour, until it goes
@@ -274,10 +347,14 @@ since it is changed, and builds; `send.cmd` and `setup.cmd` stay out, being the 
 the Run entry that starts the app at logon, "Start the helper now" at the end (or, with
 `LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
 running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
-tag, a draft until the installer is on it) builds it on a Windows runner, installs it there for
-real (`installer/install_check.py`: the released 1.7.6, this one over it as 1.7.6's updater ran
+tag) builds it on a Windows runner, installs it there for
+real (`installer/install_check.py`: the released 1.7.7, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
 msiexec, a build one version up over that as this updater does, then removed), and puts it on
-the GitHub release beside the zips.
+the GitHub release beside the zips. The release then stays a draft, with every file on it, until
+the project publishes it by hand (`.github/workflows/publish.yml`, which checks the files first):
+that leaves time to have the very installer that will ship checked, and until then nothing new
+reaches the download links or the helper's own update. The scanner's zip goes to CurseForge
+from that publish workflow too, so publishing with a plain `gh release edit` skips CurseForge.
 
 `python3 installer/build_mac.py` makes `ForeverWowCraft-Helper-<version>.dmg` on a Mac (one application for Apple silicon and Intel alike, a Python for each inside; an Apple silicon Mac asked for Rosetta before 1.7.0): the
 application bundle (`ForeverWowCraft Helper.app`: the helper's files, a standalone Python from
@@ -288,12 +365,10 @@ with a link to Applications beside it. A release builds it on the project's own 
 self-hosted runner, and puts it on the release too. The application is signed ad hoc (no
 certificate) until the project's business has an Apple Developer membership (`docs/signing.md` in the core).
 
-`test_ingame.py` runs the addon's Lua against a stand-in for the game, and needs a Lua for
-that: `pip install lupa`. Without it, it says so and passes.
-
 ## About
 
 A fan project, by players, for the game's players: not affiliated with or endorsed by Blizzard
 Entertainment. World of Warcraft is a trademark of Blizzard Entertainment, Inc. The code is MIT
 (`LICENSE`), apart from `Seed.lua`, data from the VMaNGOS database under the GPL-2.0, as its
-header says. The site, the privacy page and the Discord: <https://www.foreverwowcraft.com>.
+header says (so are the data files `places.json`, `recipe_vendors.json` and `fishing.json` in the
+project's `data` folder, each saying so in the file). The site, the privacy page and the Discord: <https://www.foreverwowcraft.com>.

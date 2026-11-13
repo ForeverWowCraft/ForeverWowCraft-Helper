@@ -10,7 +10,7 @@ gathers"). Two documents leave this computer, both built here from the addon's s
     (fields in vendors_document below), sent when they changed. For who sells what on Forever,
     the skill a trainer teaches a recipe at, and the level a recipe is gated at.
 Both go to the project's pipe under this helper's own token (a random name the pipe gave it),
-pooled with other players' into one shared database that the project means to publish openly.
+pooled with other players' to price the routes and to know Forever's vendors, trainers and recipes.
 NEVER sent: no character name, gold, bags, bank or mail, chat, guild, account name or password,
 and no position but the spot of a merchant's or trainer's window the player opened. What each
 character has (FWCS_DB.__chars) stays on this computer.
@@ -123,6 +123,7 @@ MAX_ITEMS, MAX_RUNGS = 20000, 400000      # in a scan, as the pipe has them (pip
 MAX_TIME = 2 ** 32 - 1                    # a time is unix seconds: past this it is not one
 MAX_NAMES = 1000                          # realms in realm_names, or in connected
 MAX_TEXT = 200                            # characters of an item's name, the helper's version
+MAX_LIST_NAME = 80                        # characters of a list's name or a row's name in fwc-lists/1 (the longest shipped is 50)
 # a rung's bounds, as the pipe has them. A bound here must be one no honest scan can reach: a
 # single auction past it would have every honest scan of that house refused. They refuse numbers
 # no client could have read (an integer past JavaScript's safe range), not prices nobody would
@@ -307,8 +308,11 @@ def check_lists(doc) -> str | None:
     if not isinstance(doc.get("queue"), dict):
         return "no queue"
     for name, rows in doc["queue"].items():
-        if not isinstance(rows, list) or any(not (isinstance(r, list) and len(r) == 2 and isinstance(r[0], int)) for r in rows):
-            return f"list {name!r} is not [[item id, name], ...]"
+        if not _text(name, MAX_LIST_NAME):
+            return f"list {str(name)[:40]!r}: its name is not text of at most {MAX_LIST_NAME} characters"
+        if not isinstance(rows, list) or any(not (isinstance(r, list) and len(r) == 2 and isinstance(r[0], int) and _text(r[1], MAX_LIST_NAME))
+                                             for r in rows):
+            return f"list {name!r} is not [[item id, name], ...] with names of at most {MAX_LIST_NAME} characters"
     return None
 
 
@@ -323,7 +327,10 @@ def unpack(data: bytes) -> dict:
     """A JSON document from the service's bytes, gunzipped first when they are gzipped."""
     if data[:2] == b"\x1f\x8b":
         data = gzip.decompress(data)
-    return json.loads(data.decode("utf-8"))
+    try:
+        return json.loads(data.decode("utf-8"))
+    except RecursionError:                          # JSON nested deeper than Python follows: no document of ours
+        raise PipeError("the service's answer is nested too deep to read") from None
 
 
 def digest(data: bytes) -> str:

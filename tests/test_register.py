@@ -1,5 +1,7 @@
 """A helper that was given nothing registers itself, and keeps what it was given."""
+import contextlib
 import http.server
+import io
 import json
 import os
 import sys
@@ -179,7 +181,11 @@ def test_a_scan_the_pipe_does_not_need_is_not_sent_and_not_tried_again():
             raise AssertionError("taken")
         except pipe.NotNeeded as e:
             assert e.newest == 1789999500 and e.wanted_from == 1790000100 and "not needed" in str(e)
-        assert cli.send_once(p, folder / "s.json") is False
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):
+            assert cli.send_once(p, folder / "s.json") is False
+        # what happened and that nothing needs doing; no interval the pipe does not state (until 1.8.0: "a quarter hour")
+        assert "nothing sent, and nothing needs doing." in said.getvalue() and "quarter" not in said.getvalue()
         assert (settings.STATE / "sent.json").exists() and cli.send_once(p, folder / "s.json") is False
         assert [s for s in Service.seen if s[1] == "/v1/scans"] and len([s for s in Service.seen if s[1] == "/v1/scans"]) == 2
         # what the pipe said lately spares the upload: a scan under `fresh` newer than the newest known is not sent at all
@@ -193,6 +199,11 @@ def test_a_scan_the_pipe_does_not_need_is_not_sent_and_not_tried_again():
         (folder / "s.json").write_bytes(pipe.pack(pipe.scan_document(ScanData(sd.items, "Stonespine", folder / "s.json", faction="Horde"))))
         assert cli.send_once(p, folder / "s.json", fresh=told) is False                        # already sent, by the mark
         assert len([s for s in Service.seen[before:] if s[1] == "/v1/scans"]) == 1
+        (settings.STATE / "sent.json").unlink()
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):                                                 # spared by what the pipe said: its own value
+            assert cli.send_once(p, folder / "s.json", fresh=dict(told, fresh=1200)) is False
+        assert "nothing needs doing (the pipe says a scan stays fresh for 20 minutes)." in said.getvalue(), said.getvalue()
         # Fresh.lua for the addon: by realm, then faction, the newest scan
         text = fresh.fresh_text(told)
         assert '["Stonespine"]' in text and '["Horde"]' in text

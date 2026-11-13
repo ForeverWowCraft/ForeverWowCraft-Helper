@@ -8,13 +8,18 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - name: "A Lua, to run the addon's code in tests (the helper itself needs nothing installed)"
-        run: pip install lupa pillow
+      - name: "A Lua, to run the addon's code in tests, and Pillow (the helper itself needs nothing installed): pinned by hash"
+        run: |
+          pip install --require-hashes --only-binary=:all: -r .github/test-requirements.txt
       - name: Tests
         run: |
           for t in tests/test_*.py; do echo "== $t"; python "$t" || exit 1; done

@@ -146,5 +146,5 @@ function ns.RemindCommand(arg)
   if ns.options and ns.options.boxes then for _, b in ipairs(ns.options.boxes) do b:refresh(b) end end
 end
 
-ns.remind = { Check = Check, Enabled = Enabled, Reasons = Reasons, Busy = Busy, Every = EVERY }
+ns.remind = { Check = Check, Enabled = Enabled, Reasons = Reasons, Every = EVERY }
 if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(RETRY, Check) end

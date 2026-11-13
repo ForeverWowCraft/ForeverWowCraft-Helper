@@ -1,0 +1,99 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The held release's tag, v<major>.<minor>.<patch>"
+        required: true
+      msi_sha256:
+        description: "The SHA-256 of the .msi that was reviewed (optional; refused when the draft's differs)"
+        required: false
+        default: ""
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      scanner_sha256: ${{ steps.check.outputs.scanner_sha256 }}
+    steps:
+      - name: "The draft has every file, each one as GitHub says, then it is published"
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          WANT_MSI: ${{ inputs.msi_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "the tag must be v<major>.<minor>.<patch>"; exit 1; }
+          WANT_MSI=$(echo "$WANT_MSI" | tr 'A-F' 'a-f')
+          [[ -z "$WANT_MSI" || "$WANT_MSI" =~ ^[0-9a-f]{64}$ ]] || { echo "msi_sha256 must be 64 hex digits"; exit 1; }
+          V=${TAG#v}
+          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true || { echo "$TAG is not a draft (published already, or no release)"; exit 1; }
+          d=$(mktemp -d)
+          gh release download "$TAG" --dir "$d"
+          gh release view "$TAG" --json assets --jq '.assets[] | [.name, .state, (.digest // "")] | @tsv' > "$d.assets"
+          sha() { sha256sum "$d/$1" | cut -d' ' -f1; }
+          {
+            echo "## $TAG"
+            echo
+            echo "| file | bytes | SHA-256 |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for f in "ForeverWowCraftScanner-$V.zip" "ForeverWowCraft-Helper-$V.zip" "ForeverWowCraft-Helper-$V.msi" ForeverWowCraft-Helper.msi "ForeverWowCraft-Helper-$V.dmg" ForeverWowCraft-Helper.dmg; do
+            test -f "$d/$f" || { echo "missing from the draft: $f"; exit 1; }
+            line=$(awk -F'\t' -v n="$f" '$1 == n' "$d.assets")
+            test "$(echo "$line" | cut -f2)" = uploaded || { echo "not fully uploaded: $f"; exit 1; }
+            digest=$(echo "$line" | cut -f3)
+            if [ -n "$digest" ] && [ "$digest" != "sha256:$(sha "$f")" ]; then echo "$f: the download is not the file GitHub's digest names"; exit 1; fi
+            echo "$f $(stat -c%s "$d/$f") $(sha "$f")"
+            echo "| $f | $(stat -c%s "$d/$f") | $(sha "$f") |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          test "$(sha ForeverWowCraft-Helper.msi)" = "$(sha "ForeverWowCraft-Helper-$V.msi")" || { echo "the two .msi differ"; exit 1; }
+          test "$(sha ForeverWowCraft-Helper.dmg)" = "$(sha "ForeverWowCraft-Helper-$V.dmg")" || { echo "the two .dmg differ"; exit 1; }
+          if [ -n "$WANT_MSI" ] && [ "$(sha ForeverWowCraft-Helper.msi)" != "$WANT_MSI" ]; then echo "the draft's .msi is not the one reviewed"; exit 1; fi
+          echo "scanner_sha256=$(sha "ForeverWowCraftScanner-$V.zip")" >> "$GITHUB_OUTPUT"
+          gh release edit "$TAG" --draft=false --latest
+          echo "$TAG published as the newest release; the scanner's zip goes to CurseForge next" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  curseforge:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: "CurseForge: the scanner's zip from the published release, the bytes checked on the draft"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          ZIP_SHA: ${{ needs.publish.outputs.scanner_sha256 }}
+          TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          GAME_VERSION: ${{ vars.CURSEFORGE_GAME_VERSION }}
+          RELEASE_TYPE: ${{ vars.CURSEFORGE_RELEASE_TYPE || 'release' }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "the tag must be v<major>.<minor>.<patch>"; exit 1; }
+          if [ -z "$TOKEN" ] || [ -z "$PROJECT" ] || [ -z "$GAME_VERSION" ]; then
+            echo "CurseForge: skipped. CURSEFORGE_TOKEN (a secret), CURSEFORGE_PROJECT_ID and CURSEFORGE_GAME_VERSION (variables) are not all set." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          trap 'rc=$?; if [ $rc -ne 0 ]; then echo "::error::$TAG is published on GitHub; only the CurseForge upload remains. Re-run this failed job (Re-run failed jobs), not a new dispatch."; fi' EXIT
+          [[ "$ZIP_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "no checked SHA-256 of the scanner's zip from the publish job"; exit 1; }
+          [[ "$PROJECT" =~ ^[0-9]+$ ]] || { echo "CURSEFORGE_PROJECT_ID must be a number"; exit 1; }
+          case "$RELEASE_TYPE" in alpha|beta|release) ;; *) echo "CURSEFORGE_RELEASE_TYPE must be alpha, beta or release"; exit 1;; esac
+          zip="ForeverWowCraftScanner-${TAG#v}.zip"
+          d=$(mktemp -d)
+          gh release download "$TAG" --pattern "$zip" --dir "$d"
+          test "$(sha256sum "$d/$zip" | cut -d' ' -f1)" = "$ZIP_SHA" || { echo "$zip on the release is not the file checked on the draft"; exit 1; }
+          ID=$(curl -sf -H "x-api-token: $TOKEN" https://wow.curseforge.com/api/game/versions | jq -r --arg n "$GAME_VERSION" '[.[] | select(.name == $n) | .id][0] // empty')
+          [[ "$ID" =~ ^[0-9]+$ ]] || { echo "CurseForge lists no game version by the name in CURSEFORGE_GAME_VERSION"; exit 1; }
+          META=$(jq -nc --arg c "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" --argjson id "$ID" --arg t "$RELEASE_TYPE" \
+            '{changelog: $c, changelogType: "markdown", gameVersions: [$id], releaseType: $t}')
+          curl -sf -H "x-api-token: $TOKEN" --form-string "metadata=$META" -F "file=@$d/$zip" "https://wow.curseforge.com/api/projects/$PROJECT/upload-files"
+          echo
+          echo "CurseForge: uploaded $zip to project $PROJECT for game version $ID as $RELEASE_TYPE" | tee -a "$GITHUB_STEP_SUMMARY"

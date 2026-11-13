@@ -29,8 +29,8 @@
 --     position kept is that of the window just opened (the arrow reads where the character
 --     stands to turn itself, and keeps none of it).
 --   WHERE: the helper sends the merchants and the trainers (not the places, which stay here) to
---     the project's pipe, pooled with other players' sightings into one shared database that
---     the project means to publish openly.
+--     the project's pipe, pooled with other players' sightings to know Forever's vendors and
+--     trainers.
 --
 -- ns.Bearing asks the game nothing, for the tests.
 
@@ -52,7 +52,6 @@ local function Here()
   if not (x and y) or (x == 0 and y == 0) then return end
   return map, x, y
 end
-ns.Here = Here
 
 -- a map's size in yards { width, height }, for distances: the seed's, else the client's; nil
 -- when neither can say
@@ -143,8 +142,9 @@ local function Places()
 end
 
 -- the seed's places, as tables like the noted ones, made once: a row of FWCS_SEED.places is
--- { map, x, y, kind, what, name, extra }, extra how far a trainer's rank training reaches
--- (upto: 75 to 300; 0 for a specialist who teaches recipes only) or the items a vendor sells
+-- { map, x, y, kind, what, name, extra, reach }, extra how far a trainer's rank training reaches
+-- (upto: 75 to 300; 0 for a specialist who teaches recipes only) or the items a vendor sells;
+-- reach (trainers, when the seed has it): the highest skill a recipe seen taught there asks for
 local seeded, seededFrom                  -- made from the rows once; again when the rows are another table
 local function Seeded()
   local rows = FWCS_SEED and FWCS_SEED.places or {}
@@ -154,6 +154,11 @@ local function Seeded()
     local p = { map = r[1], x = r[2], y = r[3], kind = r[4], what = r[5], name = r[6], seed = true }
     if type(r[7]) == "number" then p.upto = r[7] elseif type(r[7]) == "table" then p.sells = r[7]
     elseif type(r[7]) == "string" then p.faction = r[7] end          -- a quest giver's faction
+    if type(r[8]) == "number" and p.kind == "trainer" then p.reach = r[8] end    -- how far its recipes go, as senders saw it; none: unknown
+    if type(r[9]) == "table" and p.kind == "trainer" then                        -- the spells of the routes' recipes it was seen teaching, as a set
+      p.spells = {}
+      for _, id in ipairs(r[9]) do p.spells[id] = true end
+    end
     table.insert(seeded, p)
   end
   return seeded
@@ -211,6 +216,8 @@ local function Note(kind, what, extra)
           if k == "sells" then
             p.sells = p.sells or {}
             for _, item in ipairs(v) do if not In(p.sells, item) then table.insert(p.sells, item) end end
+          elseif k == "reach" then
+            if not p.reach or v > p.reach then p.reach = v end          -- the union over visits: a filter may hide recipes this time
           else
             p[k] = v
           end
@@ -266,11 +273,15 @@ local function NoteTrainer()
     for _, step in ipairs(plan.steps or {}) do recipes[ns.RecipeName(step)] = plan.profession end
   end
   local ranks = FWCS_SEED and FWCS_SEED.ranks or {}
-  local votes, teaches, upto, ranked = {}, {}, 0, 0
+  local votes, teaches, upto, ranked, top = {}, {}, 0, 0, 0       -- top: the highest skill a recipe (no rank) asks for
   for i = 1, GetNumTrainerServices() do
     local name, sub = GetTrainerServiceInfo(i)
     local reach = name and (ranks[name] or (sub and (ranks[sub .. " " .. name] or ranks[name .. " " .. sub])))
     if reach and reach > ranked then ranked = reach end
+    if name and not reach and GetTrainerServiceSkillReq then
+      local _, level = GetTrainerServiceSkillReq(i)
+      if type(level) == "number" and level > top and level <= 300 then top = math.floor(level) end
+    end
     if name and recipes[name] then
       votes[recipes[name]] = (votes[recipes[name]] or 0) + 1
       table.insert(teaches, name)
@@ -295,7 +306,7 @@ local function NoteTrainer()
   if (type(special) == "table" and id ~= nil and special[id] ~= nil) or (names and names[id]) then
     best, all = nil, nil                   -- the list of every place made again: a note made before is passed over by this name
   end
-  if best then Note("trainer", best, { name = Npc(), teaches = teaches, upto = ranked > 0 and ranked or (upto > 0 and upto or nil) }) end
+  if best then Note("trainer", best, { name = Npc(), teaches = teaches, upto = ranked > 0 and ranked or (upto > 0 and upto or nil), reach = top > 0 and top or nil }) end
   -- the trainer's whole list, by the creature's id, for the helper to send (nothing of the
   -- character): each service and the skill it asks for. Forever keeps the skill a recipe is
   -- taught at on the server, which the client's tables do not say, and the routes planned on
@@ -403,16 +414,29 @@ local function Reachable(p, mine)
   return side == nil or side == mine
 end
 
-function ns.NearestPlace(kind, what, item, upto)
+-- `need` (a recipe to learn: the skill it is learned at) puts a trainer seen to teach no recipe
+-- that high (its reach, the seed's or the player's own note) after the ones that may; with both
+-- trainers' reach known, the nearer comes first, not the lower rank band (Randal Worth, to 75
+-- for ranks and 50 for recipes, was sent for a recipe at 70 before Simon Tanner a few yards
+-- off: the owner, 11 Nov 2026). No reach known: as before. `spell` (that recipe's spell id):
+-- where a reachable trainer is seen to teach it (the seed's list), only those are asked, the
+-- nearest, whatever their rank band or reach; where none is known to, as above.
+function ns.NearestPlace(kind, what, item, upto, need, spell)
   local map, x, y = Here()
   local mine = Mine()
+  local only = false
+  if spell ~= nil and what ~= nil then
+    for _, p in ipairs(All()) do
+      if p.kind == kind and p.what == what and p.spells and p.spells[spell] and Reachable(p, mine) then only = true; break end
+    end
+  end
   -- Asked how far: the trainer of that rank before one that teaches further, then the nearer.
   -- Forever's trainers teach their own rank's band (Stormwind: Lawrence Schneider to 75,
   -- Sellandus to 150, Georgio Bolero to 225): a tailor of 120 sent to the artisan's found
   -- nothing to learn there (8 Nov 2026)
   local function Better(p, d, bp, bd)
     if not bp then return true end
-    if upto ~= nil and (p.upto or 0) ~= (bp.upto or 0) then return (p.upto or 0) < (bp.upto or 0) end
+    if upto ~= nil and not only and (p.upto or 0) ~= (bp.upto or 0) and not (need and p.reach and bp.reach) then return (p.upto or 0) < (bp.upto or 0) end
     return Nearer(d, p, bd, bp)
   end
   -- asked how far (a rank to train): a trainer that says it teaches that far comes first, on
@@ -421,9 +445,11 @@ function ns.NearestPlace(kind, what, item, upto)
   -- resort; one that says 0 (a specialist, recipes only) never
   local best, bestD, other, otherD, maybe, maybeD, maybeOther, maybeOtherD
   for _, p in ipairs(All()) do
-    if p.kind == kind and (what == nil or p.what == what) and (item == nil or In(p.sells, item)) and Reachable(p, mine) then
-      local fits = upto == nil or (p.upto ~= nil and p.upto >= upto)
-      local unsure = upto ~= nil and p.upto == nil
+    if p.kind == kind and (what == nil or p.what == what) and (item == nil or In(p.sells, item)) and Reachable(p, mine)
+       and (not only or (p.spells and p.spells[spell])) then
+      local fits = only or upto == nil or (p.upto ~= nil and p.upto >= upto)
+      local unsure = not only and upto ~= nil and p.upto == nil
+      if not only and need ~= nil and p.reach ~= nil and p.reach < need and (fits or unsure) then fits, unsure = false, true end    -- seen teaching nothing so high: a last resort
       if fits or unsure then
         if map and p.map == map then
           local d = Distance(map, p.x, p.y, x, y) or (math.abs(p.x - x) + math.abs(p.y - y)) * 100000
@@ -699,4 +725,4 @@ frame:SetScript("OnEvent", function(_, event)
   elseif event == "MAIL_SHOW" then Note("mailbox", "Mailbox") end           -- for the way back to the mail (since 1.6.17)
 end)
 
-ns.places = { Places = Places, All = All, Distance = Distance, Size = Size, MapName = MapName }
+ns.places = { MapName = MapName }

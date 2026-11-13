@@ -4,8 +4,8 @@
 -- FWCS_PLANS (Plans.lua, written by the helper from the site) holds the routes.
 
 local _, ns = ...
-local Spelt, Char, House, Tracked, CountBags, CountBank, CountMail, NoteSkills, Have, PLACES =
-  ns.inv.Spelt, ns.inv.Char, ns.inv.House, ns.inv.Tracked, ns.inv.CountBags, ns.inv.CountBank, ns.inv.CountMail,
+local Char, House, CountBags, CountBank, CountMail, NoteSkills, Have, PLACES =
+  ns.inv.Char, ns.inv.House, ns.inv.CountBags, ns.inv.CountBank, ns.inv.CountMail,
   ns.inv.NoteSkills, ns.inv.Have, ns.inv.PLACES
 local Button, RangeSlider = ns.Button, ns.RangeSlider
 
@@ -21,6 +21,8 @@ local COLS = { 104, 64, 64, 64 }           -- the four number columns, right to 
 local REFRESH_DELAY = 0.4                  -- seconds bag changes are gathered for before the window is drawn again
 
 local win, Refresh, SetSliders, ShowRange, picker, DrawPicker, DrawProfessions
+local reloadSwitchesOn = false        -- the empty window is in state A and the client can enable an addon: the Reload button also switches the Plans addon on (set by Refresh)
+local last      -- what the window shows: { house, plan, mine = the route less what is had, from }
 
 -- the window drawn again after a click that changes the route, and the arrow, the Make button
 -- and the shopping list moved to it at once (Craft.lua)
@@ -178,6 +180,11 @@ local function ShowItemTip(row)
   if not row.item then return end
   GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
   if GameTooltip.SetItemByID then GameTooltip:SetItemByID(row.item) else GameTooltip:AddLine(row.name:GetText() or "") end
+  local spots = last and ns.Catches(last.plan, row.item) and ns.CatchSpots(last.plan, row.item)       -- the fishing route: where the fish is caught
+  if spots then
+    GameTooltip:AddLine("Catch: " .. spots, 0.6, 0.9, 0.6, true)
+    GameTooltip:AddLine(ns.CATCH_NOTE, 0.7, 0.7, 0.7, true)
+  end
   -- the characters that can hand things to this one: the same auction house and faction
   local me, alts = Char(), ns.Settings().alts ~= false
   for _, c in pairs(FWCS_DB.__chars or {}) do
@@ -239,7 +246,9 @@ local function Build()
   win.gethelper:SetScript("OnClick", function() ns.ShowHelper() end)
   win.gethelper:Hide()
   -- the empty window's way on: a reload (a secure button running /reload: the game lets no addon call
-  -- ReloadUI). Shown while the helper runs and this character's house has no routes here yet
+  -- ReloadUI). Shown while the helper runs and this character's house has no routes here yet. While the Plans
+  -- addon is there but off (state A) it reads "Switch on and reload" and its PreClick enables the addon first, so one
+  -- click does both; the secure OnClick is left alone. PreClick reads the state Refresh set, never EmptyState().
   win.reload = CreateFrame("Button", "ForeverWowCraftWindowReload", win, "SecureActionButtonTemplate, UIPanelButtonTemplate")
   win.reload:SetSize(120, 24)
   win.reload:SetText("Reload now")
@@ -247,6 +256,9 @@ local function Build()
   win.reload:SetAttribute("type", "macro")
   win.reload:SetAttribute("macrotext", "/reload")
   win.reload:RegisterForClicks("AnyDown", "AnyUp")
+  win.reload:SetScript("PreClick", function()
+    if reloadSwitchesOn then ns.EnablePlans() end
+  end)
   win.reload:Hide()
 
   -- the first row: a button per profession the routes cover, made as they are known (DrawProfessions)
@@ -256,7 +268,7 @@ local function Build()
   -- buy recipes; every route may now)
   win.also = Button(win, 150, "", "ForeverWowCraftAlso")
   win.also:SetPoint("TOPLEFT", 12, -66)
-  win.focus = Button(win, 104, "", "ForeverWowCraftFocus")
+  win.focus = Button(win, 150, "", "ForeverWowCraftFocus")      -- "Mode: Fishing only" fits; the row is 12 + 150 + 6 + 150 + 6 + 154 + 6 + 100 = 584 of WIDTH
   win.focus:SetPoint("LEFT", win.also, "RIGHT", 6, 0)
   win.alts = Button(win, 154, "")
   win.alts:SetPoint("LEFT", win.focus, "RIGHT", 6, 0)
@@ -374,6 +386,120 @@ local function HelperNote()
   end
 end
 
+-- ================================================================ why the window is empty
+-- When no house is found for the character, the one cause the addon can tell, and its one next step. Worked
+-- out only when the window is drawn empty: nothing on a timer, nothing recorded or sent. From the files the helper
+-- writes (Plans.lua: FWCS_PLANS_WRITTEN, FWCS_SITE, FWCS_PLANS_PROBLEM) and the game's AddOns list.
+local PLANS_ADDON = "ForeverWowCraftPlans"
+local COVERED = { regions = { US = true, AU = true, EU = true, TW = true, KR = true },
+                  rules = { ["PvE"] = true, ["PvP"] = true, ["RP"] = true, ["RP PvP"] = true } }      -- the core's config.HOUSE_PATTERNS
+
+-- A function of the game's AddOns list: C_AddOns' where the client has it, else the old global, under pcall.
+-- Returns pcall's results, or false when the client has no such function.
+local function AddOnCall(name, ...)
+  local api = (type(C_AddOns) == "table" and C_AddOns[name]) or _G[name]
+  if type(api) ~= "function" then return false end
+  return pcall(api, ...)
+end
+
+-- The Plans addon in the AddOns list: "loaded", "off" (there, not loaded: unticked, or ticked and not yet
+-- reloaded), "missing" (no folder), "other" (there, and not loadable for a reason a tick does not mend), or nil when the
+-- client cannot say; and the reason the game gave (GetAddOnInfo's fifth value: "DISABLED", "MISSING", ...).
+local function PlansAddOnState()
+  local ok, first, _, _, _, fifth = AddOnCall("GetAddOnInfo", PLANS_ADDON)
+  if not ok then return nil end
+  local name, reason = first, fifth
+  if type(first) == "table" then name, reason = first.name, first.reason end       -- newer clients answer with a table
+  if name == nil or reason == "MISSING" then return "missing", reason end
+  local lok, loaded = AddOnCall("IsAddOnLoaded", PLANS_ADDON)
+  if not lok then return nil end
+  if loaded then return "loaded", reason end
+  if reason == nil or reason == "" or reason == "DISABLED" then return "off", reason or "" end
+  return "other", reason
+end
+
+local function CanSwitchOn()
+  return (type(C_AddOns) == "table" and type(C_AddOns.EnableAddOn) == "function") or type(EnableAddOn) == "function"
+end
+
+-- Enables the Plans addon (the secure reload button's PreClick, in state A only).
+function ns.EnablePlans()
+  AddOnCall("EnableAddOn", PLANS_ADDON)
+end
+
+local RELOAD = "|cffffd100Reload now|r"
+local SWITCH = "|cffffd100Switch on and reload|r"
+local PROBLEMS = { reach = true, update = true, unusable = true }
+
+-- { letter, summary, text = {...}, reload = whether the Reload button is the next step, switch = whether that button also
+-- switches the Plans addon on (state A with a client that can), debug = what the letter means and its inputs }
+local function EmptyState()
+  local summary = "No routes for this character's auction house yet."
+  if not FWCS_PLANS_WRITTEN then
+    local state, reason = PlansAddOnState()
+    if state == "off" then
+      return { letter = "A", summary = "The ForeverWowCraft Plans addon is switched off.", reload = true, switch = CanSwitchOn(),
+               text = CanSwitchOn() and {
+                 "The routes are kept in a second addon, ForeverWowCraft Plans, and it is not loaded.",
+                 "Click " .. SWITCH .. " below.", "",
+                 "Or tick it in the AddOns list (Esc > AddOns) and type /reload." } or {
+                 "The routes are kept in a second addon, ForeverWowCraft Plans, and it is not loaded.",
+                 "Tick it in the AddOns list (Esc > AddOns, or the AddOns button at character select),",
+                 "then click " .. RELOAD .. " below, or type /reload." },
+               debug = "plans addon off (reason " .. (reason ~= "" and reason or "none") .. ")" }
+    end
+    return { letter = "B", summary = summary, text = {
+               "The helper on this PC fetches the routes from foreverwowcraft.com and sends the prices the",
+               "addon records. Until it is installed, what is recorded stays on this PC." },
+             debug = "no helper has written Plans.lua (plans addon: " .. tostring(state) .. ")" }
+  end
+  local problem = FWCS_PLANS_PROBLEM
+  if type(problem) == "table" and PROBLEMS[problem.kind] then
+    local when = Age(problem.at)
+    local texts = {
+      reach = { string.format("The helper on this PC could not reach foreverwowcraft.com (%s).", when),
+                "It tries again by itself about every ten minutes.",
+                "Then click " .. RELOAD .. " below, or type /reload." },
+      update = { "The site's routes need a newer helper than the one on this PC.",
+                 "Update it from the helper's icon by the clock, or at foreverwowcraft.com/helper." },
+      unusable = { string.format("The helper fetched routes it could not use (%s).", when),
+                   "It tries again by itself about every ten minutes. Nothing for you to do." } }
+    return { letter = "C", summary = "The helper could not fetch the routes.", reload = problem.kind == "reach", text = texts[problem.kind],
+             debug = "helper could not fetch (" .. problem.kind .. ", " .. when .. ")" }
+  end
+  local realm, faction = GetRealmName() or "?", (UnitFactionGroup and UnitFactionGroup("player")) or ""
+  local ruled = ns.inv.Ruled(realm)
+  local site = type(FWCS_SITE) == "table" and type(FWCS_SITE.houses) == "table" and FWCS_SITE or nil
+  local again = { "Click " .. RELOAD .. " below, or type /reload. The helper sees a new character at its",
+                  "first reload and fetches the routes of its auction house within a minute;",
+                  "a second reload shows them here.", "" }
+  if site and ruled then
+    local listed = false
+    for _, h in ipairs(site.houses) do
+      if type(h) == "table" and h[1] == ruled and h[2] == faction then listed = true end
+    end
+    if listed then
+      table.insert(again, "Still empty after that? Check that the helper is running: its icon is by the clock.")
+      return { letter = "D", summary = summary, reload = true, text = again,
+               debug = "the site lists this house, Plans.lua does not have it (" .. #site.houses .. " houses listed)" }
+    end
+    local region, rules = realm:match("^CAMWOW (%a+)%d+ Realm %d+ (.+)$")
+    local remedy = { "The site plans them once its prices are recorded: open the auction house",
+                     "and click Save Prices." }
+    if not COVERED.regions[region or ""] then remedy = { "ForeverWowCraft does not cover this region yet." }
+    elseif not COVERED.rules[rules or ""] then remedy = { "ForeverWowCraft does not cover this kind of realm yet." } end
+    local out = { string.format("No routes on foreverwowcraft.com for %s (%s).", realm, faction ~= "" and faction or "?") }
+    for _, line in ipairs(remedy) do table.insert(out, line) end
+    return { letter = "E", summary = "The site has no routes for this auction house right now.", text = out,
+             debug = "the site has no routes for this house (" .. #site.houses .. " listed, region " .. tostring(region) .. ")" }
+  end
+  table.insert(again, site and "Still empty after that? ForeverWowCraft does not cover this realm yet."
+                            or "Still empty? Check that the helper is running and up to date: its icon is by the clock.")
+  return { letter = "F", summary = summary, reload = true, text = again,
+           debug = site and "cannot tell: the realm's name names no auction house" or "cannot tell: Plans.lua has no list of the site's houses" }
+end
+
+local debugged
 -- the slider set to the plan's range and the part of it shown
 SetSliders = function(plan, from, upto)
   win.range:Set(plan.start, plan.target, from, upto)
@@ -550,7 +676,7 @@ end
 
 -- ================================================================ what it shows
 local lines     -- the rows being put together: { text, need, have, buy, cost, item = itemID }
-local last      -- what the window shows: { house, plan, mine = the route less what is had, from }
+-- (last: what the window shows, { house, plan, mine = the route less what is had, from }; declared at the top)
 
 local function Line(text, need, have, buy, cost, item)
   table.insert(lines, { text, need or "", have or "", buy or "", cost or "", item = item })
@@ -581,6 +707,8 @@ local function Professions(house)
     if not by[plan.profession] then by[plan.profession] = {}; table.insert(names, plan.profession) end
     by[plan.profession][plan.variant] = plan
   end
+  local fish = house.fish                      -- the fishing route (Inventory.lua): one more route of its profession, picked apart from the variants
+  if fish and by[fish.profession] then by[fish.profession].fishing = fish end
   local skills = Char().skills
   local function rank(name) local _, p = next(by[name]); return skills[p.skill_line] end
   table.sort(names, function(a, b)
@@ -651,7 +779,9 @@ local function Effective(plan) return ns.Effective and ns.Effective(plan) or pla
 local function RouteOf(house, by, profession)
   local s = ns.Settings()
   local variants = by[profession or ""] or {}
-  local plan = variants[s.variant or ""]
+  -- "Fishing only" (Char().fishing, per character) is the route of the profession that has it,
+  -- and no other's: the choice stays while another profession is looked at
+  local plan = variants.fishing and Char().fishing and variants.fishing or variants[s.variant or ""]
   if not plan then
     for _, v in ipairs(house.variants or {}) do
       if variants[v[1]] then plan = variants[v[1]]; break end
@@ -730,6 +860,48 @@ function ns.RouteFor(profession)
   return (RouteOf(house, (Professions(house)), profession))
 end
 
+-- "Fishing only" (the site's cooking route that needs no auction house: the fish you catch, a
+-- vendor's goods and recipes), picked in the window's focus control or in Interface > AddOns
+-- (/fwcs fishing). The choice is the character's (Char().fishing), kept while another
+-- profession is looked at; only a house with the route (Inventory.lua) can have it.
+ns.FISHING_ABOUT = "cooking from the fish you catch, a vendor's goods and a vendor's recipes, nothing from the auction house."
+function ns.FishingAvailable()
+  local house = House()
+  return house ~= nil and house.fish ~= nil
+end
+function ns.FishingOn() return Char().fishing == true and ns.FishingAvailable() end
+function ns.FishingCommand(arg, quiet)
+  local on
+  if arg == "on" then on = true elseif arg == "off" then on = false else on = not ns.FishingOn() end
+  local there = ns.FishingAvailable()
+  if on and not there then
+    on = false
+    if not quiet and ns.Print then ns.Print("there is no fishing route for this character's auction house yet (it needs the helper, and a site that has it)") end
+  elseif not quiet and ns.Print then
+    ns.Print(on and ("Fishing only: " .. ns.FISHING_ABOUT .. " Choose it for cooking in the /fwc window (the Mode button), or /fwcs fishing off.")
+      or "cooking is planned as before (/fwcs fishing on for Fishing only)")
+  end
+  Char().fishing = on or nil
+  Repoint()
+end
+
+-- a note cut into lines of at most this many characters, at spaces (the list's rows are one line each)
+local NOTE_WIDTH = 105
+local wrapped = {}
+local function Wrapped(text)
+  local out = wrapped[text]
+  if out then return out end
+  out = {}
+  local line = ""
+  for word in text:gmatch("%S+") do
+    if line ~= "" and #line + #word + 1 > NOTE_WIDTH then table.insert(out, line); line = word
+    else line = line == "" and word or (line .. " " .. word) end
+  end
+  if line ~= "" then table.insert(out, line) end
+  wrapped[text] = out
+  return out
+end
+
 local function Fill(house, chosen)
   local c, plan = Char(), chosen.plan
   c.profession = chosen.profession            -- once shown, it stays the one shown
@@ -760,25 +932,36 @@ local function Fill(house, chosen)
   local variant = Variant(house, plan.variant) or { label = plan.variant, focus = "profit" }
   local also = chosen.also and chosen.applied and (" with " .. Title(chosen.also)) or ""
   win.also:SetText("Also: " .. (chosen.also and Title(chosen.also) or "none"))
-  -- the focus as a box, ticked for skill-up (profit is the plain route)
-  if variant.focus == "skill" then win.focus:SetText("|cff40ff40[x]|r skill-up")
-  elseif variant.focus == "profit" then win.focus:SetText("[  ] skill-up")
-  else win.focus:SetText("For: " .. FocusLabel(house, variant.focus)) end
-  if house.focus then win.focus:Show() else win.focus:Hide() end      -- a document from before: profit alone
+  -- the mode (the route's focus) as a button that names the one in use, in the window's gold
+  local fishing = plan.kind == "fishing"       -- the route is the fishing one: its costs are fish to catch (a count), not copper
+  local mode = fishing and "Fishing only" or variant.focus == "skill" and "Skill-up" or variant.focus == "profit" and "Profit"
+    or FocusLabel(house, variant.focus)
+  win.focus:SetText("Mode: |cffffd100" .. mode .. "|r")
+  if house.focus or fishing then win.focus:Show() else win.focus:Hide() end      -- a document from before: profit alone
   win.alts:SetText((ns.Settings().alts ~= false and "|cff40ff40[x]|r" or "[  ]") .. " other characters")
   win.title:SetText(string.format("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r  %s (%s), prices scanned %s",
     house.realm or "?", house.faction or "?", Age(house.scanned_at)))
   local whose = c.from[plan.profession] and "from the skill you gave (/fwc from auto undoes it)"
     or rank and "from your skill" or "a profession you do not have: the whole route"
-  win.summary:SetText(string.format(
-    "%s%s %d to %d%s, %s. %d crafts.\nTo buy: %s  (%s with nothing in hand; what you have saves %s)\nLeft to sell: %s     Net: %s%s",
-    Title(plan.profession), also, from, upto, upto < plan.target and string.format(" (of %d)", plan.target) or "", whose, mine.crafts,
-    Money(mine.spent), Money(all.spent), Money(all.spent - mine.spent), Money(mine.sold), Money(mine.sold - mine.spent), gold))
+  if fishing then              -- fish are a count: the gold is for the vendor's goods and recipes alone, and nothing is sold
+    win.summary:SetText(string.format(
+      "%s, Fishing only, %d to %d%s, %s. %d crafts.\nTo catch: %d fish  (%d with nothing in hand; what you have saves %d)\nTo buy from vendors (goods and recipes): %s%s",
+      Title(plan.profession), from, upto, upto < plan.target and string.format(" (of %d)", plan.target) or "", whose, mine.crafts,
+      mine.fish, all.fish, all.fish - mine.fish, Money(mine.spent), gold))
+  else
+    win.summary:SetText(string.format(
+      "%s%s %d to %d%s, %s. %d crafts.\nTo buy: %s  (%s with nothing in hand; what you have saves %s)\nLeft to sell: %s     Net: %s%s",
+      Title(plan.profession), also, from, upto, upto < plan.target and string.format(" (of %d)", plan.target) or "", whose, mine.crafts,
+      Money(mine.spent), Money(all.spent), Money(all.spent - mine.spent), Money(mine.sold), Money(mine.sold - mine.spent), gold))
+  end
   last = { house = house, plan = plan, mine = mine, all = all, from = from, upto = upto, capped = upto < wanted }
 
   -- what needs doing before the numbers are right
   local notices = {}
-  if chosen.also and not chosen.applied then
+  if fishing then
+    table.insert(notices, "|cff33ccffFishing only:|r " .. ns.CATCH_NOTE .. " It plans your cooking, not your Fishing skill, and no arrow leads to a fishing spot.")
+  end
+  if chosen.also and not chosen.applied and not fishing then
     table.insert(notices, string.format("|cff33ccffAlso %s:|r it changes nothing in this route, so the plain one is shown.", Title(chosen.also)))
   end
   if not rank and not c.from[plan.profession] then
@@ -832,9 +1015,10 @@ local function Fill(house, chosen)
   if #keys > 0 or #mine.learn > 0 then Head("Shopping list", "Need", "Have", "Buy", "Cost") end
   for _, item in ipairs(keys) do
     local buy = mine.buy[item] or 0
-    local text = N(item) .. ((price[item] and price[item][2] == "vendor") and "  |cff808080vendor|r" or "")
+    local catch = price[item] and price[item][2] == "catch"           -- a fish to catch: no price, the zones in the row's tooltip
+    local text = N(item) .. ((price[item] and price[item][2] == "vendor") and "  |cff808080vendor|r" or catch and "  |cff808080catch|r" or "")
     if buy == 0 then text = "|cff808080" .. N(item) .. "  (you have enough)|r" end
-    Line(text, all.buy[item] or 0, have[item] or 0, buy > 0 and buy or "|cff40ff40-|r", buy > 0 and Money(cost(item, buy)) or "", item)
+    Line(text, all.buy[item] or 0, have[item] or 0, buy > 0 and buy or "|cff40ff40-|r", buy > 0 and not catch and Money(cost(item, buy)) or "", item)
   end
   for _, learn in ipairs(mine.learn) do
     Line(N(learn.item) .. "  |cff808080recipe|r", 1, learn.owned and 1 or 0, learn.owned and "|cff40ff40-|r" or 1,
@@ -867,11 +1051,23 @@ local function Fill(house, chosen)
   local worth = plan.sell or {}
   local melt = {}
   for _, item in ipairs(plan.disenchant or {}) do melt[item] = true end
-  keys = Sorted(mine.sell, function(item) return (worth[item] or 0) * mine.sell[item] end)
+  keys = fishing and {} or Sorted(mine.sell, function(item) return (worth[item] or 0) * mine.sell[item] end)      -- the fishing route sells nothing
   if #keys > 0 then Head("Left to sell", "", "Units", "Each", "Total") end
   for _, item in ipairs(keys) do
     Line(N(item) .. (melt[item] and "  |cff808080disenchant|r" or ""), "", mine.sell[item],
       worth[item] and Money(worth[item]) or "|cff808080-|r", worth[item] and Money(worth[item] * mine.sell[item]) or "", item)
+  end
+
+  -- the fishing route's notes, once, here and not on every step: the era of the catch data and
+  -- the fishing skill's note; the rank notes (the Artisan quest) are in the rank-up verdict's tooltip
+  if fishing then
+    local any = false
+    for _, n in ipairs(plan.notes or {}) do
+      if n[3] ~= "rank" and (n[1] <= 1 or n[1] >= from) then      -- a rank's note is the rank-up verdict's (its tooltip), not the window's
+        if not any then Head("About this route"); any = true end
+        for _, part in ipairs(Wrapped(n[2])) do Line("|cffc7c7cf" .. part .. "|r") end
+      end
+    end
   end
 end
 
@@ -896,7 +1092,7 @@ function ns.AuctionatorImport(whole)
   end
   local keys = {}
   for item, n in pairs(out.buy) do
-    if n > 0 and not (price[item] and price[item][2] == "vendor") then table.insert(keys, item); name[item] = (ItemName(item, english[item])) end
+    if n > 0 and not (price[item] and (price[item][2] == "vendor" or price[item][2] == "catch")) then table.insert(keys, item); name[item] = (ItemName(item, english[item])) end
   end
   table.sort(keys, function(a, b) return name[a] < name[b] end)
   for _, item in ipairs(keys) do
@@ -906,7 +1102,7 @@ function ns.AuctionatorImport(whole)
     if price[item] then sum.cost = sum.cost + n * price[item][1] else sum.unpriced = sum.unpriced + 1 end
   end
   for _, learn in ipairs(out.learn) do
-    if not learn.owned then
+    if not learn.owned and plan.kind ~= "fishing" then          -- the fishing route's recipes are a vendor's: not for the auction house
       term(learn.item, 1)
       sum.items, sum.units, sum.recipes = sum.items + 1, sum.units + 1, sum.recipes + 1
       if learn.cost then sum.cost = sum.cost + learn.cost else sum.unpriced = sum.unpriced + 1 end
@@ -921,30 +1117,32 @@ Refresh = function()
   if not win or not win:IsShown() then return end
   CountBags()
   NoteSkills()
-  if FWCS_PLANS_WRITTEN then win.gethelper:Hide() else win.gethelper:Show() end
   win.arrowBox:SetChecked(ns.Settings().arrow ~= false)              -- as /fwcs arrow may have set it meanwhile
   local house = House()
   local chosen = house and Chosen(house)
   ShowRange(chosen and chosen.plan ~= nil)
   DrawProfessions(chosen)
+  local why = not chosen and EmptyState() or nil          -- the empty window's cause (only worked out when it is empty)
+  if why and why.letter == "A" then                       -- the Plans addon is there and off: "Switch it on" in the place of "Get the helper"
+    win.gethelper:Hide()
+  else
+    if FWCS_PLANS_WRITTEN then win.gethelper:Hide() else win.gethelper:Show() end
+  end
   local combat = InCombatLockdown and InCombatLockdown()          -- a secure button is left as it is in a fight
   if win.reload and not combat then
-    if not chosen and FWCS_PLANS_WRITTEN then win.reload:Show() else win.reload:Hide() end
+    reloadSwitchesOn = why ~= nil and why.letter == "A" and why.switch == true      -- what the button's PreClick reads
+    win.reload:SetText(reloadSwitchesOn and "Switch on and reload" or "Reload now")
+    win.reload:SetWidth(reloadSwitchesOn and 170 or 120)
+    if why and why.reload then win.reload:Show() else win.reload:Hide() end
   end
   if not chosen then
     lines, last = {}, nil
     win.also:SetText("-"); win.focus:SetText("-"); win.alts:SetText("-")
-    win.summary:SetText("No routes for this character's auction house yet.")
-    SetNotice(HelperNote() or "")
-    if FWCS_PLANS_WRITTEN then                -- the helper runs: it has not seen this character, or the site has none for its house
-      Line("Click |cffffd100Reload now|r below. The helper sees a new character at its first reload and")
-      Line("fetches the routes of its auction house within a minute; a second reload shows them here.")
-      Line("")
-      Line("Still empty after that? Then nobody has saved this realm and faction's auction house yet:")
-      Line("open it, click Save Prices, and the site has routes for it within minutes.")
-    else
-      Line("The helper on this PC fetches the routes from foreverwowcraft.com and sends the prices the")
-      Line("addon records. Until it is installed, what is recorded stays on this PC.")
+    win.summary:SetText(why.summary)
+    SetNotice(why.letter ~= "A" and HelperNote() or "")
+    for _, text in ipairs(why.text) do Line(text) end
+    if debugged ~= why.debug and ns.Debug and ns.Debug("empty window: " .. why.debug) then      -- `/fwcs debug`: which of the empty window's causes, once a change
+      debugged = why.debug                              -- remembered only when it was said (debug switched on later says it at the next draw)
     end
   elseif not chosen.plan then                 -- no profession trained, none picked: nothing to show yet
     lines, last = {}, nil
@@ -1154,17 +1352,39 @@ local function Wire()
     local at = house and Variant(house, s.variant)
     if not at then return end
     local keys = Distinct(house, part, default)
-    local to = Cycle(keys, at.focus, 1)
-    s.variant = VariantFor(house, at.recipes, to) or s.variant
+    -- on the profession that has the fishing route, "Fishing only" is a third choice after the two
+    -- focuses; on any other the control is what it was, and the choice kept for cooking is not touched
+    local fishing = house.fish and ns.ChosenProfession() == house.fish.profession
+    local c = Char()
+    if fishing then table.insert(keys, "fishing") end
+    local to = Cycle(keys, (fishing and c.fishing) and "fishing" or at.focus, 1)
+    if to == "fishing" then
+      c.fishing = true
+    else
+      if fishing then c.fishing = nil end
+      s.variant = VariantFor(house, at.recipes, to) or s.variant
+    end
     Repoint()
   end
   win.focus:SetScript("OnClick", function() Turn(4, function() return "profit" end) end)
   win.focus:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine("Skill-up focus")
-    GameTooltip:AddLine("Unticked, the route is for profit: what you make is sold at the auction house, and the route is the cheapest once it is. "
-      .. "Ticked, nothing is listed: what you make goes to a vendor, and the route is the cheapest per skill point net of that "
-      .. "(a dearer craft that a vendor pays well for can beat a cheaper one).", 1, 1, 1, true)
+    GameTooltip:AddLine("Mode")
+    GameTooltip:AddLine("Click to change.", 1, 1, 1, true)
+    local house = House()
+    local at = house and Variant(house, ns.Settings().variant)
+    local fish = house and house.fish and ns.ChosenProfession() == house.fish.profession
+    local active = fish and Char().fishing and "fishing" or at and at.focus
+    local modes = {
+      { "profit", "Profit", "What you make is sold at the auction house, and the route is the cheapest once it is." },
+      { "skill", "Skill-up", "Nothing is listed: what you make goes to a vendor, and the route is the cheapest per skill point net of that "
+        .. "(a dearer craft that a vendor pays well for can beat a cheaper one)." },
+    }
+    if fish then table.insert(modes, { "fishing", "Fishing only", ns.FISHING_ABOUT }) end
+    for _, m in ipairs(modes) do
+      local on = m[1] == active
+      GameTooltip:AddLine((on and "|cff40ff40> " .. m[2] .. "|r" or "   " .. m[2]) .. ": " .. m[3], 1, 1, 1, true)
+    end
     GameTooltip:Show()
   end)
   win.focus:SetScript("OnLeave", GameTooltip_Hide)
@@ -1259,7 +1479,7 @@ SlashCmdList.FOREVERWOWCRAFT = function(msg)
     plan = chosen and chosen.plan
   end
   if (cmd == "from" or cmd == "to" or cmd == "also") and not plan then
-    ns.Print(chosen and "no profession shown yet: pick one with the window's first button" or "no routes for this character's auction house yet")
+    ns.Print(chosen and "no profession shown yet: pick one with the window's first button" or EmptyState().summary)
   elseif cmd == "from" then
     local c = Char()
     c.from[plan.profession] = tonumber(arg)

@@ -13,11 +13,12 @@
 --   WHY: the routes are priced from them, and a recipe's level gate is learned from the scrolls.
 --   NEVER: no character name, gold, bags or bank, chat, guild or position goes with a scan. What a
 --     character has is kept for /fwc (FWCS_DB.__chars, Inventory.lua) and is never sent.
---   WHERE: the helper sends a scan to the project's pipe, pooled with other players' scans into
---     one shared database that the project means to publish openly.
+--   WHERE: the helper sends a scan to the project's pipe, pooled with other players' scans to
+--     price the routes.
 --
 -- Records auction-house price ladders for the items on its lists.
--- The helper (`python fwch.py lists`) writes Queue.lua next to this file:
+-- The helper fetches the lists and writes Queue.lua into the Plans addon's folder (ForeverWowCraftPlans,
+-- loaded after this one) and its own state folder; the Queue.lua beside this file is the one it ships with:
 --     FWCS_QUEUE = { ["list name"] = { {itemID, "item name"}, ... }, ... }
 -- With the auction house open, the on-screen button runs one of two things:
 --   FULL  - C_AuctionHouse.ReplicateItems(): every auction on the house in one server reply
@@ -47,8 +48,9 @@
 --     timeLeft is the auction house's band: 1 short (under 30 min), 2 medium (under 2 h),
 --     3 long (under 12 h), 4 very long; nil when the client did not say. Between two scans an
 --     auction that vanished while it had hours left was bought or taken down, not expired.
---   FWCS_DB[key].__history[itemID] = { {time, lowestPrice, unitsListed}, ... }  -- one per scan
---   FWCS_DB.__ui = { pos, hidden, auto, alert, ding, log, lastFull, lastFullRefused, house } -- settings
+--   FWCS_DB[key].__history[itemID] = { {time, lowestPrice, unitsListed}, ... }  -- one per scan, the last 48 h (48 at most)
+--   FWCS_DB.__ui = { pos, hidden, auto, alert, ding, log, lastFull, lastFullRefused, house, remind, arrow, arrowKeep,
+--                    arrowPos, winPos, shop, alts, haveFirst, variant, asideOpen, levelRoutes, fishing } -- settings
 --   FWCS_DB.__realms = { [name without spaces] = name as shown }   -- this account's realms
 --   FWCS_DB.__groups = { [house's realm] = { connected realms, without spaces } }
 --   FWCS_DB.__chars = { ["<house's realm>|<character>"] = what it has: see Window.lua }
@@ -80,7 +82,8 @@ local FULL_COOLDOWN = 15 * 60   -- server-enforced, per account
 local AUTO_WAIT = 120           -- seconds the snapshot by itself waits for the shopping list's buying, at most
 local LOGIN_RING_DELAY = 5      -- seconds after a login before the "FULL is ready" sound
 local TELEMETRY_EVERY = 25      -- items between progress lines in the panel
-local HISTORY_MAX = 200         -- price-history points kept per item (one per scan that covered it)
+local HISTORY_MAX = 48          -- price-history points kept per item, at most (one per complete scan that covered it)
+local HISTORY_KEEP = 48 * 3600  -- ... and none older than this, in seconds: only developer tools read it, over the last 24 h
 local SCAN_SIZE = { 900, 72 }   -- progress bar
 local SAVE_SIZE = { 340, 300 }  -- FULL / SCAN / SAVE box
 local LOG_LINES, LOG_LINE_HEIGHT = 8, 17
@@ -89,6 +92,31 @@ local LOG_LINES, LOG_LINE_HEIGHT = 8, 17
 local function Settings()
   FWCS_DB.__ui = FWCS_DB.__ui or {}
   return FWCS_DB.__ui
+end
+
+-- An item's price history as kept: the newest HISTORY_MAX points, none older than HISTORY_KEEP, in
+-- the order they were. Until 1.8.0 each item kept 200 points, which grew the saved file from 6 to
+-- 35 MB though nothing a player sees reads it and the helper does not send it.
+local function TrimmedHistory(h, now)
+  local out = {}
+  for i = math.max(1, #h - HISTORY_MAX + 1), #h do
+    local row = h[i]
+    if type(row) == "table" and type(row[1]) == "number" and row[1] >= now - HISTORY_KEEP then table.insert(out, row) end
+  end
+  return out
+end
+
+-- At login, every house's history trimmed, so that a player who no longer scans gets a smaller file too.
+local function TrimAllHistory()
+  local now = time()
+  for key, data in pairs(FWCS_DB) do
+    if type(key) == "string" and key:sub(1, 2) ~= "__" and type(data) == "table" and type(data.__history) == "table" then
+      for item, h in pairs(data.__history) do       -- existing fields only are changed or cleared: allowed while walking
+        local kept = type(h) == "table" and TrimmedHistory(h, now) or {}
+        data.__history[item] = #kept > 0 and kept or nil
+      end
+    end
+  end
 end
 
 -- Two ways to scan. With the bar (FULL / SCAN / SAVE and the progress box) the scanner is in
@@ -528,8 +556,13 @@ UpdateStatus = function()
     BarColor(COLORS.save)
     ui.big:SetText("SAVE")
     ui.big:SetTextColor(1, 1, 1)
-    ui.text:SetFormattedText("%d recorded, %d skipped%s\nclick to write to disk", state.done, state.skipped,
-      state.lastDuration and ("  in " .. FormatClock(state.lastDuration)) or "")
+    local when = state.lastDuration and ("  in " .. FormatClock(state.lastDuration)) or ""
+    if state.kind == "snapshot" and state.snapAuctions then
+      ui.text:SetFormattedText("%s auctions read, %s priced%s\nclick to write to disk", FormatLargeNumber(state.snapAuctions),
+        FormatLargeNumber(state.snapPriced or 0), when)
+    else
+      ui.text:SetFormattedText("%d recorded, %d skipped%s\nclick to write to disk", state.done, state.skipped, when)
+    end
     ui:Show()
     SaveButton(true)
 
@@ -661,8 +694,8 @@ end
 -- yet.
 -- NEVER: nothing of the character: not its name, its level, its gold or what else it carries.
 -- WHERE: the helper sends the rows with the vendors met (fwchelper/pipe.py vendors_document) to
--- the project's pipe, pooled with other players' sightings into one shared database that the
--- project means to publish openly. Everything gathered is listed in docs/scanner-addon.md,
+-- the project's pipe, pooled with other players' sightings to know Forever's vendors, trainers
+-- and recipes. Everything gathered is listed in docs/scanner-addon.md,
 -- "What the addon gathers".
 
 local function ItemData(item)                -- the client's item info, whichever name it has
@@ -884,8 +917,7 @@ local function Record(entry, listings, complete, reason)
     db.__history = db.__history or {}
     local h = db.__history[entry.itemID] or {}
     table.insert(h, { time(), listings[1] and listings[1][1] or 0, total })
-    while #h > HISTORY_MAX do table.remove(h, 1) end
-    db.__history[entry.itemID] = h
+    db.__history[entry.itemID] = TrimmedHistory(h, time())
   end
 end
 
@@ -913,6 +945,7 @@ local function Begin(kind, total)
   state.reading, state.readAway, state.readAt, state.readTotal = nil, nil, nil, nil
   state.done, state.skipped, state.deferrals, state.skipReasons = 0, 0, 0, {}
   state.pages, state.listings, state.withAuctions, state.noAuctions, state.assumed = 0, 0, 0, 0, 0
+  state.snapAuctions, state.snapPriced = nil, nil   -- a snapshot's real figures, set when it has read the house
   state.token, state.attempt = state.token + 1, state.attempt + 1
   state.startedAt = GetTime()
   if state.ticker then state.ticker:Cancel() end
@@ -943,8 +976,14 @@ local function Finish(reason)
     detail = " Skips: " .. table.concat(parts, ", ") .. "."
   end
   if state.deferrals > 0 then detail = detail .. string.format(" %d deferral(s).", state.deferrals) end
-  Print(string.format("%s %s in %s: %d items recorded, %d skipped.%s %s",
-    state.kind or "scan", reason or "finished", FormatClock(state.lastDuration or 0), state.done, state.skipped, detail,
+  local what = string.format("%d items recorded, %d skipped.", state.done, state.skipped)
+  if state.kind == "snapshot" and not reason and state.snapAuctions then
+    -- a snapshot records every queued item, so that count is only the list's size: say what was seen
+    what = string.format("%s auctions read, %s of %s route items priced.", FormatLargeNumber(state.snapAuctions),
+      FormatLargeNumber(state.snapPriced or 0), FormatLargeNumber(state.done))
+  end
+  Print(string.format("%s %s in %s: %s%s %s",
+    state.kind or "scan", reason or "finished", FormatClock(state.lastDuration or 0), what, detail,
     BarHidden() and "Click the ForeverWowCraft button at the auction house (or /reload) to save and send them."
                  or "Click SAVE (or /reload) to write to disk."))
   UpdateStatus()
@@ -1131,7 +1170,7 @@ StartScan = function(listName)
     end
   end
   if not rows then
-    Print("which list? /fwcs scan <name>. Available: " .. (#names > 0 and table.concat(names, " | ") or "none (run fwch.py lists, then /reload)"))
+    Print("which list? /fwcs scan <name>. Available: " .. (#names > 0 and table.concat(names, " | ") or "none: start the ForeverWowCraft Helper on this PC, which fetches them, then /reload"))
     return
   end
   if not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then Print("open the auction house first"); return end
@@ -1195,10 +1234,10 @@ local function RingAtLogin()
 end
 
 -- ================================================================ full snapshot
--- GetReplicateItemInfo(i) (0-based) returns positional fields; these three are present even when
--- the item's data is not cached, which is all a ladder needs. The time left comes from a call
--- of its own, as the band (1 short .. 4 very long) the old auction house API used.
-local REPLICATE = { count = 3, buyout = 10, itemID = 17 }
+-- GetReplicateItemInfo(i) (0-based) returns positional fields: the 3rd is the count, the 10th the
+-- buyout, the 17th the item. These three are present even when the item's data is not cached,
+-- which is all a ladder needs. The time left comes from a call of its own, as the band (1 short
+-- .. 4 very long) the old auction house API used.
 
 local function ReplicateTimeLeft(i)
   if not C_AuctionHouse.GetReplicateItemTimeLeft then return nil end
@@ -1212,7 +1251,7 @@ StartSnapshot = function(force)
   if SharedHouse() then Print(SHARED_NOT_SCANNED); return end
   if state.running then Print("a scan is already running; /fwcs stop first"); return end
   local wanted = QueuedItems()
-  if next(wanted) == nil then Print("no queued lists (run fwch.py lists, then /reload)"); return end
+  if next(wanted) == nil then Print("no queued lists: start the ForeverWowCraft Helper on this PC, which fetches them, then /reload"); return end
   local left = FullCooldownLeft()
   if left > 0 and not force then
     Print(string.format("full snapshot is on its 15-minute cooldown for another %s", FormatClock(left)))
@@ -1231,7 +1270,7 @@ StartSnapshot = function(force)
     local n = C_AuctionHouse.GetNumReplicateItems()
     Log(string.format("server returned %s auctions; reading ...", FormatLargeNumber(n)))
     state.reading, state.readTotal, state.readAt = true, n, 0
-    local ladders, distinct, auctions, i = {}, 0, 0, 0
+    local ladders, seen, distinct, auctions, i = {}, {}, 0, 0, 0
     local bands = { 0, 0, 0, 0, unsaid = 0 }
     local function batch()
       if not state.running or state.token ~= token then return end
@@ -1246,14 +1285,17 @@ StartSnapshot = function(force)
       end
       local stop = math.min(n, i + 500)
       while i < stop do
-        local info = { C_AuctionHouse.GetReplicateItemInfo(i) }
-        local itemID, count, buyout = info[REPLICATE.itemID], info[REPLICATE.count], info[REPLICATE.buyout]
+        -- the fields by position, with no table made for each auction: a house has over 100,000 of them
+        local _, _, count, _, _, _, _, _, _, buyout, _, _, _, _, _, _, itemID = C_AuctionHouse.GetReplicateItemInfo(i)
         if itemID and count and count > 0 and buyout and buyout > 0 then
-          if not ladders[itemID] then ladders[itemID] = {}; distinct = distinct + 1 end
-          local band = ReplicateTimeLeft(i)
-          if band then bands[band] = bands[band] + 1 else bands.unsaid = bands.unsaid + 1 end
-          table.insert(ladders[itemID], { math.max(1, math.floor(buyout / count)), count, band })   -- under a copper a unit: a copper
-          auctions = auctions + 1
+          auctions = auctions + 1                    -- every auction and item counts in the figures; only a listed item gets a ladder
+          if not seen[itemID] then seen[itemID] = true; distinct = distinct + 1 end
+          if wanted[itemID] then
+            local band = ReplicateTimeLeft(i)
+            if band then bands[band] = bands[band] + 1 else bands.unsaid = bands.unsaid + 1 end
+            ladders[itemID] = ladders[itemID] or {}
+            table.insert(ladders[itemID], { math.max(1, math.floor(buyout / count)), count, band })   -- under a copper a unit: a copper
+          end
         end
         i = i + 1
       end
@@ -1269,9 +1311,10 @@ StartSnapshot = function(force)
         state.done = state.done + 1
         if #rows > 0 then priced = priced + 1 else none = none + 1 end
       end
+      state.snapAuctions, state.snapPriced = auctions, priced
       Log(string.format("snapshot: %s auctions, %s distinct items on the AH; %d queued items priced, %d with no auctions",
         FormatLargeNumber(auctions), FormatLargeNumber(distinct), priced, none))
-      Log(string.format("time left: %s short, %s medium, %s long, %s very long, %s unsaid",
+      Log(string.format("time left of the queued items' auctions: %s short, %s medium, %s long, %s very long, %s unsaid",
         FormatLargeNumber(bands[1]), FormatLargeNumber(bands[2]), FormatLargeNumber(bands[3]), FormatLargeNumber(bands[4]),
         FormatLargeNumber(bands.unsaid)))
       NoteFullArrived()
@@ -1406,6 +1449,7 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
     return
   end
   ns.DropRecipesWithoutLevel()                           -- PLAYER_LOGIN: the saved file is in
+  TrimAllHistory()
   if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then
     Print("this client does not use the modern auction house API; scanner disabled")
     return
@@ -1416,7 +1460,7 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
   ArmReadyAlert()
   local n = #QueueNames()
   if n == 0 then
-    Print("loaded, but no queued lists: run `python fwch.py lists`, then /reload.")
+    Print("loaded, but no queued lists: start the ForeverWowCraft Helper on this PC, which fetches them, then /reload.")
   elseif BarHidden() then
     Print(string.format("loaded. Prices are recorded at the auction house%s; /fwc shows what your professions need. /fwcs for commands.",
       AutoScanEnabled() and " by itself" or " (/fwcs full)"))
@@ -1432,6 +1476,7 @@ end)
 
 -- what Window.lua and Background.lua use of this file
 ns.Print, ns.Settings, ns.RealmKey, ns.QueuedItems = Print, Settings, RealmKey, QueuedItems
+ns.Debug = function(line) if state.debug then Print(line); return true end end       -- a line in chat while /fwcs debug is on; true when it was printed
 ns.scanner = {
   Dirty = function() return dirty end,
   Running = function() return state.running end,
@@ -1479,7 +1524,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     StartScan(arg)
   elseif cmd == "lists" then
     local names = QueueNames()
-    Print(#names > 0 and ("queued lists: " .. table.concat(names, " | ")) or "no queued lists (run fwch.py lists, then /reload)")
+    Print(#names > 0 and ("queued lists: " .. table.concat(names, " | ")) or "no queued lists: start the ForeverWowCraft Helper on this PC, which fetches them, then /reload")
   elseif cmd == "stop" then
     if state.running then Finish("stopped") else Print("not running") end
   elseif cmd == "save" then
@@ -1519,7 +1564,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     Print("status bar position reset")
   elseif cmd == "alert" then
     Settings().alert = not AlertEnabled()
-    Print(AlertEnabled() and "finish alert ON: sound + pulsing bar" or "finish alert OFF")
+    Print(AlertEnabled() and "finish alert ON: a sound when prices are ready to save" or "finish alert OFF: no sound when prices are ready to save")
   elseif cmd == "ding" then
     Settings().ding = not ReadyAlertEnabled()
     ArmReadyAlert()
@@ -1544,6 +1589,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     ns.ShopCommand(arg)
   elseif cmd == "have" then
     ns.HaveCommand(arg)
+  elseif cmd == "fishing" or cmd == "fish" then
+    ns.FishingCommand(arg)
   elseif cmd == "needs" then
     ns.NeedsCommand(arg)
   elseif cmd == "debug" then
@@ -1556,7 +1603,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     if state.running then
       Print(string.format("%s running: %d/%d done", state.kind, state.done + state.skipped, state.total))
     else
-      Print(string.format("idle. %d items stored for %s%s. Commands: /fwcs full [force] | scan [list] | lists | stop | save | clear | house | bar | auto | options | reset | alert | ding | log | arrow | places | shop | have | needs | debug. /fwc: what your professions still need",
+      Print(string.format("idle. %d items stored for %s%s. Commands: /fwcs full [force] | scan [list] | lists | stop | save | clear | house | bar | auto | offer | plan | options | reset | alert | ding | remind | log | arrow | places | shop | have | fishing | needs | debug. /fwc: what your professions still need",
         n, DatasetName(), dirty and " (unsaved: click SAVE, /fwcs save or /reload)" or ""))
     end
   end

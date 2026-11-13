@@ -56,13 +56,31 @@ local function Ruled(realm)
   return Spelt(region .. " " .. rules)
 end
 
+-- The fishing route (Plans.lua's FWCS_ROUTES = { [faction] = plan }, written by helper 1.8.0 and
+-- later; nothing earlier writes or reads it) joined to a house, once: house.fish is the plan, and
+-- the names of its items go into house.items (the fish are not in the house's own). A house of
+-- no faction, a faction with no route, or a route that is not a fishing plan, has none.
+local function Attach(house)
+  if house.fishLooked then return house end
+  house.fishLooked = true
+  local route = type(FWCS_ROUTES) == "table" and FWCS_ROUTES[house.faction or ""] or nil
+  if type(route) == "table" and route.kind == "fishing" and type(route.steps) == "table" and type(route.profession) == "string" then
+    house.fish = route
+    house.items = house.items or {}
+    for item, name in pairs(type(route.names) == "table" and route.names or {}) do
+      if house.items[item] == nil then house.items[item] = name end
+    end
+  end
+  return house
+end
+
 local function House()
   local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
   local mine, group = Spelt(GetRealmName()), Spelt(ns.RealmKey())
   for key, house in pairs(FWCS_PLANS or {}) do
     if house.faction == faction then
       for _, realm in ipairs(house.realms or {}) do
-        if realm == mine or realm == group then return house, key end
+        if realm == mine or realm == group then return Attach(house), key end
       end
     end
   end
@@ -71,7 +89,7 @@ local function House()
   local ruled = Ruled(GetRealmName())
   if ruled then
     for key, house in pairs(FWCS_PLANS or {}) do
-      if house.faction == faction and Spelt(house.realm or "") == ruled then return house, key end
+      if house.faction == faction and Spelt(house.realm or "") == ruled then return Attach(house), key end
     end
   end
 end
@@ -191,13 +209,165 @@ local function InMail(item)
   return math.max(seen, coming)
 end
 
-local function NoteMailed(item, units)
+-- A purchase is counted once, whichever way it is noticed (the Buy button, a hook, the
+-- game's system line): one noted within the last moments is not noted again when either is
+-- the system line (which comes before or after the event, as the client likes).
+-- `how`: "chat" for the system line; nil for the others
+local recent = {}
+local DOUBLE = 10
+local function NoteMailed(item, units, how)
+  local now = GetTime and GetTime() or 0
+  local r = recent[item]
+  if r and now - r.at < DOUBLE and (how == "chat" or r.how == "chat") then return false end
+  recent[item] = { at = now, how = how }
   local c = Char()
   c.mailed = c.mailed or {}
   c.mailed[item] = (c.mailed[item] or 0) + (units or 1)
   c.mailedAt = time()
   if ns.HaveChanged then ns.HaveChanged() end
+  return true
 end
+
+-- A purchase made by hand in the game's own auction-house window is noticed too, so that its
+-- delivery by mail is known at once (the user, 11 Nov 2026: a recipe bought by hand, and the
+-- arrow did not go to a mailbox). Post-hooks on the client's purchase calls remember what was
+-- asked, O(1) each; the success event counts it (NoteMailed), a failure or the house closing
+-- drops it. The calls the addon's own Buy button makes (Shop.lua) go through the same
+-- functions: it sets `buyingOwn` around them and counts its own success, so nothing is counted twice.
+--   item auction: C_AuctionHouse.PlaceBid(auctionID, amount); a buyout only (amount at or over
+--     the buyout). The item behind the auction id is read, in this order, from
+--       "info":    C_AuctionHouse.GetAuctionInfoByID, when this client has it;
+--       "results": the item last searched (a post-hook on SendSearchQuery, and the item search
+--                  events), whose results (GetNumItemSearchResults / GetItemSearchResultInfo,
+--                  as the scanner reads them) hold the auction id, with its buyout;
+--     and when neither knows it, the game's own system line for a won auction (ERR_AUCTION_WON_S):
+--       "chat":    while the house is open and shortly after, the line naming an item the route
+--                  tracks is counted, unless the other ways counted it already.
+--   commodity: C_AuctionHouse.ConfirmCommoditiesPurchase(itemID, quantity)  ("commodity")
+-- `/fwcs debug` says in chat which way noticed a purchase (ns.Debug).
+local handAuctions, handCommodity = {}, nil
+local buyingOwn = false
+local lastKey                                  -- the item key last searched: the item page the player buys from
+
+local function Said(how, item, units)
+  if ns.Debug then ns.Debug(string.format("a purchase by hand noticed (%s): %d x item %d", how, units or 1, item)) end
+end
+
+-- the item, buyout and quantity of an auction id, and the way it was known
+local function AuctionOf(auctionID)
+  if C_AuctionHouse.GetAuctionInfoByID then
+    local ok, info = pcall(C_AuctionHouse.GetAuctionInfoByID, auctionID)
+    if ok and type(info) == "table" and info.itemKey and info.itemKey.itemID then
+      return info.itemKey.itemID, tonumber(info.buyoutAmount) or 0, tonumber(info.quantity) or 1, "info"
+    end
+  end
+  if lastKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
+    local ok, n = pcall(C_AuctionHouse.GetNumItemSearchResults, lastKey)
+    for i = 1, ok and tonumber(n) or 0 do
+      local ok2, info = pcall(C_AuctionHouse.GetItemSearchResultInfo, lastKey, i)
+      if ok2 and type(info) == "table" and info.auctionID == auctionID then
+        return (info.itemKey and info.itemKey.itemID) or lastKey.itemID, tonumber(info.buyoutAmount) or 0, tonumber(info.quantity) or 1, "results"
+      end
+    end
+  end
+end
+
+local function OwnCall(fn, ...)
+  buyingOwn = true
+  local ok, err = pcall(fn, ...)
+  buyingOwn = false
+  if not ok then error(err, 0) end
+end
+
+if hooksecurefunc and C_AuctionHouse then
+  if C_AuctionHouse.PlaceBid then
+    pcall(hooksecurefunc, C_AuctionHouse, "PlaceBid", function(auctionID, amount)
+      if buyingOwn or not auctionID then return end
+      local item, buyout, units, how = AuctionOf(auctionID)
+      if item and buyout > 0 and (tonumber(amount) or 0) >= buyout then    -- a bid under the buyout is not a purchase
+        handAuctions[auctionID] = { item = item, units = units, how = how }
+      end
+    end)
+  end
+  if C_AuctionHouse.SendSearchQuery then
+    pcall(hooksecurefunc, C_AuctionHouse, "SendSearchQuery", function(key)
+      if type(key) == "table" and key.itemID then lastKey = key end
+    end)
+  end
+  if C_AuctionHouse.ConfirmCommoditiesPurchase then
+    pcall(hooksecurefunc, C_AuctionHouse, "ConfirmCommoditiesPurchase", function(item, units)
+      if buyingOwn or not item then return end
+      handCommodity = { item = item, units = tonumber(units) or 1 }
+    end)
+  end
+end
+
+local purchases = CreateFrame("Frame")
+for _, event in ipairs({ "AUCTION_HOUSE_PURCHASE_COMPLETED", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED", "AUCTION_HOUSE_CLOSED",
+                         "AUCTION_HOUSE_SHOW", "ITEM_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_ADDED" }) do
+  pcall(purchases.RegisterEvent, purchases, event)
+end
+
+-- The game's line for a won auction, as a pattern, from its own global string (any language):
+-- "You won an auction for %s". Built again only when the string differs from the last one.
+local wonFormat, wonPattern
+local function WonPattern()
+  local fmt = ERR_AUCTION_WON_S
+  if type(fmt) ~= "string" then return nil end
+  if fmt ~= wonFormat then
+    wonFormat = fmt
+    local marked = fmt:gsub("%%%d?%$?s", "\1")                      -- %s, %1$s: where the item stands
+    marked = marked:gsub("[%^%$%(%)%.%%%[%]%*%+%-%?]", "%%%0")
+    wonPattern = "^" .. marked:gsub("\1", "(.+)") .. "$"
+  end
+  return wonPattern
+end
+
+-- the item a won-auction line names, when it is one the route tracks: from its link, else its name
+local function WonItem(msg)
+  local pattern = WonPattern()
+  local what = pattern and msg:match(pattern)
+  if not what then return nil end
+  local id = tonumber(what:match("item:(%d+)"))
+  local tracked = Tracked()
+  if id then return tracked[id] and id or nil end
+  local name = what:match("%[(.-)%]") or what
+  for item in pairs(tracked) do
+    if ns.ItemName and ns.ItemName(item) == name then return item end
+  end
+end
+
+local chatOn = false
+local function Chat(on)
+  if on == chatOn then return end
+  chatOn = on
+  pcall(on and purchases.RegisterEvent or purchases.UnregisterEvent, purchases, "CHAT_MSG_SYSTEM")
+end
+
+purchases:SetScript("OnEvent", function(_, event, a1)
+  if event == "AUCTION_HOUSE_PURCHASE_COMPLETED" then
+    local h = handAuctions[a1]
+    handAuctions[a1] = nil
+    if h and NoteMailed(h.item, h.units) then Said(h.how, h.item, h.units) end
+  elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+    local h = handCommodity
+    handCommodity = nil
+    if h and NoteMailed(h.item, h.units) then Said("commodity", h.item, h.units) end
+  elseif event == "ITEM_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_ADDED" then
+    if type(a1) == "table" and a1.itemID then lastKey = a1 end
+  elseif event == "CHAT_MSG_SYSTEM" then
+    local item = type(a1) == "string" and WonItem(a1)
+    if item and NoteMailed(item, 1, "chat") then Said("system line", item, 1) end
+  elseif event == "AUCTION_HOUSE_SHOW" then
+    Chat(true)
+  else                                                    -- failed, or the house closed: nothing was bought
+    handCommodity = nil
+    if event == "AUCTION_HOUSE_CLOSED" then
+      handAuctions, lastKey = {}, nil
+      if C_Timer and C_Timer.After then C_Timer.After(20, function() if not ahOpen then Chat(false) end end) else Chat(false) end
+    end
+  end
+end)
 
 -- The character's own auctions still up (not the sold ones: those are money in the mail), once
 -- the auction house has sent the list (asked for when it opens; the game's own Auctions tab
@@ -325,4 +495,4 @@ end)
 
 ns.inv = { Spelt = Spelt, Char = Char, House = House, Tracked = Tracked, Count = Count, CountBags = CountBags, CountBank = CountBank,
            CountMail = CountMail, NoteSkills = NoteSkills, SkillsReadable = SkillsReadable, Have = Have, PLACES = PLACES,
-           InMail = InMail, NoteMailed = NoteMailed, Retrack = Retrack }
+           InMail = InMail, NoteMailed = NoteMailed, OwnCall = OwnCall, Retrack = Retrack, Ruled = Ruled }

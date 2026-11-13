@@ -5,12 +5,37 @@ on:
     tags: ["v*"]
 
 jobs:
+  # The tests, with a token that can write nothing: what they install from PyPI never runs beside the
+  # release's token or the zips (13 Nov 2026)
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Tests
+        run: |
+          pip install --require-hashes --only-binary=:all: -r .github/test-requirements.txt
+          for t in tests/test_*.py; do echo "== $t"; python "$t" || exit 1; done
+          python tests/lua_check.py addon/ForeverWowCraftScanner/*.lua
+
+  # The draft and the zips: nothing installed here (the zips are zip and git archive alone)
   release:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      id: ${{ steps.draft.outputs.id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -21,11 +46,6 @@ jobs:
           test "$V" = "$T" || { echo "tag v$T, but fwchelper is $V"; exit 1; }
           grep -q "^## Version: $V$" addon/ForeverWowCraftScanner/ForeverWowCraftScanner.toc || { echo "the .toc is not at $V"; exit 1; }
           echo "VERSION=$V" >> "$GITHUB_ENV"
-      - name: Tests
-        run: |
-          pip install lupa pillow
-          for t in tests/test_*.py; do echo "== $t"; python "$t" || exit 1; done
-          python tests/lua_check.py addon/ForeverWowCraftScanner/*.lua
       - name: The zips
         run: |
           mkdir -p dist
@@ -34,28 +54,21 @@ jobs:
           ls -l dist
       # A draft until the installer is on it: published here, the release was the newest for the
       # minutes the Windows build took, with no .msi to download at releases/latest (the site's
-      # link, and the helpers' own update check) and players met an error (8 Nov 2026)
-      - name: The GitHub release, a draft until the installer is on it
+      # link, and the helpers' own update check) and players met an error (8 Nov 2026). Since 13 Nov
+      # 2026 it stays a draft after every file is on it, until the project publishes it (publish.yml).
+      # Its id goes to the Mac's job: GitHub's releases/tags/<tag> answers a published release alone
+      # (gh finds a draft by its tag through GraphQL, which the Mac's curl does not)
+      - name: The GitHub release, a draft
+        id: draft
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --draft --title "ForeverWowCraft Helper $VERSION" --generate-notes
-      - name: CurseForge
-        env:
-          TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
-          PROJECT: ${{ vars.CURSEFORGE_PROJECT_ID }}
-          GAME_VERSION: ${{ vars.CURSEFORGE_GAME_VERSION }}
-          RELEASE_TYPE: ${{ vars.CURSEFORGE_RELEASE_TYPE || 'release' }}
         run: |
-          if [ -z "$TOKEN" ] || [ -z "$PROJECT" ] || [ -z "$GAME_VERSION" ]; then
-            echo "CurseForge: skipped. CURSEFORGE_TOKEN (a secret), CURSEFORGE_PROJECT_ID and CURSEFORGE_GAME_VERSION (variables) are not all set."
-            exit 0
-          fi
-          ID=$(curl -sf -H "x-api-token: $TOKEN" https://wow.curseforge.com/api/game/versions | python -c "import json, os, sys; v = [x['id'] for x in json.load(sys.stdin) if x['name'] == os.environ['GAME_VERSION']]; print(v[0] if v else '')")
-          test -n "$ID" || { echo "CurseForge lists no game version named $GAME_VERSION"; exit 1; }
-          case "$RELEASE_TYPE" in alpha|beta|release) ;; *) echo "CURSEFORGE_RELEASE_TYPE must be alpha, beta or release, not $RELEASE_TYPE"; exit 1;; esac
-          META='{"changelog":"https://github.com/'"$GITHUB_REPOSITORY"'/releases/tag/'"$GITHUB_REF_NAME"'","changelogType":"markdown","gameVersions":['"$ID"'],"releaseType":"'"$RELEASE_TYPE"'"}'
-          curl -sf -H "x-api-token: $TOKEN" -F "metadata=$META" -F "file=@dist/ForeverWowCraftScanner-$VERSION.zip" "https://wow.curseforge.com/api/projects/$PROJECT/upload-files"
-          echo "CurseForge: uploaded ForeverWowCraftScanner-$VERSION.zip to project $PROJECT for game version $GAME_VERSION ($ID) as $RELEASE_TYPE"
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --draft --title "ForeverWowCraft Helper $VERSION" --generate-notes
+          id=$(gh release view "$GITHUB_REF_NAME" --json databaseId,isDraft --jq 'select(.isDraft) | .databaseId')
+          [[ "$id" =~ ^[0-9]+$ ]] || { echo "the draft just made is not found by its tag"; exit 1; }
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      # No CurseForge here: the scanner's zip goes there when the release is published (publish.yml),
+      # as a tag must reach no player while the release is held (13 Nov 2026)
 
   installer:
     needs: release
@@ -64,13 +77,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: "The installer: Python and WiX fetched and checked, the .msi built"
         run: python installer/build.py --out dist
-      # installed for real before it is published (installer/install_check.py): the released 1.7.6, pinned by its
-      # SHA-256, then this release over it as 1.7.6's own updater ran msiexec, then a test build one version up over
+      # installed for real before it is published (installer/install_check.py): the released 1.7.7, pinned by its
+      # SHA-256, then this release over it quietly with no LAUNCHAPP (as a hand-run msiexec, and 1.7.6's updater, ran it), then a test build one version up over
       # that as this helper's updater does (the installer starting the helper), then removed; a failure leaves the
       # release a draft, with msiexec's logs kept for a week
       - name: "The installer installed, upgraded, started and removed on this runner"
@@ -79,8 +94,8 @@ jobs:
           B=$(python -c "import sys; sys.path.insert(0, 'installer'); import build; x, y, z = map(int, build.version().split('.')); print(f'{x}.{y}.{z + 1}')" | tr -d '\r')
           python installer/build.py --out "$RUNNER_TEMP/b" --cache dist/cache --version "$B"
           python installer/install_check.py \
-            --old-url https://github.com/ForeverWowCraft/ForeverWowCraft-Helper/releases/download/v1.7.6/ForeverWowCraft-Helper-1.7.6.msi \
-            --old-sha256 31ffb57f704895fd676400b44fb451ac801965248941d34cf3a4c9a61514731c \
+            --old-url https://github.com/ForeverWowCraft/ForeverWowCraft-Helper/releases/download/v1.7.7/ForeverWowCraft-Helper-1.7.7.msi \
+            --old-sha256 e3eba2b41a2a8620a49b14434f7178c5dc2a1bbcad0158daf20dd1274e106162 \
             --new "$(ls dist/*.msi)" --newer "$RUNNER_TEMP/b/ForeverWowCraft-Helper-$B.msi" --logs "$RUNNER_TEMP/install-logs" --cache "$RUNNER_TEMP/cache"
       - name: msiexec's logs, when the install test failed
         if: failure()
@@ -96,18 +111,47 @@ jobs:
           $msi = (Get-ChildItem dist/*.msi).FullName
           Copy-Item $msi dist/ForeverWowCraft-Helper.msi
           gh release upload "$env:GITHUB_REF_NAME" $msi dist/ForeverWowCraft-Helper.msi
-      - name: "Published: the newest release, with its installer"
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$env:GITHUB_REF_NAME" --draft=false --latest
+      # Held, not published: the .msi's name, size and SHA-256, for Microsoft's malware review of
+      # this very file, and the commands that publish it afterwards (13 Nov 2026)
+      - name: "Held: a draft until the project publishes it"
+        shell: bash
+        run: |
+          msi=$(ls dist/ForeverWowCraft-Helper-*.msi)
+          name=$(basename "$msi")
+          size=$(python -c "import os, sys; print(os.path.getsize(sys.argv[1]))" "$msi" | tr -d '\r')
+          sha=$(python -c "import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], 'rb').read()).hexdigest())" "$msi" | tr -d '\r')
+          {
+            echo "## $GITHUB_REF_NAME is held as a draft"
+            echo
+            echo "Players, the helper's own update and releases/latest see nothing of it until it is published."
+            echo
+            echo "| file | bytes | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| $name | $size | $sha |"
+            echo
+            echo "ForeverWowCraft-Helper.msi is the same file. To download it for the review:"
+            echo '```'
+            echo "gh release download $GITHUB_REF_NAME --repo $GITHUB_REPOSITORY --pattern $name"
+            echo '```'
+            echo "The Mac's disk image follows in the mac job. To publish, once it is on the draft too (the publish workflow checks every file first):"
+            echo '```'
+            echo "gh workflow run publish.yml --repo $GITHUB_REPOSITORY -f tag=$GITHUB_REF_NAME -f msi_sha256=$sha"
+            echo '```'
+            echo "or, with no checks (also the way when the Mac is off and its files will not come):"
+            echo '```'
+            echo "gh release edit $GITHUB_REF_NAME --repo $GITHUB_REPOSITORY --draft=false --latest"
+            echo '```'
+            echo "The plain command skips CurseForge: only the publish workflow uploads the scanner's zip there."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The Mac application, on the project's own Mac: a self-hosted runner, "imac", which only a tag
   # of the project's reaches (this workflow runs on tags alone, and the repository asks approval
   # for every outside contributor's workflow). The repository variable MAC_RUNNER switched away
   # from "on" skips the job while the Mac is off. The upload is the API itself: the Mac has no gh.
-  # After the installer: the release is published by then (a draft has no tag to be found by).
+  # After the installer, onto the draft, which is found by the id the release job passes on
+  # (GitHub's releases/tags/<tag> answers a published release alone).
   mac:
-    needs: installer
+    needs: [release, installer]
     if: vars.MAC_RUNNER == 'on'
     runs-on: [self-hosted, macOS, imac]
     permissions:
@@ -118,6 +162,8 @@ jobs:
           echo "::add-mask::$HOME"
           echo "::add-mask::$(whoami)"
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: "The application and its disk image: Python fetched and checked, PyObjC into it (installer/build_mac.py)"
         run: |
           echo "/Library/Frameworks/Python.framework/Versions/3.14/bin" >> "$GITHUB_PATH"
@@ -131,14 +177,25 @@ jobs:
           out=$("$app/Contents/MacOS/ForeverWowCraft Helper" --identity)
           echo "$out"
           case "$out" in *"identifier com.foreverwowcraft.helper,"*) ;; *) echo "the main bundle is not the helper's"; exit 1 ;; esac
-      - name: On the release, by its version and by its fixed name
+      - name: On the draft, by its version and by its fixed name
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.release.outputs.id }}
         run: |
-          dmg=$(ls dist/*.dmg)
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]] || { echo "no release id from the release job"; exit 1; }
+          dmg=$(ls dist/ForeverWowCraft-Helper-*.dmg)
           cp "$dmg" dist/ForeverWowCraft-Helper.dmg
-          id=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
           for f in "$dmg" dist/ForeverWowCraft-Helper.dmg; do
-            curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f"               "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=$(basename "$f")" > /dev/null
+            curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$f" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$(basename "$f")" > /dev/null
             echo "uploaded $(basename "$f")"
           done
+          {
+            echo "## The Mac's disk image, on the held draft"
+            echo
+            echo "| file | bytes | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| $(basename "$dmg") | $(stat -f%z "$dmg") | $(shasum -a 256 "$dmg" | cut -d' ' -f1) |"
+            echo
+            echo "ForeverWowCraft-Helper.dmg is the same file. The draft has every file now; the installer job's summary has the command that publishes it."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

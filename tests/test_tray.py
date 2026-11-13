@@ -122,6 +122,24 @@ def test_the_log_stamps_lines_rolls_over_and_tells_its_hook():
     assert not log.isatty() and log.encoding == "utf-8"
 
 
+def test_the_log_does_not_name_the_windows_or_mac_user():
+    win = "C:\\Users\\Ann Lee"
+    assert tray.redact("the state is in C:\\Users\\Ann Lee\\AppData\\Local\\ForeverWowCraft", win) == "the state is in ~\\AppData\\Local\\ForeverWowCraft"
+    assert tray.redact("log: C:/Users/Ann Lee/AppData/x.log, done", win) == "log: ~/AppData/x.log, done"        # either slash
+    assert tray.redact("C:\\Users\\Ann Leeds\\x and C:\\Users\\Ann Lee", win) == "C:\\Users\\Ann Leeds\\x and ~"  # not a longer name
+    assert tray.redact('File "C:\\Users\\Ann Lee\\h\\cli.py", line 3', win) == 'File "~\\h\\cli.py", line 3'
+    lower = tray.redact("c:\\users\\ann lee\\x", win)
+    assert lower == ("~\\x" if sys.platform == "win32" else "c:\\users\\ann lee\\x")           # Windows' names are any case
+    assert tray.redact("/Users/ann/Library/Logs/x", "/Users/ann") == "~/Library/Logs/x"
+    assert tray.redact("/x/y", "/") == "/x/y"                                                     # no home to speak of
+    # and as the log writes it, with this machine's own home
+    folder = Path(tempfile.mkdtemp())
+    log = tray.Log(folder / "helper.log")
+    print(f"the state is in {Path.home() / 'AppData' / 'Local' / 'ForeverWowCraft'}", file=log)
+    written = (folder / "helper.log").read_text(encoding="utf-8")
+    assert str(Path.home()) not in written and "the state is in ~" in written, written
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):

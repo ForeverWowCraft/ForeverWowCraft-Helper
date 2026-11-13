@@ -148,7 +148,7 @@ local function BuildOptions()
   scroll:SetPoint("TOPLEFT", 0, -4)
   scroll:SetPoint("BOTTOMRIGHT", -28, 4)
   local page = CreateFrame("Frame", nil, scroll)
-  page:SetSize(600, 900)
+  page:SetSize(600, 960)
   scroll:SetScrollChild(page)
   local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", 16, -16)
@@ -160,7 +160,7 @@ local function BuildOptions()
   blurb:SetWordWrap(true)
   blurb:SetText("The addon records the auction house's prices and sends them, through the helper on this PC, to "
     .. "foreverwowcraft.com, where every scanner's prices make the routes that /fwc shows. Nothing of yours is sent: "
-    .. "only prices and the merchants and trainers you visit. Each switch here has a command too (/fwcs); this page is the same settings.")
+    .. "only prices and the merchants and trainers you visit. Most switches here also have a command (type /fwcs for the list).")
   local saved = ns.Settings
   local y = -92
   local function Next(h) local at = y; y = y - h; return at end
@@ -212,6 +212,12 @@ local function BuildOptions()
       .. "or the routes may have changed on the site: both move only at a reload. Never in combat, "
       .. "nor while the auction house, a merchant or a profession window is open. Later puts it off an hour.",
       function() return ns.remind.Enabled() end, function(v) ns.RemindCommand(v and "on" or "off") end),
+    CheckBox(page, Next(76), "Cooking: Fishing only",
+      "Plans this character's cooking from the fish you catch, a vendor's goods and a vendor's recipes, nothing from the "
+      .. "auction house. It is also the third choice of the Mode button in the /fwc window, and /fwcs fishing is the same. "
+      .. "Where the fish are caught is the Classic-era world's data. Kept for this character; it needs the route from the site.",
+      function() return ns.FishingOn and ns.FishingOn() or false end,
+      function(v) if ns.FishingCommand then ns.FishingCommand(v and "on" or "off", true) end end),
   }
   -- where the prices are kept: told from where the character stands, unless said here
   local where = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -263,6 +269,7 @@ local function BuildOptions()
   panel.OnDefault = function(self)                 -- the Settings window's Defaults button: the shipped defaults again
     local s = saved()
     for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "haveFirst", "remind" }) do s[key] = nil end
+    if ns.FishingCommand then ns.FishingCommand("off", true) end         -- this character's, not the account's: the same shipped default
     self:refresh()
     Scanner().Refresh()
   end

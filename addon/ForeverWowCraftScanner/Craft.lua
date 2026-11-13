@@ -13,7 +13,7 @@ local _, ns = ...
 local Char, House = ns.inv.Char, ns.inv.House
 local PREFIX = "|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: "
 local V = ns.verdict
-local Verdict, Bags, Shopping, api, NoteStations, Selected, N = V.Verdict, V.Bags, V.Shopping, V.api, V.NoteStations, V.Selected, V.N
+local Verdict, api, NoteStations, Selected = V.Verdict, V.api, V.NoteStations, V.Selected
 
 -- ================================================================ the button
 -- An icon at the top right of the recipe page's detail, a glow pulsing round it in the colour
@@ -47,7 +47,7 @@ end
 local function Aside(v)
   local a = v.aside
   if not a then return nil end
-  local p, d, here = ns.NearestPlace(a.place[1], a.place[2], a.place[3], a.place[5])
+  local p, d, here = ns.NearestPlace(a.place[1], a.place[2], a.place[3], a.place[5], a.place[6], a.place[7])
   local detail
   if p then
     local who = p.name and (": " .. p.name) or ""
@@ -66,7 +66,7 @@ end
 local function Point(v, by)
   local note = v.note or v.text                  -- a buy verdict's note lists the items and their sources
   if v.place then
-    local p, d, here = ns.NearestPlace(v.place[1], v.place[2], v.place[3], v.place[5])
+    local p, d, here = ns.NearestPlace(v.place[1], v.place[2], v.place[3], v.place[5], v.place[6], v.place[7])
     if p then
       local title = v.place[4]
       if p.name and (p.kind == "vendor" or p.kind == "trainer" or p.kind == "quest") then title = title .. ": " .. p.name end
@@ -86,7 +86,7 @@ local function Point(v, by)
       ns.SetArrow(nil, pointed.title, false, note, pointed.profession)
     end
   elseif v.show or v.text:match("^Needs ") then     -- a tool to buy, or needs of no place: the arrow says the words
-    local note = (v.using or v.bank) and v.note or nil       -- what of yours the step uses, what to take from the bank; not a buy list cut short of gold
+    local note = (v.using or v.bank or v.catch) and v.note or nil       -- what of yours the step uses, what to take from the bank, the zones of a fish to catch; not a buy list cut short of gold
     pointed = { title = v.text, note = note, by = by or "panel", profession = v.profession and ns.Title(v.profession) or nil }
     ns.SetArrow(nil, v.text, false, note, pointed.profession)
   elseif v.spell then                          -- something to make, here: the words, under a hammer (the note: what of yours it uses)

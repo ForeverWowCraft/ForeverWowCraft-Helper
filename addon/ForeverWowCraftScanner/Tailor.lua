@@ -114,6 +114,40 @@ function ns.BuyRow(plan, item)
   return Vendors()[item]
 end
 
+-- ================================================================ the fishing route
+-- The fishing route (Plans.lua FWCS_ROUTES, joined to the house by Inventory.lua) is a plan of
+-- kind "fishing": its fish are buy rows with the source "catch" (a weight, never copper), and
+-- plan.catch = { [fish] = { { zone, chance }, ... } } says where each is caught, from the
+-- Classic-era world's tables, which may differ from Forever's. Nothing here asks the game.
+ns.CATCH_NOTE = "Catch spots are from the Classic-era world and may differ."
+
+-- whether the route buys the item by catching it
+function ns.Catches(plan, item)
+  local row = plan and plan.buy and plan.buy[item]
+  return row ~= nil and row[2] == "catch"
+end
+
+-- where a fish is caught, from the plan: "Wetlands 100%, Teldrassil 100%, Loch Modan 88%", or with
+-- `names` only the zones' names; nil when the plan names none. Made once a plan, a fish and a kind
+local spots = setmetatable({}, { __mode = "k" })
+function ns.CatchSpots(plan, item, names)
+  local all = plan and plan.catch
+  local rows = all and all[item]
+  if type(rows) ~= "table" or #rows == 0 then return nil end
+  local held = spots[all]
+  if not held then held = {}; spots[all] = held end
+  local key = names and -item or item
+  if held[key] == nil then
+    local parts = {}
+    for _, z in ipairs(rows) do
+      local chance = tonumber(z[2]) or 0
+      table.insert(parts, names and z[1] or string.format(chance >= 10 and "%s %d%%" or "%s %.1f%%", z[1], chance >= 10 and math.floor(chance + 0.5) or chance))
+    end
+    held[key] = table.concat(parts, ", ")
+  end
+  return held[key]
+end
+
 local function In(list, item)
   for _, v in ipairs(list or {}) do
     if v == item then return true end
@@ -138,7 +172,7 @@ function ns.Tailor(plan, skill, have, upto)
   local own, stock, known = {}, {}, {}     -- what is left of `have`; made and not used yet; item -> how an earlier step makes it
   for item, units in pairs(have or {}) do own[item] = units end
   local out = { from = skill, to = upto, steps = {}, buy = {}, make = {}, how = {}, used = {}, sell = {}, learn = {}, blocked = {}, tools = {},
-                spent = 0, sold = 0, crafts = 0, unpriced = 0 }
+                spent = 0, sold = 0, crafts = 0, unpriced = 0, fish = 0 }
 
   local function Get(item, need, step, depth)
     local take = math.min(own[item] or 0, need)
@@ -232,7 +266,8 @@ function ns.Tailor(plan, skill, have, upto)
 
   for item, units in pairs(out.buy) do
     local price = ns.BuyRow(plan, item)
-    if price then out.spent = out.spent + units * price[1] else out.unpriced = out.unpriced + 1 end
+    if price and price[2] == "catch" then out.fish = out.fish + units         -- a fish the player catches: a count, never copper (the fishing route)
+    elseif price then out.spent = out.spent + units * price[1] else out.unpriced = out.unpriced + 1 end
   end
   for item, units in pairs(stock) do
     if units > 0 then
@@ -354,11 +389,11 @@ local function Owned(item)
   n = n + (row and row[2] or 0)
   return n + (inv.InMail and inv.InMail(item) or (row and row[3]) or 0)
 end
-ns.HaveOwned = Owned
 
 -- what one craft of a recipe makes is worth as the route counts it: the document's recipes (the
 -- profession panel's figures), else the route's own sale price, else nothing
 local function Worth(plan, cand, house)
+  if plan.kind == "fishing" then return 0 end          -- what a craft makes is worth nothing to the fishing route: the fish are what count
   local row = house and house.recipes and cand.spell and house.recipes[cand.spell]
   if type(row) == "table" and type(row[2]) == "number" then return row[2] end
   local m = cand.makes

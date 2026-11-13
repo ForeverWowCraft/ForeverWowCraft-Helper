@@ -207,7 +207,7 @@ function Prime()
   end
   for _, row in ipairs(panel.rows) do
     local e = rawget(row, "entry")
-    if e and e.source ~= "vendor" and (e.have or 0) < e.units and not known[e.item] and not bought[e.item] then
+    if e and e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not known[e.item] and not bought[e.item] then
       Search(e.item, row)
       return
     end
@@ -245,7 +245,7 @@ local function Click(row)
   -- row: done after, they went through; done before, the client refused the call (11 Oct 2026)
   if pending and pending.row == row and pending.state == "priced" then
     pending.state = "buying"
-    C_AuctionHouse.ConfirmCommoditiesPurchase(e.item, pending.units)
+    ns.inv.OwnCall(C_AuctionHouse.ConfirmCommoditiesPurchase, e.item, pending.units)
     Say(row, "buying...")
     row.buy:Disable()                                      -- one confirm only: dead until the house answers, whatever is clicked
     GiveUpLater(pending)
@@ -271,7 +271,7 @@ local function Click(row)
   if not HouseReady() then print(PREFIX .. "the house is busy answering the snapshot: a moment, then click again"); return end
   if k.auctionID then
     pending = { item = e.item, units = 1, row = row, state = "buying", price = k.price, auctionID = k.auctionID }
-    C_AuctionHouse.PlaceBid(k.auctionID, k.price)
+    ns.inv.OwnCall(C_AuctionHouse.PlaceBid, k.auctionID, k.price)
     Say(row, "buying...")
     row.buy:SetText("...")
     row.buy:Disable()
@@ -479,6 +479,8 @@ function ns.RefreshShopping()
       local n, units = Stacks(e)
       if e.have >= e.units then
         row.status:SetText("|cff40ff40done|r"); row.buy:Hide()
+      elseif e.source == "catch" then                            -- a fish of the fishing route: caught, never bought
+        row.status:SetText("catch"); row.buy:Hide()
       elseif merchant and merchant[e.item] then                  -- the merchant open sells it: a click buys up to a stack
         if vending and vending.item == e.item and vending.have == e.have then                 -- the bags not yet moved (the row may have moved)
           row.status:SetText(string.format("buying %d...", vending.units)); row.buy:Show(); row.buy:Disable()
@@ -531,7 +533,7 @@ function ns.ShoppingBusy()
   if pending then return true end
   for _, e in ipairs(list) do
     local k = known[e.item]
-    if e.source ~= "vendor" and (e.have or 0) < e.units and not bought[e.item] and not (k and k.none) then return true end
+    if e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not bought[e.item] and not (k and k.none) then return true end
   end
   return false
 end
@@ -543,7 +545,7 @@ function ns.OpenShopping()
   local entries = ns.craft and ns.craft.Shopping and ns.craft.Shopping()
   local any = false
   for _, e in ipairs(entries or {}) do
-    if (e.have or 0) < e.units and (merchant and merchant[e.item] or (not merchant and e.source ~= "vendor")) then any = true end
+    if (e.have or 0) < e.units and (merchant and merchant[e.item] or (not merchant and e.source ~= "vendor" and e.source ~= "catch")) then any = true end
   end
   if any then offered = true; ns.ShowShopping(entries) end
 end

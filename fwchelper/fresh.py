@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from . import scan, settings
-from .plans import lua
+from .plans import _whole, lua
 
 GLOBAL = "FWCS_FRESH"
 
@@ -24,10 +24,10 @@ def for_addon(told: dict) -> dict:
     houses: dict[str, dict] = {}
     for key, h in (told.get("houses") or {}).items():
         realm, _, faction = str(key).partition("|")
-        if not isinstance(h, dict) or not h.get("newest"):
+        if not isinstance(h, dict) or not _whole(h.get("newest")):          # a time that is no number is no scan
             continue
-        houses.setdefault(realm, {})[faction] = {"newest": int(h["newest"])}
-    return {"written": int(time.time()), "fresh": int(told.get("fresh") or 600), "houses": houses}
+        houses.setdefault(realm, {})[faction] = {"newest": _whole(h["newest"])}
+    return {"written": int(time.time()), "fresh": _whole(told.get("fresh")) or 600, "houses": houses}
 
 
 def fresh_text(told: dict) -> str:
@@ -53,9 +53,13 @@ def write(told: dict) -> list[Path]:
     text = fresh_text(told)
     targets = [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else [])
     for t in targets:
-        t.parent.mkdir(parents=True, exist_ok=True)
-        t.write_text(text, encoding="utf-8")
+        scan.write_whole(t, text)
     return targets
+
+
+def fresh_minutes(told: dict) -> int:
+    """How long the pipe last said a scan stays fresh (its own value, `fresh`), in whole minutes, at least one."""
+    return max(1, round((_whole(told.get("fresh")) or 600) / 60))
 
 
 def not_needed(told: dict | None, realm: str, faction: str, scanned_at: int) -> int | None:
@@ -65,7 +69,7 @@ def not_needed(told: dict | None, realm: str, faction: str, scanned_at: int) -> 
     if not told:
         return None
     h = (told.get("houses") or {}).get(f"{realm}|{faction}")
-    newest = h and h.get("newest")
-    if newest and scanned_at - int(newest) < int(told.get("fresh") or 600):
-        return int(newest)
+    newest = _whole(h.get("newest")) if isinstance(h, dict) else 0
+    if newest and scanned_at - newest < (_whole(told.get("fresh")) or 600):
+        return newest
     return None
