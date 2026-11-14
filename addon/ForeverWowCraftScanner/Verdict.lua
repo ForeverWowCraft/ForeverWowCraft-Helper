@@ -389,7 +389,7 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
   end
   if #catch > 0 then table.insert(tip, ns.CATCH_NOTE) end
   table.insert(tip, "Click: the shopping list.")
-  -- the note under the arrow: each item and where it is got, the vendor's first (the user, 7 Nov 2026); a fish: its zones
+  -- the note under the arrow: each item and where it is got, the vendor's first; a fish: its zones
   local parts, ordered = {}, {}
   for _, e in ipairs(vendor) do table.insert(ordered, e) end
   for _, e in ipairs(ah) do table.insert(ordered, e) end
@@ -447,7 +447,7 @@ end
 
 -- What the step needs that waits in the mail (seen in the inbox, or bought at the auction
 -- house this visit, which the game delivers by mail): the mailbox first, the nearest one,
--- before anything is bought again (the user, 7 Nov 2026). `scroll`: the recipe the route buys
+-- before anything is bought again. `scroll`: the recipe the route buys
 -- for this step, named with the rest when it waits there too (a bought recipe is mailed like
 -- anything else). nil when nothing waits.
 local function MailVerdict(house, plan, nxt, step, tip, profession, scroll)
@@ -776,7 +776,7 @@ local function VerdictOf(given)
       end
     end
     -- "Buy the recipe" for a pattern the route buys: "Learn" read as the trainer's to a player
-    -- who then looked for Red Linen Vest there (the user, 7 Nov 2026)
+    -- who then looked for Red Linen Vest there
     return { text = (learn and "Buy the recipe for " or "Learn ") .. ns.RecipeName(step) .. " first", tip = tip, shopping = shopping, learn = nxt.spell,
              place = learn and Seller(plan, learn[1]) or trainer, profession = profession }
   end
@@ -915,7 +915,7 @@ end
 -- in the bags. Short of it, the words say by how much and the two ways out: gold farmed, or
 -- the reagents farmed instead of bought, where they can be (the recipe and a vendor's goods
 -- take gold; what the house sells drops or grows somewhere). No arrow to a seller for what
--- cannot be paid; the click still opens the list, with the prices. The user, 6 Nov 2026: told
+-- cannot be paid; the click still opens the list, with the prices. A player was told
 -- to buy a cooking recipe without the silver for it.
 local function Short(v)
   if not v.shopping or not GetMoney then return v end

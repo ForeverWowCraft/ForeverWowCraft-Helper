@@ -430,7 +430,7 @@ if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(5, Headless) end
 
 -- the route changed by a click in the /fwc window (skill-up, the second profession, another
 -- profession picked): the Make button's words, the arrow and the shopping list at once, not at
--- the next pass (the user asked whether the arrow follows the skill-up box, 6 Nov 2026)
+-- the next pass (the arrow follows the skill-up box)
 function ns.RoutePicked()
   if PanelShown() then Refresh() else Headless() end
   if ns.ReloadShopping then ns.ReloadShopping() end

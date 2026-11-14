@@ -200,8 +200,7 @@ end
 
 -- How many of an item wait in the mail: counted in the inbox when a mailbox was last open, or
 -- bought at the auction house since (NoteMailed: the game delivers a purchase by mail), the
--- larger. The Make button sends the character to the mailbox for them before buying more
--- (the user, 7 Nov 2026).
+-- larger. The Make button sends the character to the mailbox for them before buying more.
 local function InMail(item)
   local c = Char()
   local seen = c.items[item] and c.items[item][3] or 0
@@ -229,7 +228,7 @@ local function NoteMailed(item, units, how)
 end
 
 -- A purchase made by hand in the game's own auction-house window is noticed too, so that its
--- delivery by mail is known at once (the user, 11 Nov 2026: a recipe bought by hand, and the
+-- delivery by mail is known at once (a recipe bought by hand, and the
 -- arrow did not go to a mailbox). Post-hooks on the client's purchase calls remember what was
 -- asked, O(1) each; the success event counts it (NoteMailed), a failure or the house closing
 -- drops it. The calls the addon's own Buy button makes (Shop.lua) go through the same

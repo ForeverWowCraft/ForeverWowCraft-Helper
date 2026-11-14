@@ -94,7 +94,7 @@ Button = function()
   button:SetScript("OnClick", function()
     local sc = Scanner()
     if sc.Dirty() then sc.Reload()
-    elseif not sc.Running() and sc.CooldownLeft() <= 0 then sc.StartSnapshot(false) end       -- no shift-click past the cooldown (the user, 8 Nov 2026)
+    elseif not sc.Running() and sc.CooldownLeft() <= 0 then sc.StartSnapshot(false) end       -- no shift-click past the cooldown
   end)
   button:SetScript("OnEnter", Tip)
   button:SetScript("OnLeave", GameTooltip_Hide)
@@ -142,7 +142,7 @@ end
 local function BuildOptions()
   local panel = CreateFrame("Frame", "ForeverWowCraftOptions")
   panel.name = "ForeverWowCraft"
-  -- every setting of the addon is here (the user, 6 Nov 2026: a box or an entry for each, not a
+  -- every setting of the addon is here (a box or an entry for each, not a
   -- command alone); more than the options canvas is tall, so the page scrolls
   local scroll = CreateFrame("ScrollFrame", "ForeverWowCraftOptionsScroll", panel, "UIPanelScrollFrameTemplate")
   scroll:SetPoint("TOPLEFT", 0, -4)
@@ -258,7 +258,7 @@ local function BuildOptions()
     end
   end
   panel:SetScript("OnShow", function(self) self:refresh() end)
-  -- The page showed every box unticked after an update (the user, 7 Nov 2026): the frame is
+  -- The page showed every box unticked after an update: the frame is
   -- made at load with no parent, so it counts as shown from the start and OnShow never fires
   -- when the Settings window displays it. So: the Settings window's own call when the page
   -- is displayed (OnRefresh), and while the page is in sight, the boxes are read again every

@@ -1373,7 +1373,7 @@ local function Drop(reason)
 end
 
 -- (said in the bar's log, not in chat: a player who closes the house while the snapshot is
--- awaited has nothing to do about it, and the words in chat were noise; the user, 8 Nov 2026)
+-- awaited has nothing to do about it, and the words in chat were noise)
 local function SnapshotHouseClosed()
   state.readAway = true
   if state.reading then
@@ -1415,7 +1415,7 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
       -- the snapshot awaited went with the window: a closed house gets no answer (12 Oct 2026),
       -- and waiting the 120 s out kept the button at "Scanning..." on the reopened house (6 Nov
       -- 2026). Let go at once, and the server's cooldown taken to run from the ask: whether it
-      -- does is not known (the user, 6 Nov 2026: the first ask most likely starts it), and a
+      -- does is not known (the first ask most likely starts it), and a
       -- /fwcs full force tries sooner, for a test (the shift-click that did went in 1.6.23)
       Settings().lastFullRefused = state.askedAt or time()
       ArmReadyAlert()

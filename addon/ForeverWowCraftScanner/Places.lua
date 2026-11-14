@@ -310,7 +310,7 @@ local function NoteTrainer()
   -- the trainer's whole list, by the creature's id, for the helper to send (nothing of the
   -- character): each service and the skill it asks for. Forever keeps the skill a recipe is
   -- taught at on the server, which the client's tables do not say, and the routes planned on
-  -- vanilla's levels were wrong by it (Embossed Leather Gloves, the user, 7 Nov 2026). The
+  -- vanilla's levels were wrong by it (Embossed Leather Gloves). The
   -- union over visits: a service a filter hid this time stays from the last
   local map, x, y = Here()
   if id and map and GetTrainerServiceSkillReq then
@@ -418,7 +418,7 @@ end
 -- that high (its reach, the seed's or the player's own note) after the ones that may; with both
 -- trainers' reach known, the nearer comes first, not the lower rank band (Randal Worth, to 75
 -- for ranks and 50 for recipes, was sent for a recipe at 70 before Simon Tanner a few yards
--- off: the owner, 11 Nov 2026). No reach known: as before. `spell` (that recipe's spell id):
+-- off). No reach known: as before. `spell` (that recipe's spell id):
 -- where a reachable trainer is seen to teach it (the seed's list), only those are asked, the
 -- nearest, whatever their rank band or reach; where none is known to, as above.
 function ns.NearestPlace(kind, what, item, upto, need, spell)

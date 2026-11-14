@@ -573,7 +573,7 @@ def test_the_scanner_in_the_background():
     # the options page registered the old way (the stub has no Settings API)
     assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 13
     assert lua.eval("registered_panel == ns.options")
-    # every setting is on the page (the user, 6 Nov 2026): the switches, by their getters and setters
+    # every setting is on the page: the switches, by their getters and setters
     lua.execute("ns.options:refresh()")
     labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 14)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
@@ -709,7 +709,7 @@ def test_the_make_button_crafts_the_route_a_step_at_a_time():
     assert [lua.eval(f"ForeverWowCraftShop.rows[{i}].name.text") for i in (1, 2, 3)] == ["Linen Cloth", "Coarse Thread", "Bleach"]
     assert lua.eval("ForeverWowCraftShop.rows[1].need.text") == "need 14, have 0" and lua.eval("ForeverWowCraftShop.rows[2].status.text") == "vendor"
     # the /fwc window's "only as far as the gold goes", 2s typed: the step is cut where the gold ends (two points, 1s 90c), and the
-    # Make button, its tip and the shopping list ask for that much and no more (the user, 7 Nov 2026)
+    # Make button, its tip and the shopping list ask for that much and no more
     lua.execute('ns.inv.Char().budget = { on = true, copper = 200 }; Fire("BAG_UPDATE_DELAYED"); RunTimers()')
     tip = [re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", line) for line in lua.eval("ForeverWowCraftMake.verdict.tip").values()]
     assert "Only as far as the gold goes (the box in the /fwc window): this step is cut at skill 46." in tip
@@ -1387,7 +1387,7 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     lua.execute('px, py = 0.50, 0.50; learned[2385] = true; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
     # two sources: the arrow goes to the nearer. A vendor selling the thread seen 200 yd east: the auctioneer (100 yd) still;
-    # from 50 yd of the vendor, the vendor (the user, 7 Nov 2026)
+    # from 50 yd of the vendor, the vendor
     lua.execute('px = 0.70; wares = { 2320 }; Fire("MERCHANT_SHOW"); px = 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
     lua.execute('px = 0.65; Fire("TRADE_SKILL_LIST_UPDATE")')
@@ -1401,7 +1401,7 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     lua.execute('ns.RouteFor("tailoring").buy[2589] = { 30, "ah" }; px = 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert tip()[-1] == "The arrow points at the nearest: Auctioneer, 100 yd."
     # what waits in the mail comes first: the cloth seen in the inbox at a mailbox 50 yd south (noted as a place), the
-    # arrow goes there; the inbox seen empty, the shops again; bought at the house, it is on its way by mail (the user, 7 Nov 2026)
+    # arrow goes there; the inbox seen empty, the shops again; bought at the house, it is on its way by mail
     lua.execute('px, py = 0.50, 0.55; mail[1] = { { 2589, 72 } }; Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); '
                 'mail[1] = nil; px, py = 0.50, 0.50; Fire("TRADE_SKILL_LIST_UPDATE")')
     assert text() == "Collect 72 Linen Cloth from the mailbox" and lua.eval("ForeverWowCraftMake.verdict.note") == "72 Linen Cloth: mailbox"
@@ -1412,7 +1412,7 @@ def test_the_make_button_points_the_arrow_at_what_it_needs():
     assert text() == "Collect 72 Linen Cloth from the mailbox"
     lua.execute('Fire("MAIL_SHOW"); Fire("MAIL_INBOX_UPDATE"); RunTimers(); Fire("MAIL_CLOSED"); Fire("TRADE_SKILL_LIST_UPDATE")')
     assert text() == "Buy from a vendor (1) and the auction house (1)" and lua.eval("ForeverWowCraftMake.verdict.note").startswith("12 Coarse Thread: vendor")
-    # put away by a right-click: a loot that moves the step does not bring it back (the user, 7 Nov 2026); the profession
+    # put away by a right-click: a loot that moves the step does not bring it back; the profession
     # window opened does, pointing at the step as it is now; so does ticking Keep arrow
     lua.execute('ForeverWowCraftArrow.scripts.OnMouseUp(ForeverWowCraftArrow, "RightButton")')
     assert arrow().shown is False
@@ -1518,7 +1518,7 @@ def _two_trainers(lua, rows, here=(0.50, 0.50)):
                 "FWCS_SEED.places = %s; px, py = %s, %s; ns.NotePlace('auction', '')" % (rows, here[0], here[1]))
 
 
-# Stormwind's two leatherworkers (the owner, 11 Nov 2026): one teaches ranks to 75 and recipes to 50,
+# Stormwind's two leatherworkers: one teaches ranks to 75 and recipes to 50,
 # the other ranks to 150 and recipes to 150, a few yards apart; a recipe learned at 70 is the second's
 OWNER_ROWS = ('{ { 1453, 0.50, 0.50, "trainer", "tailoring", "Near", 75, 50 }, '
               '{ 1453, 0.50, 0.51, "trainer", "tailoring", "Far", 150, 150 } }')
@@ -1531,7 +1531,7 @@ def test_a_recipe_is_taught_by_a_trainer_that_teaches_so_far():
         found = lua.eval("(ns.NearestPlace(%s))" % ", ".join(a))
         return found.name if found else None
     _two_trainers(lua, OWNER_ROWS)
-    # the owner's case: a rank at 70 fits both (the lower band comes first), a recipe learned at 70 is the far one's
+    # a rank at 70 fits both (the lower band comes first), a recipe learned at 70 is the far one's
     assert name('"trainer", "tailoring", nil, 70') == "Near"                            # the rank: as before
     assert name('"trainer", "tailoring", nil, 70, 70') == "Far"                         # the recipe: not the one that teaches to 50
     assert name('"trainer", "tailoring", nil, 70, 51') == "Far" and name('"trainer", "tailoring", nil, 70, 50') == "Near"
@@ -1618,7 +1618,7 @@ def test_the_trainers_window_gives_the_players_own_note_a_reach():
 
 
 def test_the_learn_verdict_points_at_a_trainer_that_teaches_the_recipe():
-    """The owner's case through the verdict (11 Nov 2026): the arrow for "Learn ... first" goes to the
+    """The two-leatherworkers case through the verdict: the arrow for "Learn ... first" goes to the
     nearest trainer that may teach the recipe, not the lower band whose recipes stop short of it."""
     lua = _game()
     lua.execute(PLACES_GAME)
@@ -1808,7 +1808,7 @@ def test_a_snapshot_awaited_when_the_house_closes_is_let_go_when_it_opens_again(
     # the first ask's timers fire later: they belong to the ask let go, and change nothing
     lua.execute("RunTimers()")
     assert lua.eval("ns.scanner.Running()") is False and lua.eval("replicated") == 1
-    # a shift-click past the cooldown is no more (the user, 8 Nov 2026); the command, for a test, still tries sooner
+    # a shift-click past the cooldown is no more; the command, for a test, still tries sooner
     lua.execute("shift = true; ForeverWowCraftAHButton.scripts.OnClick(ForeverWowCraftAHButton)")
     assert lua.eval("replicated") == 1 and lua.eval("ns.scanner.Running()") is False
     lua.execute('shift = false; SlashCmdList.FOREVERWOWCRAFTSCANNER("full force")')

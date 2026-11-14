@@ -243,9 +243,8 @@ class App:
     def check_now(self) -> None:
         """Check for an update now, from the menu: GitHub asked at once, the answer a balloon
         whatever it is, and a newer helper installed quietly right away, whether or not it
-        installs by itself as a rule, and even if that version failed once before (the user
-        asked). Where a quiet install cannot be (the Mac, no published checksum), update_now
-        says so and the update waits at the top of the menu."""
+        installs by itself as a rule, and even if that version failed once before. Where a quiet install cannot be (the Mac, no
+        published checksum), update_now says so and the update waits at the top of the menu."""
         self.looked_update = time.time()
         found = update.latest()
         if not found:

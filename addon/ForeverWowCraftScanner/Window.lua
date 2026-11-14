@@ -167,8 +167,8 @@ end
 
 -- The skill the gold reaches from `from` with `have` in hand, when the window's "only as far as
 -- the gold goes" box is ticked; nil when it is not. The Make button and the shopping list cut
--- the step there too, so that the list asks for what the gold buys and no more (the user,
--- 7 Nov 2026: 56 venom sacs for 50s asked of a 20s cap).
+-- the step there too, so that the list asks for what the gold buys and no more (56 venom sacs for 50s
+-- asked of a 20s cap).
 function ns.BudgetReach(plan, from, have)
   local b = Char().budget
   if not RANGE or not (b and b.on) then return nil end
@@ -232,7 +232,7 @@ local function Build()
   win.feedback:SetPoint("RIGHT", close, "LEFT", 2, 0)
   win.feedback:SetScript("OnClick", function() ns.ShowFeedback() end)
   -- the arrow on or off: a box by the Feedback button, the same switch as /fwcs arrow on|off
-  -- (the user, 6 Nov 2026: an easy way to it, in this window)
+  -- (an easy way to it, in this window)
   win.arrowBox = CreateFrame("CheckButton", "ForeverWowCraftArrowBox", win, "UICheckButtonTemplate")
   win.arrowBox:SetSize(22, 22)
   win.arrowBox:SetPoint("RIGHT", win.feedback, "LEFT", -4, 0)

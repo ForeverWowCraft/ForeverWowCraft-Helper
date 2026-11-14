@@ -60,7 +60,7 @@ def menu(s: Status, startup: bool, auto: bool = True) -> list:
             (LOG, "Open the log", True, False),
             (STARTUP, STARTUP_LABEL, True, startup),
             (AUTO, "Update by itself", True, auto),
-            (CHECK, "Check for an update now", True, False),    # and install it quietly when one is out (the user, 6 Nov 2026)
+            (CHECK, "Check for an update now", True, False),    # and install it quietly when one is out
             (HELP, "Help", True, False), None,
             (QUIT, "Quit", True, False)]
 
@@ -120,7 +120,7 @@ def balloon(line: str) -> tuple[str, str] | None:
 # The game keeps its saved variables under WTF\Account\<account id>#1\...: the id is the player's
 # Battle.net account, and the helper names that file in its lines ("not sent: ... holds no scan
 # data yet"). It is not for a log that is opened from the menu and pasted for help: the folder's
-# name is replaced before a line is written (the owner, 6 Nov 2026: no personal data leaking). So is the home
+# name is replaced before a line is written (no personal data leaking). So is the home
 # folder, which names the Windows or Mac user: the state folder, the installer's log and a traceback are under it.
 ACCOUNT_FOLDER = re.compile(r"([\\/])Account([\\/])[^\\/\s]+")
 

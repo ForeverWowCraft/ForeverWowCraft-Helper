@@ -1,5 +1,5 @@
 -- A reminder to reload, now and then: a small box at the top of the screen with a red "Reload
--- now" button (the user, 6 Nov 2026: another addon does this every quarter of an hour, and it
+-- now" button (another addon does this every quarter of an hour, and it
 -- keeps what goes in and out in step).
 --
 -- Why a reload: what the addon records reaches the disk, and so the helper and the site,
@@ -14,7 +14,7 @@
 
 local _, ns = ...
 
-local EVERY = 60 * 60                      -- seconds between reminders (a quarter of an hour until 1.7.0; the user, 9 Nov 2026)
+local EVERY = 60 * 60                      -- seconds between reminders (a quarter of an hour until 1.7.0)
 local LATER = 60 * 60                      -- what "Later" buys
 local RETRY = 30                           -- seconds between looks while something is in the way
 
@@ -29,7 +29,7 @@ local function Scanner() return ns.scanner end
 local function Reasons()
   local out = {}
   local sc = Scanner()
-  -- prices named; the rest of what the addon notes is not spelt out (the user, 6 Nov 2026)
+  -- prices named; the rest of what the addon notes is not spelt out
   if sc and sc.Dirty() then table.insert(out, "The prices you recorded reach the helper and the site at a reload")
   elseif (ns.notedAt or 0) > loadedAt then table.insert(out, "What the addon noted since the last reload reaches the helper then") end
   -- the helper runs (it writes the routes as the site has them; a reload loads them): the routes
@@ -64,7 +64,7 @@ local function Build()
   box:EnableMouse(true)
   box.title = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   box.title:SetPoint("TOPLEFT", 14, -12)
-  box.title:SetWidth(412)                    -- short of the buttons: the title ran under them (the user, 7 Nov 2026); wide enough for its words (8 Nov)
+  box.title:SetWidth(412)                    -- short of the buttons: the title ran under them; wide enough for its words
   box.title:SetJustifyH("LEFT")
   box.title:SetWordWrap(false)
   box.title:SetText("|cff" .. ns.BRAND.gold .. "ForeverWowCraft|r: reload to update addon data")
@@ -73,7 +73,7 @@ local function Build()
   box.why:SetWidth(412)
   box.why:SetJustifyH("LEFT")
   box.why:SetWordWrap(true)
-  box.why:SetTextColor(0.78, 0.78, 0.78)      -- not the template's white: the words say what the reload does, softly (the user, 8 Nov 2026)
+  box.why:SetTextColor(0.78, 0.78, 0.78)      -- not the template's white: the words say what the reload does, softly
   -- a secure button with a macro of its own, /reload: the game lets no addon call ReloadUI
   -- on Forever's client (the box showed and the button did nothing, two players, 6 Nov 2026),
   -- but a macro run by a click of a secure button it reloads for. The box goes with the click
@@ -106,7 +106,7 @@ end
 
 local function Show(reasons)
   if not box then Build() end
-  box.why:SetText("Reloading the UI allows for addons to update the client with new data.")     -- the reasons decide when, not what is said (the user, 8 Nov 2026)
+  box.why:SetText("Reloading the UI allows for addons to update the client with new data.")     -- the reasons decide when, not what is said
   if not box:IsShown() then
     box:Show()
     if PlaySound and SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPEN then PlaySound(SOUNDKIT.IG_MAINMENU_OPEN, "Master") end

@@ -58,7 +58,7 @@ def test_the_installer_starts_the_helper_when_launchapp_is_given():
 
 def test_the_console_programs_the_helper_runs_open_no_window():
     """tasklist, run from the windowless helper for the game and for another watcher, opened a
-    console window for a moment at every start (the user, 7 Nov 2026)."""
+    console window for a moment at every start."""
     if sys.platform != "win32":
         return
     from fwchelper import cli, win
