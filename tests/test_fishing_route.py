@@ -545,3 +545,10 @@ def test_the_mode_tooltip_lists_the_modes_on_offer_and_marks_the_active_one():
     window(lua)
     tip = tooltip(lua)
     assert len(tip) == 4 and not any("Fishing only" in t for t in tip) and sum(t.startswith("|cff40ff40> ") for t in tip) == 1
+
+
+if __name__ == "__main__":
+    for k, v in list(globals().items()):
+        if k.startswith("test_") and callable(v):
+            v()
+            print("ok", k)

@@ -7,7 +7,8 @@
 --       profession = the one last shown, picked = the one the player picked from the list,
 --       from = { [profession] = skill to plan from, when the player said one },
 --       upto = { [profession] = skill to plan up to }, also = { [profession] = second one, false for none },
---       budget = { copper = gold to spend when typed (nil: the bags), on = true when the route is cut there } }
+--       budget = { copper = gold to spend when typed (nil: the bags), on = true when the route is cut there },
+--       learned = { [skill line] = the recipes the profession panel last listed as learned: Verdict.lua, NoteRecipes } }
 -- Bags are read slot by slot whenever they change. The bank, the mailbox and the character's
 -- own auctions can only be read while each is open (the game has no other way to them), so
 -- those counts are from the last visit (bankSeen, mailSeen, ahSeen). Only items a profession

@@ -634,6 +634,372 @@ end
 local switched                           -- the book opened another profession: the shopping list follows
 local asideOf                            -- the note the verdict carries under the arrow (the next rank to train, the other trip)
 local usingOf                            -- "Using your 40 Briarthorn": the step's recipe chosen for what the character has
+
+-- The colour the client gives a recipe at the character's skill: "optimal" (orange), "medium"
+-- (yellow), "easy" (green), "trivial" (grey), "difficult" (red: not yet); nil when it cannot say.
+-- The client's word beats the route's tables (Forever moves recipe levels by hotfix)
+local COLOURS = { [0] = "optimal", [1] = "medium", [2] = "easy", [3] = "trivial" }
+local KINDS = { optimal = true, medium = true, easy = true, trivial = true, difficult = true }
+function api.Colour(spell)
+  if C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+    local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, spell)
+    if ok and type(info) == "table" and info.relativeDifficulty ~= nil then return COLOURS[info.relativeDifficulty] end
+  end
+  if GetTradeSkillInfo then
+    local i = OldIndex(spell)
+    if i then
+      local _, kind = GetTradeSkillInfo(i)
+      if KINDS[kind] then return kind end
+    end
+  end
+  return nil
+end
+
+-- A run of a vouched recipe (ns.StandIns) from `skill`, up to `to`: the crafts it takes (about,
+-- where a craft may give no point) and the skill it stops at, never past one where its chance is
+-- 0. Where the route says nothing of its chance (e.now nil), the client's colour does: orange or
+-- yellow, one craft a point up to `to` (yellow lasts far longer than a run from the bags gains:
+-- it turns green, then grey, before a craft is wasted); green, one craft a click (the next could
+-- be grey, and nothing says how far off that is); grey, red or no word, none. Grey or red in the
+-- client is none whatever the route's tables say
+local function Run(e, colour, skill, to)
+  if colour == "trivial" or colour == "difficult" then return 0, skill end
+  if e.now == nil then
+    if colour == "optimal" or colour == "medium" then return to - skill, to end
+    if colour == "easy" then return 1, math.min(to, skill + 1) end
+    return 0, skill
+  end
+  local crafts, at = 0, skill
+  while at < to do
+    local c = e.chance(at)
+    if not c or c <= 0 then break end
+    crafts, at = crafts + 1 / c, at + 1
+  end
+  return math.ceil(crafts - 0.001), at
+end
+
+-- A run from the bags of recipe `c` ({ spell, uses, name? }), `crafts` at most and stopping at
+-- skill `stop` (Run): the Make verdict, with `said` (usingOf, name) the tooltip's line of why;
+-- "Needs <station>" when the recipe needs one the character is not at; nil when the bags hold no
+-- craft of it or a tool it needs is lacking. `low`: the run's chance is the client's green
+local function Offer(house, plan, nxt, c, crafts, stop, from, banked, tip, profession, said, low)
+  local can = crafts
+  for _, u in ipairs(c.uses) do can = math.min(can, math.floor((ns.inv.Count(u[1]) or 0) / u[2])) end
+  if can <= 0 then return nil end
+  local needs, place = {}, nil
+  for _, r in ipairs(api.Requirements(c.spell)) do
+    if not r.met then
+      if r.place and not api.ToolRecipe(r.name) then
+        table.insert(needs, r.name)
+        place = place or { "station", r.name, nil, r.name }
+      else
+        return nil                         -- a tool lacking: no craft from the bags
+      end
+    end
+  end
+  local name = c.name or ns.RecipeName(c)
+  local mine = {}
+  for _, u in ipairs(c.uses) do table.insert(mine, { u[1], u[2] * can }) end
+  table.sort(mine, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+  usingOf = ns.UsingText({ mine = mine }, function(item) return N(house, item) end)     -- the arrow's note: this run's, not the stretch's
+  table.insert(tip, said(usingOf, name))
+  if crafts > stop - from then
+    table.insert(tip, string.format("Not every craft gives a point here: about %d crafts for %d points.", crafts, stop - from))
+  elseif low then
+    table.insert(tip, "Green in the panel: one at a time, until it stops giving points.")
+  end
+  local later = {}                         -- what of the stretch's own recipe waits in the bank: fetched after this run
+  for _, u in ipairs(nxt.uses or {}) do
+    if (banked[u[1]] or 0) > 0 then table.insert(later, string.format("%d %s", banked[u[1]], N(house, u[1]))) end
+  end
+  if #later > 0 then table.insert(tip, "In your bank for later: " .. table.concat(later, ", ") .. ".") end
+  if #needs > 0 then
+    table.insert(tip, "The recipe needs " .. table.concat(needs, ", ") .. ".")
+    return { text = "Needs " .. table.concat(needs, ", "), tip = tip, place = place, recipe = c.spell, profession = profession }
+  end
+  table.insert(tip, string.format("Click: makes %d, stopping at skill %d.", can, stop))
+  return { text = string.format("Make %d %s", can, name), tip = tip, spell = c.spell, crafts = can, to = stop, line = plan.skill_line, profession = profession }
+end
+
+-- ================================================================ known recipes, off the route
+-- The recipes of a profession the character knows, as the profession panel lists them: read
+-- while the panel is open, and kept in the character's saved record so that the same answer
+-- holds with the panel closed and after a reload (with the panel open the button made cakes from
+-- the bags; closed, the arrow went back to buying the recipe for Clam Chowder, 14 Nov 2026).
+--
+-- WHAT THIS GATHERS: with the panel open on a profession, every recipe of it the character has
+-- learned, as the client shows it: its spell, name and colour at the character's skill, what it
+-- takes, and whether it has a cooldown. Kept in FWCS_DB.__chars["<house's realm>|<name>"].learned
+-- (Inventory.lua's record of the character), on this computer, NEVER sent: the helper reads of
+-- __chars only names, houses, factions, items and skills (fwchelper/plans.py, characters), and
+-- sends scans and vendors alone. Why: to offer, from the bags, a recipe off the route that still
+-- gives points, with the panel closed too. The shape, one profession by its skill line:
+--   learned[skill line] = { skill = the skill it was seen at, t = when,
+--     list = { { spell, colour ("optimal", "medium", "easy", "trivial"), name,
+--                uses = { { item, units }, ... }, cd = true when it has a cooldown }, ... } }
+-- written again whole at each look (once per change: ns.HaveGen, Tailor.lua), a profession the
+-- character no longer has dropped then. Cost: a call or two per recipe of the profession, once
+-- per change while the panel is open.
+--
+-- Cooldowns: C_TradeSkillUI.GetRecipeCooldown says only that a recipe is cooling down (and
+-- whether it is a daily one or has charges); GetSpellBaseCooldown, where the client has it, says
+-- a recipe has a cooldown at all; the old panel's GetTradeSkillCooldown says the time left. A
+-- recipe any of them marks is noted cd, and so is a transmute by its name, whatever they say.
+local function Cooling(spell, oldIndex, name)
+  if (name or ""):match("^Transmute") then return true end
+  if C_TradeSkillUI and C_TradeSkillUI.GetRecipeCooldown then
+    local ok, left, daily, _, most = pcall(C_TradeSkillUI.GetRecipeCooldown, spell)
+    if ok and ((tonumber(left) or 0) > 0 or daily == true or (tonumber(most) or 0) > 0) then return true end
+  end
+  if GetSpellBaseCooldown then
+    local ok, ms = pcall(GetSpellBaseCooldown, spell)
+    if ok and (tonumber(ms) or 0) > 0 then return true end
+  end
+  if oldIndex and GetTradeSkillCooldown then
+    local ok, left = pcall(GetTradeSkillCooldown, oldIndex)
+    if ok and (tonumber(left) or 0) > 0 then return true end
+  end
+  return false
+end
+
+-- the panel's list, read now: { { spell, colour, name, uses, cd }, ... } of the learned recipes;
+-- nil when the client gives none
+local function PanelList()
+  local out
+  if C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo then
+    local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+    for _, id in ipairs(ok and type(ids) == "table" and ids or {}) do
+      local ok2, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+      if ok2 and type(info) == "table" and info.learned and COLOURS[info.relativeDifficulty] then
+        out = out or {}
+        table.insert(out, { spell = id, colour = COLOURS[info.relativeDifficulty], name = info.name, uses = Schematic(id) or {},
+                            cd = Cooling(id, nil, info.name) or nil })
+      end
+    end
+  elseif GetNumTradeSkills and GetTradeSkillInfo and GetTradeSkillRecipeLink and GetTradeSkillNumReagents and GetTradeSkillReagentInfo and GetTradeSkillReagentItemLink then
+    for i = 1, GetNumTradeSkills() or 0 do
+      local name, kind = GetTradeSkillInfo(i)
+      local link = KINDS[kind] and kind ~= "difficult" and GetTradeSkillRecipeLink(i)
+      local spell = link and tonumber(link:match("enchant:(%d+)"))
+      if spell then
+        local uses = {}
+        for r = 1, GetTradeSkillNumReagents(i) or 0 do
+          local _, _, count = GetTradeSkillReagentInfo(i, r)
+          local rlink = GetTradeSkillReagentItemLink(i, r)
+          local item = rlink and tonumber(rlink:match("item:(%d+)"))
+          if item and (tonumber(count) or 0) > 0 then table.insert(uses, { item, tonumber(count) }) end
+        end
+        out = out or {}
+        table.insert(out, { spell = spell, colour = kind, name = name, uses = uses, cd = Cooling(spell, i, name) or nil })
+      end
+    end
+  end
+  return out
+end
+
+-- The panel open on the profession of skill line `line`, at `skill`: its list read (once per
+-- change) and kept as the character's record of it
+local seenGen, seenOf
+local function NoteRecipes(line, skill)
+  local gen = ns.HaveGen and ns.HaveGen() or 0
+  if not line or (seenGen == gen and seenOf == line) then return end
+  local list = PanelList()
+  if not list then return end
+  seenGen, seenOf = gen, line
+  local c = Char()
+  c.learned = c.learned or {}
+  c.learned[line] = { skill = skill, t = time and time() or 0, list = list }
+  if ns.inv.SkillsReadable() then                         -- a profession the character no longer has: its record goes
+    for l in pairs(c.learned) do if not c.skills[l] then c.learned[l] = nil end end
+  end
+end
+
+-- The recipes the fallback may offer: the character's record of the profession of skill line
+-- `line` (just read, with the panel open), orange and yellow only (green, grey and red never),
+-- none with a cooldown. Seen at another skill than `skill`: a recipe is offered only where the
+-- route's numbers show it still at least yellow there (its `at`, from any stretch that lists it
+-- as a next-best: below the green), at the colour they give; else it is unknown, and left out.
+-- nil when there is no record (the panel never opened on the profession on this computer)
+local function KnownRecipes(plan, line, skill)
+  local rec = line and (Char().learned or {})[line]
+  if type(rec) ~= "table" or type(rec.list) ~= "table" then return nil end
+  local ats
+  local out = {}
+  for _, r in ipairs(rec.list) do
+    local colour = r.colour
+    if rec.skill ~= skill then
+      if not ats then
+        ats = {}
+        for _, s in ipairs((plan.source and plan.source.steps) or plan.steps or {}) do
+          for _, a in ipairs(s.alt or {}) do if a.spell and a.at then ats[a.spell] = ats[a.spell] or a.at end end
+        end
+      end
+      local at = ats[r.spell]
+      colour = at and skill >= at[1] and skill < at[3] and (skill < at[2] and "optimal" or "medium") or nil
+    end
+    if (colour == "optimal" or colour == "medium") and not r.cd and type(r.uses) == "table" and #r.uses > 0 then
+      table.insert(out, { spell = r.spell, name = r.name, colour = colour, uses = r.uses })
+    end
+  end
+  return out
+end
+
+-- With the panel closed, the record stands in for what the client would say of a recipe there:
+-- learned (a recipe in it is), and its colour (at the skill it was seen at only). Set by the
+-- verdict for the profession it serves; nil with the panel open, where the client answers
+local memory
+local function Remembered(spell)
+  if not memory then return nil end
+  if not memory.by then
+    memory.by = {}
+    for _, r in ipairs(memory.rec.list or {}) do memory.by[r.spell] = r end
+  end
+  return memory.by[spell]
+end
+-- learned: the client's yes, or the record's (a recipe once learned stays learned; the record
+-- never turns the client's yes into a no)
+local function Learned(spell)
+  local live = api.Learned(spell)
+  if live ~= true and Remembered(spell) then return true end
+  return live
+end
+-- the colour: with the panel closed the record's, while it was seen at this skill; else the client's
+local function Colour(spell)
+  local r = memory and memory.same and Remembered(spell)
+  if r then return r.colour end
+  return api.Colour(spell)
+end
+
+-- What the route still needs that a known recipe off the route must not burn: every item the
+-- stretches from the current one on use, and what those are made of where the route makes them
+-- (plan.made). Not reserved: what the route buys from a vendor (VendorSells: a vendor's stock is
+-- cheap and never runs out, so a cake's Hot Spices are bought again for a later stretch at a
+-- vendor's price, where reserving them would keep the cake from the bags for a few coppers'
+-- worth of spices). Simple and on the safe side: an item the route uses is skipped whatever the
+-- counts, rather than weighed against what a later stretch would buy anyway
+local function Reserved(plan, skill)
+  local out = {}
+  local function Add(item, depth)
+    if out[item] or VendorSells(plan, item) then return end
+    out[item] = true
+    local how = plan.made and plan.made[item]
+    if how and depth < 4 then
+      for _, u in ipairs(how[2] or {}) do Add(u[1], depth + 1) end
+    end
+  end
+  for _, s in ipairs(plan.steps or {}) do
+    if s.to > skill then
+      for _, u in ipairs(s.uses or {}) do Add(u[1], 0) end
+    end
+  end
+  return out
+end
+
+-- The bags first. Nothing of the stretch's chosen recipe (nor of what it makes on the way) can
+-- be made from the bags, or that recipe is not learned yet: before the trainer, a recipe to buy,
+-- the bank, the mailbox or a seller, the first recipe the planner vouches for (ns.StandIns,
+-- Tailor.lua: the stretch's own and its next-best, then those of the stretches before it) that
+-- the bags alone hold a craft of is made, as many as they hold, up to the stretch's end (the
+-- gold's cut, nxt.to, included) or the skill where it stops giving points, whichever is first:
+-- a whole run of one recipe, never a craft of each in turn. Counted from the bags alone, as Can
+-- is: what the bank holds of it does not make a craft now. One the character does not know (a
+-- trainer's walk, or a scroll to buy) or that lacks a tool is no craft from the bags, and is
+-- passed over; a station it needs is said as for the stretch's own. A green craft is allowed
+-- (the reagents are the player's own), but no point a craft is promised: the tooltip says about
+-- how many crafts.
+--
+-- Then, nothing the route vouches for being in the bags: any recipe of the profession the
+-- character knows that the panel shows (or showed, at this skill: the character's record, so the
+-- answer is the same with the panel closed and after a reload) orange or yellow and the bags hold
+-- a craft of (KnownRecipes), none that uses what the route still needs (Reserved). Orange before
+-- yellow, then the one the bags make the most crafts of, then by name; a run up to the stretch's
+-- end, the verdict asked again after it (a player with the fins and the legs for soups and cakes
+-- in the bags was sent to buy the recipe for Clam Chowder, a route without either, 14 Nov 2026).
+-- Once the bags hold no craft of any, the verdict goes on as before (the last fin in the bank
+-- fetched for the soup, once the cakes are made). nil when none is to be made.
+local function BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
+  local list = ns.StandIns and ns.StandIns(plan, skill)
+  if not list then return nil end        -- the box off (the route's own recipes), or a stretch whose product a later one uses
+  local from = math.max(skill, nxt.from)
+  local seen = { [nxt.spell or 0] = true }
+  for _, e in ipairs(list) do
+    local c = e.rec
+    seen[c.spell] = true
+    if c.spell ~= nxt.spell and c.uses and #c.uses > 0 and Learned(c.spell) ~= false then
+      local colour = Colour(c.spell)
+      local crafts, stop = Run(e, colour, from, nxt.to)
+      local v = crafts > 0 and Offer(house, plan, nxt, c, crafts, stop, from, banked, tip, profession, function(using, name)
+        return e.here and string.format("%s: %s stands in for %s from your bags, nothing to fetch or buy.", using, name, ns.RecipeName(nxt.step))
+          or string.format("%s: %s, from an earlier stretch, still gives points: made from your bags, nothing to fetch or buy.", using, name)
+      end, e.now == nil and colour == "easy")
+      if v then return v end
+    end
+  end
+  local known = KnownRecipes(plan, plan.skill_line, skill)
+  if not known then                      -- never seen: said once here, the verdict going on as before
+    table.insert(tip, string.format("Open your %s window once so the addon can see what your bags can make.", ns.Title(profession)))
+    return nil
+  end
+  if #known == 0 then return nil end
+  local reserved = Reserved(plan, skill)
+  local offers = {}
+  for _, c in ipairs(known) do
+    local free = not seen[c.spell]
+    for _, u in ipairs(c.uses) do if reserved[u[1]] then free = false end end
+    if free then
+      local can = math.huge
+      for _, u in ipairs(c.uses) do can = math.min(can, math.floor((ns.inv.Count(u[1]) or 0) / u[2])) end
+      if can > 0 then table.insert(offers, { c = c, can = can }) end
+    end
+  end
+  table.sort(offers, function(a, b)
+    if a.c.colour ~= b.c.colour then return a.c.colour == "optimal" end
+    if a.can ~= b.can then return a.can > b.can end
+    return (a.c.name or "") < (b.c.name or "")
+  end)
+  for _, o in ipairs(offers) do
+    local crafts, stop = Run({}, o.c.colour, from, nxt.to)
+    local v = crafts > 0 and Offer(house, plan, nxt, o.c, crafts, stop, from, banked, tip, profession, function(using, name)
+      return string.format("%s: %s is not on the route but still gives points: made from your bags, nothing to fetch or buy.", using, name)
+    end)
+    if v then return v end
+  end
+  return nil
+end
+
+-- The stretch's recipe is not learned yet: a vouched recipe the bags hold a craft of is made
+-- first (BagsVerdict), and the trip for the recipe becomes the arrow's note, as the other trip of
+-- a two-trip verdict is (a player was sent to buy the recipe for Clam Chowder with 3 soups and 4
+-- cakes' worth in the bags, 14 Nov 2026). The trip: the recipe bought where the route buys it,
+-- collected from the mailbox when it waits there, taken from the bank (a tooltip line: the arrow
+-- knows no bank), or learned at the trainer. A scroll already in the bags is learned first, one
+-- click and no trip; a recipe the character's level cannot learn yet is said in the tooltip, no
+-- trip offered. nil when the bags make nothing: the recipe's own verdicts follow, as before
+local function BagsBeforeLearning(house, plan, nxt, skill, banked, tip, profession, learn, trainer)
+  if learn and (ns.inv.Count(learn[1]) or 0) > 0 then return nil end
+  local made = BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
+  if not made then return nil end
+  local recipe = ns.RecipeName(nxt.step)
+  local need = learn and ((ns.NoteRecipeLevel and ns.NoteRecipeLevel(learn[1])) or learn[3])
+  local mine = UnitLevel and UnitLevel("player")
+  local line
+  if need and mine and need > mine then
+    line = string.format("%s asks for character level %d: learned later.", recipe, need)
+  elseif learn and ns.inv.InMail and (ns.inv.InMail(learn[1]) or 0) > 0 then
+    asideOf = { text = "Then collect " .. N(house, learn[1]) .. " from the mailbox", place = { "mailbox", nil, nil, "Mailbox" } }
+  elseif learn and ((Char().items[learn[1]] or {})[2] or 0) > 0 then
+    line = string.format("Then take %s from the bank and learn %s.", N(house, learn[1]), recipe)
+  elseif learn then
+    Char().tolearn = { spell = nxt.spell, item = learn[1], cost = learn[2] }       -- the list at the house still offers it
+    asideOf = { text = "Then buy the recipe for " .. recipe, place = Seller(plan, learn[1]) }
+  else
+    asideOf = { text = "Then learn " .. recipe .. " at the trainer", place = trainer }
+  end
+  if asideOf and not line then line = asideOf.text .. " (the arrow's note)." end
+  table.insert(made.tip, #made.tip, line)                    -- before "Click: ..."
+  return made
+end
+
 local function VerdictOf(given)
   local house = House()
   if not house then
@@ -667,6 +1033,15 @@ local function VerdictOf(given)
   local tip = { string.format("%s route, skill %d.", ns.Title(profession), skill) }
   if not given then pcall(ns.LearnTools, plan) end      -- the panel open on the route's profession: the tools its recipes need
   local bags, banked = Bags(plan)
+  -- the panel open on the route's profession: what it lists is kept (NoteRecipes); closed, the
+  -- character's record of it answers for the client (memory: Learned, Colour, KnownRecipes)
+  memory = nil
+  if not given then
+    pcall(NoteRecipes, plan.skill_line, skill)
+  else
+    local rec = (Char().learned or {})[plan.skill_line]
+    if type(rec) == "table" and type(rec.list) == "table" then memory = { rec = rec, same = rec.skill == skill } end
+  end
   local nxt = skill < plan.target and ns.NextCraft(plan, skill, bags, ns.BudgetReach and ns.BudgetReach(plan, skill, bags))
   if not nxt then
     return { text = string.format("Route done at skill %d", skill), tip = { tip[1], string.format("The route ends at %d.", plan.target) } }
@@ -735,9 +1110,11 @@ local function VerdictOf(given)
   table.insert(tip, string.format("Step: %s, skill %d to %d, about %d crafts.", ns.RecipeName(step), nxt.from, nxt.to, nxt.crafts))
   -- a recipe to learn: the trainer's, or one the route buys. With reagents to buy as well, the
   -- nearer of the trainer and the house comes first, the other as a note under the arrow
-  if api.Learned(nxt.spell) == false then
+  if Learned(nxt.spell) == false then
     local learn = step.learn
     local trainer = { "trainer", profession, nil, ns.Title(profession) .. " trainer", step.from, step.at and step.at[1], nxt.spell }     -- [5] the rank to train, [6] the skill the recipe is learned at (a trainer seen to teach none so high comes last), [7] its spell (a trainer seen to teach it only)
+    local made = BagsBeforeLearning(house, plan, nxt, skill, banked, tip, profession, learn, trainer)
+    if made then return made end
     if not learn and NearerFirst(profession, plan, nxt, step.from, trainer[6], trainer[7]) == "buy" then
       table.insert(tip, "The house is nearer: buy first, then learn the recipe at the trainer.")
       local v = BuyVerdict(house, plan, nxt, step, tip, profession)
@@ -897,8 +1274,11 @@ local function VerdictOf(given)
       return { text = string.format("Make %d %s", can, c.what), tip = tip, spell = c.spell, crafts = can, to = nxt.to, line = plan.skill_line, profession = profession }
     end
   end
-  -- nothing can be made from the bags: what is in the bank (with "Use what I already have
-  -- first"), what waits in the mail, then what to buy, where
+  -- nothing of the stretch's recipe can be made from the bags: a recipe that may stand in for it
+  -- and that the bags hold a craft of (BagsVerdict); then what is in the bank (with "Use what I
+  -- already have first"), what waits in the mail, then what to buy, where
+  local fromBags = BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
+  if fromBags then return fromBags end
   local fromBank = BankVerdict(house, plan, nxt, banked, tip, profession)
   if fromBank then return fromBank end
   if #nxt.buy > 0 then return MailVerdict(house, plan, nxt, step, tip, profession) or BuyVerdict(house, plan, nxt, step, tip, profession) end
@@ -941,8 +1321,9 @@ end
 
 -- the verdict, with its note (the next rank to train, from 25 below the cap) and the gold
 local function Verdict(given)
-  asideOf, usingOf = nil, nil
+  asideOf, usingOf, memory = nil, nil, nil
   local v = VerdictOf(given)
+  memory = nil                             -- the record answers for one verdict only
   if type(v) == "table" and asideOf then v.aside = asideOf end
   if type(v) == "table" and usingOf and not v.rank then v.note, v.using = v.note and (usingOf .. "; " .. v.note) or usingOf, usingOf end   -- the arrow's note says it too
   if type(v) == "table" then Short(v) end

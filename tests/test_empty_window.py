@@ -376,11 +376,11 @@ def test_state_d_the_site_has_the_house_and_the_file_does_not():
 
 
 def test_state_e_the_site_has_no_routes_for_this_house():
-    for realm, faction, line in (("CAMWOW US2 Realm 1 PvP", "Horde", "and click Save Prices."),
-                                 ("CAMWOW EU4 Realm 3 RP PvP", "Horde", "and click Save Prices."),
-                                 ("CAMWOW TW1 Realm 1 PvE", "Horde", "and click Save Prices."),
-                                 ("CAMWOW KR1 Realm 1 PvP", "Horde", "and click Save Prices."),
-                                 ("CAMWOW AU1 Realm 2 RP", "Horde", "and click Save Prices."),
+    for realm, faction, line in (("CAMWOW US2 Realm 1 PvP", "Horde", "They arrive here by themselves once they are."),
+                                 ("CAMWOW EU4 Realm 3 RP PvP", "Horde", "They arrive here by themselves once they are."),
+                                 ("CAMWOW TW1 Realm 1 PvE", "Horde", "They arrive here by themselves once they are."),
+                                 ("CAMWOW KR1 Realm 1 PvP", "Horde", "They arrive here by themselves once they are."),
+                                 ("CAMWOW AU1 Realm 2 RP", "Horde", "They arrive here by themselves once they are."),
                                  ("CAMWOW XX1 Realm 2 PvE", "Horde", "ForeverWowCraft does not cover this region yet."),
                                  ("CAMWOW US1 Realm 2 Hardcore", "Horde", "ForeverWowCraft does not cover this kind of realm yet.")):
         lua = _load(written(), f'function GetRealmName() return "{realm}" end')
@@ -389,7 +389,7 @@ def test_state_e_the_site_has_no_routes_for_this_house():
         assert f"No routes on foreverwowcraft.com for {realm} ({faction})." in text, realm
         assert line in text, realm
         if line.startswith("and"):
-            assert "The site plans them once its prices are recorded: open the auction house" in text and "within the hour" not in text
+            assert "Routes for this auction house are not planned yet." in text and "Save Prices" not in text and "within the hour" not in text
         assert _buttons(lua) == {"reload": False, "helper": False, "switch": False}, realm
     # the faction matters: the house is listed for Alliance and Horde, an EU Alliance house is not
     assert "No routes on foreverwowcraft.com for" in _shown(_load(written(), 'function GetRealmName() return "CAMWOW EU1 Realm 1 PvP" end; function UnitFactionGroup() return "Alliance" end'))
@@ -496,3 +496,10 @@ def test_the_debug_line_is_said_the_first_time_the_empty_window_is_drawn_with_de
     assert said() == 1
     lua.execute("Fire('BAG_UPDATE_DELAYED'); RunTimers()")
     assert said() == 1
+
+
+if __name__ == "__main__":
+    for k, v in list(globals().items()):
+        if k.startswith("test_") and callable(v):
+            v()
+            print("ok", k)

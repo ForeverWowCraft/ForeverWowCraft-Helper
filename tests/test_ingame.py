@@ -2454,7 +2454,12 @@ def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_s
     lua.execute('UnitLevel = function() return 40 end; Fire("PLAYER_LEVEL_UP")')
     assert text() == "Make 7 Linen Belt"
     lua.execute('UnitLevel = function() return 45 end; Fire("PLAYER_LEVEL_UP")')
+    # the bags hold 7 belts' worth, a recipe the planner listed for the stretch: made first, the shirt's scroll the arrow's
+    # note (test_bags_first.py); with the bolts gone, the scroll first, as ever
+    assert text() == "Make 7 Linen Belt" and strip(lua.eval("ForeverWowCraftMake.verdict.aside.text")) == "Then buy the recipe for White Linen Shirt"
+    lua.execute('bags[0] = { { 2320, 20 } }; Fire("BAG_UPDATE_DELAYED")')
     assert text() == "Buy the recipe for White Linen Shirt first"
+    lua.execute('bags[0] = { { 2996, 40 }, { 2320, 20 } }; Fire("BAG_UPDATE_DELAYED")')
     # the box off: the route as planned, whatever the level
     lua.execute('UnitLevel = function() return 30 end; FWCS_DB.__ui.levelRoutes = false; Fire("BAG_UPDATE_DELAYED")')
     assert text() == "Needs level 45 for White Linen Shirt"

@@ -371,6 +371,7 @@ local haveGen = 0                                   -- moved on by every change 
 local haveCache = setmetatable({}, { __mode = "k" })
 ns.haveWalks = 0                                    -- how many times the choice was worked out (for the tests)
 function ns.HaveChanged() haveGen = haveGen + 1 end
+function ns.HaveGen() return haveGen end            -- for what else is worked out once per change (Verdict.lua, KnownRecipes)
 
 local function Knows(spell)
   if not spell then return false end
@@ -538,6 +539,97 @@ function ns.UseWhatIHave(plan, skill)
   for k, v in pairs(plan) do out[k] = v end
   out.steps, out.source = steps, plan.source or plan
   return Keep(out)
+end
+
+-- ================================================================ the bags first
+-- The recipes the planner vouches for that a run made from the bags may use at `skill`, for the
+-- Make button (Verdict.lua, BagsVerdict): it takes the first of them the bags alone hold a craft
+-- of, once the stretch's chosen recipe has none there or is not learned yet, before it sends the
+-- character to learn or buy that recipe, to the bank, the mailbox or a seller. What is in hand
+-- is made now: a player with the spider legs for 4 cakes in the bags was sent to the bank for 1
+-- fin of the soup the stretch had chosen, and then, the cakes made, to buy the recipe of the next
+-- stretch with 3 soups' worth still in the bags (14 Nov 2026).
+--
+-- Vouched for: the stretch's own recipe and its next-best in the planner's order (cheapest a
+-- point first), then the recipes and next-best of the stretches before it, nearest first, those
+-- with the better chance at `skill` before the others (the planner ranked them for their own
+-- stretch, not for this skill, so the chance is what is left to tell them apart). As the
+-- stretches' records before any swap have them (plan.source: the route before Effective and
+-- UseWhatIHave). Never one the character's level cannot learn, a next-best of this stretch
+-- learned above its start, or one the planner's numbers say gives no point at `skill`; nothing
+-- at all for a stretch whose product a later one uses (bolts for the bags), nor with "Use what I
+-- already have first" off (the route's own recipes, whatever is had).
+--
+-- Each comes as { rec, chance = function(skill) -> 0..1 or nil, here = true for this stretch's }.
+-- The chance a craft gives a point: the planner's own `per` (crafts a point, its skill-up model)
+-- inside the stretch the recipe is listed in; else the classic curve from its `at` (orange,
+-- yellow, green, grey: foreverwowcraft/planner.py Recipe.chance, without the model's factor),
+-- the recipe's own or that of the same recipe listed as a next-best elsewhere in the route; nil
+-- where nothing says (a route's recipe is sent without `at`): the client's colour decides then
+-- (Verdict.lua). A run made from the bags needs a point only at the skills it is made at, not at
+-- every skill of the stretch: the button stops it where the chance falls to 0.
+--
+-- Cost: nothing new to weigh. A craft made wholly from the bags buys nothing, and UseWhatIHave
+-- counts what is owned as free, so by its own rule such a craft costs less than any that buys or
+-- fetches; the stretch's whole-run choice is left as it is.
+local function Curve(at, skill)
+  if skill < at[1] or skill >= at[4] then return 0 end
+  if skill < at[2] or at[4] <= at[2] then return 1 end
+  return math.min(1, (at[4] - skill) / (at[4] - at[2]))
+end
+function ns.StandIns(plan, skill)
+  if not plan or not plan.steps then return nil end
+  if ns.Settings and ns.Settings().haveFirst == false then return nil end
+  local i, step
+  for k, s in ipairs(plan.steps) do               -- the stretch ns.NextCraft serves
+    local left = s.blocked and ((s.to > skill) and 1 or 0) or ns.CraftsLeft(s, skill)
+    if left > 0 then i, step = k, s; break end
+  end
+  if not step or step.blocked then return nil end
+  if FeedsLater(plan, i) or (plan.source and FeedsLater(plan.source, i)) then return nil end
+  local raws = (plan.source and plan.source.steps) or plan.steps
+  local ats = {}                                  -- a recipe's colours, from wherever the route lists it as a next-best
+  for _, s in ipairs(raws) do
+    for _, a in ipairs(s.alt or {}) do if a.spell and a.at then ats[a.spell] = ats[a.spell] or a.at end end
+  end
+  local from = math.max(skill, step.from)
+  local level = UnitLevel and UnitLevel("player") or math.huge
+  local out, seen = {}, {}
+  local function Add(rec, s, here, list)
+    if not rec.spell or seen[rec.spell] or not Fits(rec, from, level) then return end
+    if here and rec ~= s and rec.at and rec.at[1] and rec.at[1] > from then return end
+    local function Chance(at)
+      if at >= s.from and at < s.to and rec.per and rec.per[at - s.from + 1] then
+        local per = rec.per[at - s.from + 1]
+        return per > 0 and math.min(1, 1 / per) or 0
+      end
+      local colours = rec.at or ats[rec.spell]
+      return colours and Curve(colours, at) or nil
+    end
+    local now = Chance(from)
+    if now == 0 then return end
+    seen[rec.spell] = true
+    table.insert(list, { rec = rec, chance = Chance, here = here or nil, now = now })
+  end
+  local raw = raws[i] or step
+  Add(raw, raw, true, out)
+  for _, alt in ipairs(raw.alt or {}) do Add(alt, raw, true, out) end
+  local before = {}
+  for k = i - 1, 1, -1 do
+    local s = raws[k]
+    if s and not s.blocked then
+      Add(s, s, false, before)
+      for _, alt in ipairs(s.alt or {}) do Add(alt, s, false, before) end
+    end
+  end
+  for n, e in ipairs(before) do e.order = n end
+  table.sort(before, function(a, b)               -- the better chance first; unknown (the client's to say) after the known
+    local x, y = a.now or -1, b.now or -1
+    if x ~= y then return x > y end
+    return a.order < b.order
+  end)
+  for _, e in ipairs(before) do table.insert(out, e) end
+  return out
 end
 
 -- what moves the answer on: the bags, the bank, the mail, the skill, the level, the gold, a

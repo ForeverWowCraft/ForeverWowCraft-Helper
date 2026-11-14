@@ -45,14 +45,14 @@ python fwch.py fresh            when each auction house was last scanned by anyo
    the icon and **Choose the game folder**: the "World of Warcraft" folder, the one that holds
    the client folder (`_forever_`).
 3. Start the game (if it was running, log out to the character screen and back in: the game finds a new addon there; an updated one needs only `/reload`).
-   `/fwc` opens the window. Open the auction house now and then: the prices are recorded by
-   themselves, the **Save Prices** button on its frame lights up when there is something to
-   save, and that click is all it asks; the helper sends them within seconds. (Interface,
+   `/fwc` opens the window with your routes; you do not need to scan to get them. At the
+   auction house, the **Save Prices** button lights up when there is something to save.
+   Clicking it is optional and helps keep prices current for everyone. (Interface,
    AddOns, ForeverWowCraft has the switches, among them the scanner's own bar for running
    scans by hand.)
 
-Point at the icon for how things stand: what was last sent, how many auction houses have
-routes, or what is wrong. Its menu: **Send prices now**; **Fetch routes now**; **Choose the
+Point at the icon for how things stand: how many auction houses have routes, when prices were last
+sent (once some were), or what is wrong. Its menu: **Send prices now**; **Fetch routes now**; **Choose the
 game folder**; **Open the log**; **Start with Windows**, ticked when it does (Windows' own
 Settings > Apps > Startup has the same switch); **Update by itself**, ticked when it does, and
 **Check for an update now** (see [Updating](#updating)); **Help**; **Quit**. A balloon comes only when
@@ -348,7 +348,7 @@ the Run entry that starts the app at logon, "Start the helper now" at the end (o
 `LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
 running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
 tag) builds it on a Windows runner, installs it there for
-real (`installer/install_check.py`: the released 1.7.7, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
+real (`installer/install_check.py`: the released 1.8.0, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
 msiexec, a build one version up over that as this updater does, then removed), and puts it on
 the GitHub release beside the zips. The release then stays a draft, with every file on it, until
 the project publishes it by hand (`.github/workflows/publish.yml`, which checks the files first):

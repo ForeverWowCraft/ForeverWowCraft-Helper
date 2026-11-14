@@ -15,7 +15,12 @@ def test_the_tooltip_says_how_things_stand_in_127_characters():
     s = tray.Status()
     assert tray.tooltip(s) == f"ForeverWowCraft Helper {__version__}\nGame not found: choose the game folder"
     s.game = Path("C:/Games/World of Warcraft")
-    assert tray.tooltip(s).endswith("\nnothing sent yet: open the auction house and click Save Prices; no routes yet")
+    assert tray.tooltip(s).endswith("\nno routes yet")
+    s.houses = ["classic-beta-pvp-2--horde", "another"]
+    assert tray.tooltip(s).endswith("\nroutes for 2 auction houses")
+    for text in (tray.tooltip(s), tray.tooltip(tray.Status(game=s.game))):
+        assert "Save Prices" not in text and "scan" not in text and "auction house and" not in text and "sent" not in text
+    s.houses = []
     s.name, s.last_sent, s.houses = "h-abc", int(time.time()) - 120, ["classic-beta-pvp-2--horde"]
     text = tray.tooltip(s)
     assert text.startswith(f"ForeverWowCraft Helper {__version__}, as h-abc\nlast sent 2 min ago; routes for 1 auction house")

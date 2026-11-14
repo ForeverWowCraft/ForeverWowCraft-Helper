@@ -38,9 +38,9 @@ def _said(s: Status) -> str:
         return "Game not found: choose the game folder"
     if s.problem:
         return s.problem
-    sent = f"last sent {age_text(s.last_sent)}" if s.last_sent else "nothing sent yet: open the auction house and click Save Prices"
     routes = f"routes for {len(s.houses)} auction house{'s' if len(s.houses) != 1 else ''}" if s.houses else "no routes yet"
-    return f"{sent}; {routes}"
+    # nothing about sending until something was sent: the routes do not depend on a player's own scan
+    return f"last sent {age_text(s.last_sent)}; {routes}" if s.last_sent else routes
 
 
 def tooltip(s: Status) -> str:

@@ -36,5 +36,5 @@ if exist "%~dp0python\pythonw.exe" (
 )
 echo.
 echo Done. Start the game. /fwc shows what your professions still need, less what you have.
-echo To save prices: open the auction house and click Save Prices.
+echo Clicking Save Prices at the auction house is optional and helps keep prices current.
 echo The helper sends every scan: it is running now, an icon by the clock, and starts with Windows from now on.

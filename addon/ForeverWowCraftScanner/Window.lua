@@ -484,8 +484,8 @@ local function EmptyState()
                debug = "the site lists this house, Plans.lua does not have it (" .. #site.houses .. " houses listed)" }
     end
     local region, rules = realm:match("^CAMWOW (%a+)%d+ Realm %d+ (.+)$")
-    local remedy = { "The site plans them once its prices are recorded: open the auction house",
-                     "and click Save Prices." }
+    local remedy = { "Routes for this auction house are not planned yet.",
+                     "They arrive here by themselves once they are." }
     if not COVERED.regions[region or ""] then remedy = { "ForeverWowCraft does not cover this region yet." }
     elseif not COVERED.rules[rules or ""] then remedy = { "ForeverWowCraft does not cover this kind of realm yet." } end
     local out = { string.format("No routes on foreverwowcraft.com for %s (%s).", realm, faction ~= "" and faction or "?") }
