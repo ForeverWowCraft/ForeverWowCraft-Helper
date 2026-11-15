@@ -849,7 +849,7 @@ def test_the_seed_knows_the_vanilla_world():
     assert lua.eval('(ns.NearestPlace("station", "Anvil"))').what == "Anvil"
     assert lua.eval('(ns.NearestPlace("auction"))').name.startswith("Auctioneer")
     lua.execute("ns.PlacesCommand()")
-    assert "and 1877 that the addon came with" in lua.eval("printed[#printed - 1]")
+    assert "and 2319 that the addon came with" in lua.eval("printed[#printed - 1]")
     assert lua.eval("printed[#printed]").endswith("kept for the helper: 0 merchant window(s), 0 wares; 0 trainer window(s), 0 services; 0 recipe scroll(s) with the level each asks for.")
 
 
@@ -2584,6 +2584,39 @@ def test_what_the_character_has_chooses_among_the_stretchs_recipes():
     assert route(2) == "Linen Belt" and lua.eval("ns.haveWalks") == walks             # the last answer stands in the fight
     lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
     assert route(2) == "White Linen Shirt" and lua.eval("ns.haveWalks") == walks + 1
+
+
+def test_the_arrow_says_what_to_do_where_it_points_then_what_of_yours_it_uses():
+    """The live game, 15 Nov 2026: Hillman's Belt stood in for Dark Leather Tunic with the character's 64 Medium Leather, its
+    recipe to buy first; the arrow at the auctioneer said only "(Using your 64 Medium Leather)", not what to do there. Here the
+    belts stand in for the shirts with 21 wool, their recipe a scroll to buy: the arrow's note is the verdict's words, then the
+    wool. A verdict with a note of its own (the bank's) keeps both, the using-text first, as before."""
+    lua = _game(_owned_doc())
+    lua.execute('''
+      learned = { [2963] = true, [2393] = true, [2385] = true, [3916] = true }
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function() return {} end, CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      UnitLevel = function() return 30 end
+      local plan = FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"]
+      plan.steps[2].alt[1].learn = { 6001, 200 }; plan.buy[6001] = { 200, "ah" }
+      skill = 44; bags[0] = { { 2320, 20 }, { 2592, 21 } }; money = 100000
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s or "")  # noqa: E731
+    v = lua.eval("ForeverWowCraftMake.verdict")
+    assert strip(v.text) == "Buy the recipe for Linen Belt first" and v.place[1] == "auction", strip(v.text)
+    arrow = lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].arrow')
+    assert strip(arrow.note) == "Buy the recipe for Linen Belt first; using your 21 Wool Cloth and 7 Coarse Thread", strip(arrow.note)
+    assert strip(v.note) == "Using your 21 Wool Cloth and 7 Coarse Thread"          # the verdict's own fields as they were
+    # the scroll learned, the wool in the bank: the bank's verdict has its note, kept after the using-text
+    lua.execute('learned[3915] = true; bags[0] = { { 2320, 20 } }; FWCS_DB.__chars["Stonespine|Thrallson"].items[2592] = { 0, 21, 0, 0 }; '
+                'ns.HaveChanged(); Fire("TRADE_SKILL_SHOW")')
+    assert strip(lua.eval("ForeverWowCraftMake.verdict.text")) == "Take 21 Wool Cloth from the bank"
+    assert strip(lua.eval('FWCS_DB.__chars["Stonespine|Thrallson"].arrow.note')) == "Using your 21 Wool Cloth and 7 Coarse Thread; 21 Wool Cloth: bank"
 
 
 BOUGHT_SCROLL_GAME = """

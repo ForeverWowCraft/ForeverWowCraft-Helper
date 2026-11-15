@@ -4,7 +4,10 @@ green or grey, kept for the whole account by spell (FWCS_DB.__colours, Verdict.l
 Held here: two looks at two skills make the lowest and highest skill of each colour; a window linked in chat records nothing; a skill
 bonus other than 0, or a client that says nothing of one, records nothing; a colour where the kept bounds say it cannot be drops the
 older pair; a recipe not learned is not recorded; a profession without a route is; a first look before the client's list loads is
-tried again at the next refresh, a costly empty look at most once a second and once more by a timer; nothing of the character is in the table.
+tried again at the next refresh, a costly empty look at most once a second and once more by a timer; every skill point gained in a
+Make run is looked at, while the button's verdict holds through the cast; a switch to another profession, its list not yet
+followed, records nothing of the last one's list at the new rank; 1.8.2's table is started again once; nothing of the character
+is in the table.
 
 Needs a Lua: `pip install lupa`; without it this says so and passes.
 """
@@ -14,9 +17,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_bags_first import (COOKING, SPELL_CAKE, SPELL_EGGTHING, SPELL_SAUSAGE, SPELL_SOUP, held, lua_literal,  # noqa: E402
-                             panel_game, panel_verdict)
-from test_ingame import lupa  # noqa: E402
+from test_bags_first import (COOKING, FIN, GAME, LEATHERWORKING, LEG, LINES, LW_LIST, PANEL, SPELL_CAKE, SPELL_EGGTHING,  # noqa: E402
+                             SPELL_KIT, SPELL_SAUSAGE, SPELL_SOUP, SPELL_TAIL, SPICES, SWITCH, held, lua_literal, offroute_doc,
+                             panel_game, panel_verdict, strip)
+from test_ingame import _game, lupa  # noqa: E402
 
 ALCHEMY = 171
 BASE = """
@@ -157,6 +161,90 @@ def test_a_list_none_learned_is_looked_at_again_at_most_once_a_second():
     assert colours(lua) == {}
     lua.execute("clock = 103; Fire('TRADE_SKILL_LIST_UPDATE')")
     assert colours(lua)[SPELL_CAKE]["o"] == (120, 120), colours(lua)
+
+
+def test_every_skill_point_of_a_make_run_is_looked_at_while_the_verdict_holds():
+    """A Make run from 119: the button's verdict holds while the client casts (Craft.lua Refresh), and the skill goes 120, 121, 122
+    with the cake orange at 120 and yellow from 121. Each point is looked at: the orange's highest is 120 and the yellow's lowest
+    121, the two skills a colour changes between, not only the skills before and after the run."""
+    if lupa is None:
+        return
+    lua = game()
+    held(lua, bags={FIN: 6, LEG: 9, SPICES: 7}, skill=119)
+    v = panel_verdict(lua)
+    assert v["text"] == "Make 4 Gooey Spider Cake", v
+    assert colours(lua)[SPELL_CAKE]["o"] == (119, 119)
+    lua.execute("casting = false; UnitCastingInfo = function() if casting then return 'Gooey Spider Cake' end end; "
+                "ForeverWowCraftMake.scripts.OnClick(ForeverWowCraftMake); casting = true")
+    for skill, c in ((120, 0), (121, 1), (122, 1)):
+        lua.execute(f"colour[{SPELL_CAKE}] = {c}; skill = {skill}; ns.inv.Char().skills[{COOKING}] = skill; "
+                    f"bags[0] = {{ {{ {FIN}, 6 }}, {{ {LEG}, {9 - 2 * (skill - 119)} }}, {{ {SPICES}, {7 - (skill - 119)} }} }}; "
+                    "Fire('CHAT_MSG_SKILL'); Fire('SKILL_LINES_CHANGED'); Fire('BAG_UPDATE_DELAYED')")
+        assert strip(lua.eval("ForeverWowCraftMake.verdict.text")) == "Make 4 Gooey Spider Cake"     # held through the cast
+    lua.execute("casting = false; Fire('BAG_UPDATE_DELAYED')")                # the run over: the verdict moves on
+    assert strip(lua.eval("ForeverWowCraftMake.verdict.text")) != "Make 4 Gooey Spider Cake"
+    row = colours(lua)[SPELL_CAKE]
+    assert row["o"] == (119, 120) and row["y"] == (121, 122), row
+
+
+def test_a_switch_records_nothing_of_the_last_professions_list_at_the_new_rank():
+    """The live game, 15 Nov 2026: the window toggled from Cooking to Leatherworking; the client named Leatherworking (rank 30) while
+    its list was still Cooking's, and Cooking's colours were recorded at 30. Now that look records nothing; the Leatherworking list,
+    once it follows, is recorded at 30 (by the later look a little over a second on, as a look of a list not loaded yet)."""
+    if lupa is None:
+        return
+    lua = game()
+    lua.execute(CLOCK + LINES + SWITCH)
+    look(lua, 120)
+    assert colours(lua)[SPELL_CAKE]["o"] == (120, 120)
+    lua.execute(f"prof = {LEATHERWORKING}; clock = 100.5")
+    panel_verdict(lua)
+    got = colours(lua)
+    assert got[SPELL_CAKE]["o"] == (120, 120) and SPELL_KIT not in got, got        # nothing at 30 for the cake
+    assert len(lua.eval("timers")) == 1
+    lua.execute(LW_LIST + "clock = 100.6; Fire('TRADE_SKILL_LIST_UPDATE')")         # within the second: held back
+    lua.execute("clock = 101.7; RunTimers()")
+    got = colours(lua)
+    assert got[SPELL_KIT]["o"] == (30, 30) and got[SPELL_CAKE]["o"] == (120, 120) and set(got[SPELL_CAKE]) == {"o", "t"}, got
+
+
+def test_a_client_that_cannot_say_whose_a_recipe_is_records_as_before():
+    if lupa is None:
+        return
+    lua = game()
+    lua.execute(CLOCK + SWITCH)
+    look(lua, 120)
+    lua.execute(f"prof = {LEATHERWORKING}; clock = 100.5")
+    panel_verdict(lua)
+    assert colours(lua)[SPELL_CAKE]["o"] == (30, 120)                                # no word from the client: the look counts
+
+
+def test_the_colours_of_helper_182_are_started_again_once():
+    """Rows recorded before the switch was told apart may be another profession's: the table is dropped at the first pass and marked
+    (FWCS_DB.__coloursFrom = 2), and never again."""
+    if lupa is None:
+        return
+    lua = game()
+    lua.execute("FWCS_DB.__colours = { [1] = { o = { 5, 5 }, t = 1 } }")
+    look(lua, 120)
+    got = colours(lua)
+    assert 1 not in got and got[SPELL_CAKE]["o"] == (120, 120) and lua.eval("FWCS_DB.__coloursFrom") == 2, got
+    lua.execute("FWCS_DB.__colours[1] = { o = { 5, 5 }, t = 1 }")
+    look(lua, 125, **{str(SPELL_CAKE): 1})
+    got = colours(lua)
+    assert got[1]["o"] == (5, 5) and got[SPELL_CAKE]["y"] == (125, 125), got
+    saved = lua_literal(lua.eval("FWCS_DB"))                                         # a reload: the mark carried over, nothing dropped
+    fresh = panel_game_saved(saved)
+    look(fresh, 126, **{str(SPELL_CAKE): 1})
+    got = colours(fresh)
+    assert got[1]["o"] == (5, 5) and got[SPELL_CAKE]["y"] == (125, 126), got
+
+
+def panel_game_saved(saved: str):
+    """game() after a /reload: the saved variables carried over."""
+    lua = _game(offroute_doc(), saved="FWCS_DB = " + saved)
+    lua.execute(GAME + f"learned[{SPELL_TAIL}] = true" + PANEL + BASE)
+    return lua
 
 
 def test_nothing_of_the_character_is_in_the_table():

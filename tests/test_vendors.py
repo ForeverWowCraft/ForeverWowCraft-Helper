@@ -199,6 +199,20 @@ def test_recipe_colours_are_read_and_travel_with_the_sightings():
                                                                       separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
 
 
+def test_the_colours_restart_mark_is_read_past_and_never_sent():
+    """FWCS_DB.__coloursFrom (15 Nov 2026): a number beside __colours saying which start the table is of; the file reads as before,
+    the colours the same, no house made of it, nothing of it in the document sent."""
+    f = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
+    f.write_text(COLOURED.replace('\t["__colours"] = {', '\t["__coloursFrom"] = 2,\n\t["__colours"] = {', 1), encoding="utf-8")
+    assert scan.saved_db(f).get("__coloursFrom") == 2
+    plain = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
+    plain.write_text(COLOURED, encoding="utf-8")
+    assert scan.colours(f) == scan.colours(plain) and scan.colours(f)
+    assert scan.datasets(f) == scan.datasets(plain)
+    sent = json.dumps(pipe.vendors_document(scan.vendors(f), scan.trainers(f), scan.recipes(f), scan.colours(f)))
+    assert "coloursFrom" not in sent
+
+
 def test_bad_colours_are_left_out_and_the_rest_is_kept():
     f = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
     f.write_text(COLOURED, encoding="utf-8")

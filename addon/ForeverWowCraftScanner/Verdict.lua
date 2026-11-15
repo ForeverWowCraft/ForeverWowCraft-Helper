@@ -111,6 +111,20 @@ function api.Learned(spell)
   if GetNumTradeSkills then return OldIndex(spell) ~= nil end
 end
 
+-- whether the client says the recipe is of the profession `line`: true when it is, false when it
+-- says another, nil when it cannot say (no such call, an error, no answer, or no `line`).
+-- GetTradeSkillLineForRecipe gives the recipe's own skill line, its name and the profession
+-- above it (Light Armor Kit: 2945, "Leatherworking", 165), so either the first or the third may
+-- be the profession's id. Needed because at a switch in the window (Cooking to Leatherworking,
+-- 15 Nov 2026) the client names the new profession before its list follows: for a moment
+-- GetAllRecipeIDs and GetRecipeInfo still serve the old profession's recipes
+function api.OfLine(spell, line)
+  if not line or not (C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillLineForRecipe) then return nil end
+  local ok, own, _, parent = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, spell)
+  if not ok or (own == nil and parent == nil) then return nil end
+  return own == line or parent == line
+end
+
 -- what the recipe needs: { { name, met, place }, ... }; place = a station to stand at (Anvil,
 -- Forge) rather than a tool carried (Blacksmith Hammer), by the client's kind where it says,
 -- else by name
@@ -668,7 +682,9 @@ end
 -- WHEN: only with the player's own profession window open (never one linked in chat, a guild's,
 -- an inspected or an NPC's: open.linked), on whatever profession it shows, route or not; one
 -- pass over the window's list once per change (ns.HaveGen, Tailor.lua: the skill, a recipe
--- learned, the bags) and of the skill shown, run with the Make button's verdict, never per frame.
+-- learned, the bags) and of the skill shown, run with the Make button's verdict, never per frame,
+-- and while a Make run holds that verdict through a cast (ns.verdict.NoteColours, Craft.lua
+-- Refresh): each skill point of the run is looked at, as a colour changes between two points.
 -- A look that sees no learned recipe is not kept: the window opens before the client has loaded
 -- its list (TRADE_SKILL_SHOW; the list comes with TRADE_SKILL_LIST_UPDATE, which moves neither
 -- the skill nor the bags), so an empty look is tried again at the next refresh. A look where the
@@ -676,6 +692,15 @@ end
 -- recipes but none learned yet costs a call per recipe, so it is tried at most once a second
 -- (GetTime), and one more look is set a little over a second later (C_Timer), once for the
 -- change, window and skill, one waiting at most, in case no refresh comes after the list.
+-- A switch in the window from one profession to another counts the same: the client names the
+-- new profession (GetBaseProfessionInfo) a moment before GetAllRecipeIDs and GetRecipeInfo give
+-- its list, so a look where the client says a learned recipe is of another profession than the
+-- one named (api.OfLine) records nothing and is tried again like a list with none learned
+-- (Cooking's colours were recorded at the Leatherworking rank, 15 Nov 2026). The colours helper
+-- 1.8.2 recorded may hold such rows and cannot be told apart, so the table is started again
+-- once: FWCS_DB.__coloursFrom, a number beside it, says which start the table is of (2 since
+-- this fix; another, or none, and __colours is dropped at the next pass). Kept on this computer
+-- only, never sent.
 -- WHY: the planner's yellow, green and grey for each recipe come from client tables that are
 -- wrong for many recipes on Forever (the levels move by hotfix); the game's own colours, pooled
 -- over players, are the check on them. Nothing uses them yet.
@@ -728,15 +753,20 @@ end
 
 -- the window's learned recipes and their colour now: { [spell] = "o" | "y" | "g" | "x" } (red,
 -- and a recipe not learned, left out), and how many rows of the list were walked. One call a
--- recipe of the list
-local function SeenColours()
+-- recipe of the list, and one more a learned recipe where the client can say which profession it
+-- is of (api.OfLine): a learned recipe of another profession than `of`, the one the window names,
+-- and the list is the previous profession's still (the client names the new one before its list
+-- follows), so nothing of it is given, as with a list not loaded yet
+local function SeenColours(of)
   local out, walked = {}, 0
   if C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo then
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     for _, id in ipairs(ok and type(ids) == "table" and ids or {}) do
       walked = walked + 1
       local ok2, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
-      local key = ok2 and type(info) == "table" and info.learned == true and COLOUR_KEYS[COLOURS[info.relativeDifficulty]]
+      local learned = ok2 and type(info) == "table" and info.learned == true
+      if learned and api.OfLine(id, of) == false then return {}, walked end
+      local key = learned and COLOUR_KEYS[COLOURS[info.relativeDifficulty]]
       if key and type(id) == "number" then out[id] = key end
     end
   elseif GetNumTradeSkills and GetTradeSkillInfo and GetTradeSkillRecipeLink then
@@ -761,16 +791,20 @@ local colourKey                          -- the change, window and skill last re
 local emptyKey, emptyAt                  -- the last look that walked a list and saw no learned recipe, and when (GetTime)
 local laterKey, laterPending             -- the key a later look was scheduled for (C_Timer), once a key; one waiting at most
 local EMPTY_AGAIN = 1                    -- seconds before such a look of the same key is tried again
+local COLOURS_FROM = 2                   -- FWCS_DB.__coloursFrom: the table kept since the switch fix (see above)
 local function NoteColours(open, later)
   if not open or open.linked or type(FWCS_DB) ~= "table" then return end
+  if FWCS_DB.__coloursFrom ~= COLOURS_FROM then           -- 1.8.2's colours, some from a switch: started again, once
+    FWCS_DB.__colours, FWCS_DB.__coloursFrom = nil, COLOURS_FROM
+  end
   local rank = api.BaseRank()
   if not rank then return end
   local key = string.format("%s:%s:%d", tostring(ns.HaveGen and ns.HaveGen() or 0), tostring(open.id or open.name), rank)
   if key == colourKey then return end
   local clock = GetTime and GetTime() or nil
   if not later and key == emptyKey and clock and emptyAt and clock - emptyAt < EMPTY_AGAIN then return end
-  local seen, walked = SeenColours()
-  if not next(seen) then                                  -- the list not loaded yet: not kept
+  local seen, walked = SeenColours(open.id)
+  if not next(seen) then                                  -- the list not loaded yet (or still the last profession's): not kept
     if walked > 0 then                                    -- a call a recipe spent for nothing: not again within a second
       emptyKey, emptyAt = key, clock
       if laterKey ~= key and not laterPending and C_Timer and C_Timer.After then
@@ -917,13 +951,17 @@ local function Cooling(spell, oldIndex, name)
 end
 
 -- the panel's list, read now: { { spell, colour, name, uses, cd }, ... } of the learned recipes;
--- nil when the client gives none
-local function PanelList()
+-- nil when the client gives none, and nil when it says a learned recipe of the list is of another
+-- profession than `line` (api.OfLine): at a switch in the window the client names the new
+-- profession a moment before its list follows, and the old one's recipes were kept under the new
+-- line (Cooking's Dry Pork Ribs offered on the Leatherworking route, 15 Nov 2026)
+local function PanelList(line)
   local out
   if C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo then
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     for _, id in ipairs(ok and type(ids) == "table" and ids or {}) do
       local ok2, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+      if ok2 and type(info) == "table" and info.learned and api.OfLine(id, line) == false then return nil end
       if ok2 and type(info) == "table" and info.learned and COLOURS[info.relativeDifficulty] then
         out = out or {}
         table.insert(out, { spell = id, colour = COLOURS[info.relativeDifficulty], name = info.name, uses = Schematic(id) or {},
@@ -952,12 +990,13 @@ local function PanelList()
 end
 
 -- The panel open on the profession of skill line `line`, at `skill`: its list read (once per
--- change) and kept as the character's record of it
+-- change) and kept as the character's record of it. No list, or still the last profession's
+-- (PanelList), and nothing is kept, the next refresh reading it again
 local seenGen, seenOf
 local function NoteRecipes(line, skill)
   local gen = ns.HaveGen and ns.HaveGen() or 0
   if not line or (seenGen == gen and seenOf == line) then return end
-  local list = PanelList()
+  local list = PanelList(line)
   if not list then return end
   seenGen, seenOf = gen, line
   local c = Char()
@@ -973,7 +1012,10 @@ end
 -- none with a cooldown. Seen at another skill than `skill`: a recipe is offered only where the
 -- route's numbers show it still at least yellow there (its `at`, from any stretch that lists it
 -- as a next-best: below the green), at the colour they give; else it is unknown, and left out.
--- nil when there is no record (the panel never opened on the profession on this computer)
+-- nil when there is no record (the panel never opened on the profession on this computer). A
+-- recipe the client says is of another profession is left out (api.OfLine): helper 1.8.2 kept
+-- the last profession's list under the new one at a switch in the window, until the next look
+-- wrote the record again
 local function KnownRecipes(plan, line, skill)
   local rec = line and (Char().learned or {})[line]
   if type(rec) ~= "table" or type(rec.list) ~= "table" then return nil end
@@ -991,7 +1033,8 @@ local function KnownRecipes(plan, line, skill)
       local at = ats[r.spell]
       colour = at and skill >= at[1] and skill < at[3] and (skill < at[2] and "optimal" or "medium") or nil
     end
-    if (colour == "optimal" or colour == "medium") and not r.cd and type(r.uses) == "table" and #r.uses > 0 then
+    if (colour == "optimal" or colour == "medium") and not r.cd and type(r.uses) == "table" and #r.uses > 0
+       and api.OfLine(r.spell, line) ~= false then
       table.insert(out, { spell = r.spell, name = r.name, colour = colour, uses = r.uses })
     end
   end
@@ -1482,7 +1525,13 @@ local function Verdict(given)
   local v = VerdictOf(given)
   memory = nil                             -- the record answers for one verdict only
   if type(v) == "table" and asideOf then v.aside = asideOf end
-  if type(v) == "table" and usingOf and not v.rank then v.note, v.using = v.note and (usingOf .. "; " .. v.note) or usingOf, usingOf end   -- the arrow's note says it too
+  if type(v) == "table" and usingOf and not v.rank then
+    -- a verdict with a place and no note of its own: the arrow's note there was the verdict's
+    -- words, and the using-text alone left the arrow at the auctioneer without saying what to do
+    -- (Hillman's Belt's recipe to buy, 15 Nov 2026), so the words come first, then the using-text
+    if v.place and not v.note then v.arrowNote = v.text .. "; " .. (usingOf:gsub("^Using", "using")) end
+    v.note, v.using = v.note and (usingOf .. "; " .. v.note) or usingOf, usingOf                  -- the arrow's note says it too
+  end
   if type(v) == "table" then Short(v) end
   return v
 end
@@ -1491,5 +1540,6 @@ api.IsPlace = IsPlace
 -- whether the book opened another profession since last asked (the shopping list follows it)
 local function Switched() local s = switched; switched = false; return s end
 
-ns.verdict = { Verdict = Verdict, api = api, NoteStations = NoteStations, Selected = Selected, Switched = Switched }
+ns.verdict = { Verdict = Verdict, api = api, NoteStations = NoteStations, Selected = Selected, Switched = Switched,
+               NoteColours = function() pcall(NoteColours, api.Open()) end }
 ns.craft = { Shopping = Shopping }

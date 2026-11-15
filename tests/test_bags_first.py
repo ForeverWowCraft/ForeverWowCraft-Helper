@@ -19,7 +19,9 @@ chance, and its grey is none; with the bags empty, the recipe first as before.
 Last, the fallback: nothing the route vouches for in the bags, the profession panel open, any recipe the character knows that the
 panel shows orange or yellow and the bags hold a craft of, orange first, then the most crafts; never green, grey or red, one
 cooling down or with a cooldown at all, a transmute, or one that takes what the route still needs (a vendor's goods excepted);
-with the panel closed or the box off, as before.
+with the panel closed or the box off, as before. And (15 Nov 2026) at a switch in the window from Cooking to Leatherworking,
+the client naming Leatherworking before its list follows, nothing of Cooking's list is kept or offered on the Leatherworking
+route, nor a Cooking recipe 1.8.2 left in the Leatherworking record.
 
 Needs a Lua: `pip install lupa`; without it this says so and passes.
 """
@@ -552,6 +554,104 @@ def test_the_box_off_keeps_the_record_out():
     lua.execute(CLOSED + 'SlashCmdList.FOREVERWOWCRAFTSCANNER("have off")')
     v = verdict(lua)
     assert v["text"] == "Buy the recipe for Clam Chowder first" and not any("Open your" in t for t in v["tip"]), v
+
+
+# ---- a switch in the window: the client names the new profession before its list follows (15 Nov 2026) --------------------------
+LEATHERWORKING = 165
+RIBS, LIGHT_LEATHER, COARSE_THREAD = 2677, 2318, 2320
+SPELL_RIBS, SPELL_KIT, SPELL_CLOAK = 2546, 2152, 2162
+LINES = f"""
+  -- C_TradeSkillUI.GetTradeSkillLineForRecipe as the live client gives it: the recipe's own skill line, its name, the profession above
+  lines = {{ [{SPELL_KIT}] = {{ 2945, "Leatherworking", {LEATHERWORKING} }}, [{SPELL_CLOAK}] = {{ 2945, "Leatherworking", {LEATHERWORKING} }} }}
+  for _, spell in ipairs({{ {SPELL_SOUP}, {SPELL_CAKE}, {SPELL_CLAMTHING}, {SPELL_EGGTHING}, {SPELL_TRANSMUTE}, {SPELL_SAUSAGE}, {SPELL_RIBS},
+                          {SPELL_TAIL}, {SPELL_KABOB}, {SPELL_LIZARD} }}) do
+    lines[spell] = {{ 2939, "Cooking", {COOKING} }}
+  end
+  C_TradeSkillUI.GetTradeSkillLineForRecipe = function(id) local l = lines[id]; if l then return l[1], l[2], l[3] end end
+"""
+SWITCH = f"""
+  -- the character has Cooking and Leatherworking; GetBaseProfessionInfo names whichever `prof` is
+  prof, lwskill = {COOKING}, 30
+  C_TradeSkillUI.GetBaseProfessionInfo = function()
+    return {{ professionID = prof, skillLevel = prof == {LEATHERWORKING} and lwskill or skill, skillModifier = 0 }}
+  end
+  function GetNumSkillLines() return 3 end
+  function GetSkillLineInfo(i)
+    if i == 1 then return "Professions", true end
+    if i == 2 then return "Cooking", false, false, skill, 0, 0, 150 end
+    return "Leatherworking", false, false, lwskill, 0, 0, 75
+  end
+  names[{SPELL_RIBS}] = "Dry Pork Ribs"; schematic[{SPELL_RIBS}] = {{ {{ {RIBS}, 1 }}, {{ {MILD}, 1 }} }}; learned[{SPELL_RIBS}] = true; colour[{SPELL_RIBS}] = 0
+"""
+LW_LIST = f"""
+  -- the Leatherworking list, as the client gives it a moment after the switch
+  names = {{ [{SPELL_KIT}] = "Light Armor Kit" }}
+  schematic = {{ [{SPELL_KIT}] = {{ {{ {LIGHT_LEATHER}, 1 }} }} }}
+  learned[{SPELL_KIT}] = true; colour[{SPELL_KIT}] = 0
+"""
+
+
+def leather_doc() -> dict:
+    """The off-route cooking document with a leatherworking route beside it: Embossed Leather Cloak 1 to 40, taught by a trainer."""
+    doc = offroute_doc()
+    doc["plans"]["leatherworking-trainer"] = {
+        "profession": "leatherworking", "skill_line": LEATHERWORKING, "variant": "trainer", "start": 1, "target": 40, "net": -2000,
+        "spent": 2000, "sold": 0, "gaps": [], "made": {}, "sell": {}, "disenchant": [],
+        "steps": [{"from": 1, "to": 40, "recipe": "Embossed Leather Cloak", "spell": SPELL_CLOAK, "crafts": 40,
+                   "uses": [[LIGHT_LEATHER, 5], [COARSE_THREAD, 2]], "makes": [2310, 1], "per": [1] * 40,
+                   "buy": [LIGHT_LEATHER, COARSE_THREAD], "craft": []}],
+        "buy": {str(LIGHT_LEATHER): [50, "ah"], str(COARSE_THREAD): [10, "vendor"]}}
+    doc["items"].update({str(RIBS): "Boar Ribs", str(LIGHT_LEATHER): "Light Leather", str(COARSE_THREAD): "Coarse Thread",
+                         "2310": "Embossed Leather Cloak", "2547": "Dry Pork Ribs"})
+    return doc
+
+
+def switch_game(lines=True):
+    lua = game(leather_doc())
+    lua.execute(f"learned[{SPELL_TAIL}] = true" + PANEL + SWITCH + (LINES if lines else ""))
+    return lua
+
+
+def leather_record(lua) -> list:
+    rec = lua.eval(f'FWCS_DB.__chars["Stonespine|Thrallson"].learned[{LEATHERWORKING}]')
+    return None if rec is None else sorted(r.spell for r in rec.list.values())
+
+
+def test_a_switch_keeps_nothing_of_the_last_profession_until_its_own_list_follows():
+    """The live game, 15 Nov 2026: the window toggled from Cooking to Leatherworking; the client named Leatherworking while its list
+    was still Cooking's, Cooking's recipes were kept under Leatherworking, and the Leatherworking arrow said "Using your 5 Boar Ribs
+    and 5 Mild Spices", then "learn Embossed Leather Cloak at the trainer". Now nothing is kept of a list the client says is of
+    another profession; the Leatherworking list, once it follows (TRADE_SKILL_LIST_UPDATE, no change of bags or skill), is."""
+    if lupa is None:
+        return
+    lua = switch_game()
+    held(lua, bags={RIBS: 5, MILD: 5}, skill=120)
+    assert panel_verdict(lua)["text"] == "Make 5 Dry Pork Ribs"                       # on Cooking: the ribs, rightly
+    lua.execute(f"prof = {LEATHERWORKING}")                                          # the switch: the list still Cooking's
+    v = panel_verdict(lua)
+    assert "Dry Pork Ribs" not in v["text"] and not any("Pork Ribs" in t or "Boar Ribs" in t for t in v["tip"]), v
+    assert "Boar Ribs" not in (v["note"] or "") and leather_record(lua) is None, (v, leather_record(lua))
+    assert "Leatherworking route" in v["tip"][0], v
+    lua.execute(LW_LIST + "Fire('TRADE_SKILL_LIST_UPDATE')")                         # its own list: read and kept, nothing else moving
+    assert leather_record(lua) == [SPELL_KIT], leather_record(lua)
+    v = panel_verdict(lua)
+    assert "Dry Pork Ribs" not in v["text"] and not any("Pork Ribs" in t for t in v["tip"]), v
+
+
+def test_a_saved_record_holding_the_last_professions_recipes_is_not_offered():
+    """Helper 1.8.2 left Cooking's Dry Pork Ribs in the Leatherworking record: with the panel closed, the client saying the recipe is
+    Cooking's, it is not offered on the Leatherworking route; a client that cannot say offers the record as before."""
+    if lupa is None:
+        return
+    lua = switch_game()
+    held(lua, bags={RIBS: 5, MILD: 5}, skill=120)
+    lua.execute(CLOSED + f'FWCS_DB.__chars["Stonespine|Thrallson"].learned[{LEATHERWORKING}] = {{ skill = 30, t = 1, list = {{ '
+                f'{{ spell = {SPELL_RIBS}, colour = "optimal", name = "Dry Pork Ribs", uses = {{ {{ {RIBS}, 1 }}, {{ {MILD}, 1 }} }} }} }} }}; ns.HaveChanged()')
+    leather = f'ns.verdict.Verdict({{ open = {{ id = {LEATHERWORKING}, rank = 30, max = 75 }}, profession = "leatherworking" }})'
+    text = strip(lua.eval(leather).text)
+    assert "Dry Pork Ribs" not in text, text
+    lua.execute("C_TradeSkillUI.GetTradeSkillLineForRecipe = nil; ns.HaveChanged()")
+    assert strip(lua.eval(leather).text) == "Make 5 Dry Pork Ribs"                    # no word from the client: as before
 
 
 if __name__ == "__main__":

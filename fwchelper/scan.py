@@ -14,7 +14,8 @@ realm names (FWCS_DB.__realms, __groups), the merchants, trainers and recipe scr
 met (vendors, trainers, recipes), and the recipe colours (FWCS_DB.__colours: by spell, the skills
 each learned recipe showed each colour at, no character in it: colours). pipe.py says which of it is sent and where. The characters'
 own table (FWCS_DB.__chars: what each has) is read by plans.py to know which houses' routes to
-fetch, never sent; the addon's settings (__ui) and its places (__places) are not read here.
+fetch, never sent; the addon's settings (__ui), its places (__places) and the colours' start (__coloursFrom, a
+number) are not read here.
 """
 from __future__ import annotations
 import glob

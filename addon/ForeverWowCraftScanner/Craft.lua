@@ -64,7 +64,9 @@ end
 -- the arrow set from a verdict: at the nearest of what it needs, with the way in its tooltip;
 -- `by` says who set it ("panel" | "headless"), for Headless to know which it may clear
 local function Point(v, by)
-  local note = v.note or v.text                  -- a buy verdict's note lists the items and their sources
+  -- a buy verdict's note lists the items and their sources; one with a place and no note of its
+  -- own says its words there, and with what of the character's it uses, both (Verdict.lua, arrowNote)
+  local note = v.arrowNote or v.note or v.text
   if v.place then
     local p, d, here = ns.NearestPlace(v.place[1], v.place[2], v.place[3], v.place[5], v.place[6], v.place[7])
     if p then
@@ -157,8 +159,9 @@ local function Refresh()
     return
   end
   -- a click's crafting under way: the verdict holds until the cast ends (the bags change
-  -- with every craft, and the words and the arrow flickered along, 12 Oct 2026)
-  if running and UnitCastingInfo and (UnitCastingInfo("player")) then return end
+  -- with every craft, and the words and the arrow flickered along, 12 Oct 2026). The window's
+  -- colours are still looked at, so each skill point of the run is recorded (V.NoteColours)
+  if running and UnitCastingInfo and (UnitCastingInfo("player")) then V.NoteColours(); return end
   local ok, v = pcall(Verdict)
   if not ok then v = { text = "ForeverWowCraft: error", tip = { tostring(v) } } end
   button.verdict = v

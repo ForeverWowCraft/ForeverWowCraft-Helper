@@ -234,6 +234,10 @@ def _load(plans_source, setup="", release=False):
     for name in _toc(read):
         if name == "Queue.lua":
             continue
+        if name == "Seed.lua" and isinstance(release, str):        # the places are data: the same seed for both, so a regenerated
+            source = (ADDON / name).read_text(encoding="utf-8")     # seed (reagent sellers, 15 Nov 2026) compares the window's code alone
+            lua.globals().Load(name, source)
+            continue
         source = read(name) if (name != "Plans.lua" or plans_source is None) else plans_source
         lua.globals().Load(name, source)
     lua.execute('Fire("PLAYER_LOGIN"); Fire("PLAYER_ENTERING_WORLD", true); RunTimers()')
