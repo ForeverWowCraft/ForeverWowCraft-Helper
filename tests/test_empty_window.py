@@ -458,7 +458,10 @@ def test_this_addon_given_a_plans_lua_of_1_7_7_shows_routes_as_before_and_with_n
     if _release_source("ForeverWowCraftScanner.toc", BEFORE_THIS) is not None:
         assert now.replace("of the Mode button", "of the focus button").replace(       # and the options page's blurb, true since 1.8.0
             "Most switches here also have a command (type /fwcs for the list).",
-            "Each switch here has a command too (/fwcs); this page is the same settings.") == _shown(_load(text_1_7_7, release=BEFORE_THIS))  # the same window as before, for a house it has
+            "Each switch here has a command too (/fwcs); this page is the same settings.").replace(     # and since the recipe colours (14 Nov 2026)
+            "Only prices, the merchants and trainers you visit, and how the game rates your recipes are sent. Nothing names you or your characters.",
+            "Nothing of yours is sent: only prices and the merchants and trainers you visit.") \
+            == _shown(_load(text_1_7_7, release=BEFORE_THIS))  # the same window as before, for a house it has
     state = _shown(_load(plans.plans_text([ELSEWHERE], "test", written=NOW), AT_USPVE))
     assert "Still empty? Check that the helper is running and up to date: its icon is by the clock." in state
 

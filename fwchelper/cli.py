@@ -303,8 +303,9 @@ _vendors_done: tuple | None = None      # the saved file's version (scan.file_ve
 
 def send_vendors_once(p, path: Path | None = None) -> bool:
     """Send the vendors and trainers the addon has seen (scan.vendors, scan.trainers) and the
-    levels the recipe scrolls asked for (scan.recipes), when they changed since they were last
-    sent: one document, the union of every sighting, kept at the pipe per helper. Returns
+    levels the recipe scrolls asked for (scan.recipes), with the recipe colours (scan.colours,
+    which never travel alone: the pipe refuses a document without vendors, trainers or scrolls),
+    when they changed since they were last sent: one document, the union of every sighting, kept at the pipe per helper. Returns
     whether anything was sent. A saved file unchanged since its sightings were last dealt with
     is not read again (three reads of a 6 MB file took 5 s and 200 MB, every ten minutes); a
     send that failed is tried again."""
@@ -313,18 +314,21 @@ def send_vendors_once(p, path: Path | None = None) -> bool:
     version = scan.file_version(file) if file else None
     if version is not None and version == _vendors_done:
         return False
-    seen = scan.vendors(file) if file and file.suffix == ".lua" else {}
-    met = scan.trainers(file) if file and file.suffix == ".lua" else {}
-    asked = scan.recipes(file) if file and file.suffix == ".lua" else {}
-    if not seen and not met and not asked:
+    db = scan.saved_db(file) if file and file.suffix == ".lua" else {}      # parsed once for the four readers
+    seen, met, asked = scan.vendors(db=db), scan.trainers(db=db), scan.recipes(db=db)
+    if not seen and not met and not asked:     # recipe colours alone are no document at the pipe: they wait, unsaid
         _vendors_done = version
         return False
-    doc = pipemod.vendors_document(seen, met, asked)
+    doc = pipemod.vendors_document(seen, met, asked, scan.colours(db=db))
+    del db
+    dropped = pipemod.drop_bad_colours(doc)    # never a reason to hold the sightings back
     mark = pipemod.mark_vendors(doc)
     sent = json.loads(_sent_file().read_text(encoding="utf-8")) if _sent_file().exists() else {}
     if sent.get("__vendors") == mark:
         _vendors_done = version
         return False
+    if dropped:                                # said once, with the send it is left out of
+        print(f"recipe colours left out: {dropped}")
     answer = p.send_vendors(doc)
     settings.STATE.mkdir(parents=True, exist_ok=True)
     sent["__vendors"] = mark
@@ -333,6 +337,7 @@ def send_vendors_once(p, path: Path | None = None) -> bool:
     print(f"vendors sent: {len(doc['vendors'])} seen, {sum(len(v['items']) for v in doc['vendors'].values())} wares"
           + (f"; {len(met)} trainer(s), {sum(len(t['teaches']) for t in met.values())} services" if met else "")
           + (f"; {len(asked)} recipe scroll(s) with the level each asks for" if asked else "")
+          + (f"; {len(doc['colours'])} recipe colours" if doc.get("colours") else "")
           + ("" if answer.get("new", True) else " (the pipe had them)"))
     return True
 

@@ -6,14 +6,18 @@ gathers"). Two documents leave this computer, both built here from the addon's s
     auctions (unit price, stack, how many, time left), when; the names of the realms the
     account's characters logged in on with the addon, and the house's connected realms, so that
     the site names the house. Sent after the player saved a scan in game. For the routes' prices.
-  the sightings (fwc-vendors/1): the merchants, trainers and recipe scrolls the player met
-    (fields in vendors_document below), sent when they changed. For who sells what on Forever,
-    the skill a trainer teaches a recipe at, and the level a recipe is gated at.
+  the sightings (fwc-vendors/1): the merchants, trainers and recipe scrolls the player met, and
+    the recipe colours: for each recipe the account's characters know, the lowest and highest
+    skill at which the game showed it orange, yellow, green or grey, by spell alone (fields in
+    vendors_document below), sent when they changed. For who sells what on Forever, the skill a
+    trainer teaches a recipe at, the level a recipe is gated at, and the true colour levels of
+    each recipe.
 Both go to the project's pipe under this helper's own token (a random name the pipe gave it),
 pooled with other players' to price the routes and to know Forever's vendors, trainers and recipes.
-NEVER sent: no character name, gold, bags, bank or mail, chat, guild, account name or password,
-and no position but the spot of a merchant's or trainer's window the player opened. What each
-character has (FWCS_DB.__chars) stays on this computer.
+NEVER sent: no character name, realm-and-character key, gold, bags, bank or mail, chat, guild,
+account name or password, the character's skills or the recipes it learned as a list, and no
+position but the spot of a merchant's or trainer's window the player opened. What each character
+has (FWCS_DB.__chars, with its skills and its `learned`) stays on this computer.
 
 Two documents, both JSON, sent gzipped:
 
@@ -72,7 +76,7 @@ from collections import Counter
 from pathlib import Path
 
 from . import __version__, settings
-from .scan import FACTIONS, ScanData, ScanItem
+from .scan import COLOUR_KEYS, COLOUR_MAX_SKILL, FACTIONS, MAX_COLOURED, ScanData, ScanItem
 
 SCAN_FORMAT, LISTS_FORMAT, VENDORS_FORMAT = "fwc-scan/1", "fwc-lists/1", "fwc-vendors/1"
 
@@ -205,7 +209,8 @@ def scan_from_document(doc: dict, source: Path | None = None) -> ScanData:
                     connected=[str(g) for g in group] if isinstance(group, list) else [])
 
 
-def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None = None, recipes: dict[int, dict] | None = None) -> dict:
+def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None = None, recipes: dict[int, dict] | None = None,
+                     colours: dict[int, dict] | None = None) -> dict:
     """The vendors a helper's player has met, for the pipe (POST /v1/vendors): {"format",
     "helper", "vendors": {creature id: {name, map, x, y, t, faction, build, items: {item id:
     {price, stack, n, usable, t, cost?}}}}, "trainers": {creature id: {name, map, x, y, t,
@@ -216,15 +221,60 @@ def vendors_document(vendors: dict[int, dict], trainers: dict[int, dict] | None 
     pipe as deployed checks level and t and keeps a row whole, so the fields of 1.7.5 travel
     without a change to it. Nothing of the player: the vendor's name and where it stood, its
     wares and their prices, the trainer's and what it teaches at which skill, a scroll's
-    levels, when each was seen."""
-    return {"format": VENDORS_FORMAT, "helper": __version__,
-            "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()},
-            "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()},
-            "recipes": {str(k): {"level": int(r["level"]), "t": int(r.get("t") or 0), **{f: r[f] for f in RECIPE_EXTRAS if f in r}}
-                        for k, r in (recipes or {}).items()}}
+    levels, when each was seen.
+
+    "colours" (since 14 Nov 2026, only when the addon has any): {spell id: {"o": [lo, hi], "y",
+    "g", "x", "t"}}, the lowest and highest skill at which the player's own profession window
+    showed a learned recipe orange, yellow, green or grey (each colour only when seen), and when
+    the row last changed. By spell for the whole account: no character, no realm. For checking
+    the colour levels the routes are planned with, which come from client tables that are wrong
+    for many recipes on Forever. The pipe as deployed keeps a document whole and checks none of
+    it, so it travels without a change there; it still refuses a document whose vendors, trainers
+    and recipes are all empty, so colours alone wait for another sighting (send_vendors_once)."""
+    doc = {"format": VENDORS_FORMAT, "helper": __version__,
+           "vendors": {str(k): {**v, "items": {str(i): r for i, r in v["items"].items()}} for k, v in vendors.items()},
+           "trainers": {str(k): {**t, "teaches": {str(n): int(level) for n, level in t["teaches"].items()}} for k, t in (trainers or {}).items()},
+           "recipes": {str(k): {"level": int(r["level"]), "t": int(r.get("t") or 0), **{f: r[f] for f in RECIPE_EXTRAS if f in r}}
+                       for k, r in (recipes or {}).items()}}
+    if colours:
+        doc["colours"] = {str(k): {**{c: [int(row[c][0]), int(row[c][1])] for c in COLOUR_KEYS if c in row}, "t": int(row.get("t") or 0)}
+                          for k, row in colours.items()}
+    return doc
 
 
 RECIPE_EXTRAS = ("tip", "made", "made_level")      # a recipe row's fields since 1.7.5, each there only when known
+# Recipe colours, by scan.py's numbers (one copy): COLOUR_KEYS orange, yellow, green, grey;
+# COLOUR_MAX_SKILL the highest skill a colour pair may name (Classic's cap is 300, later
+# expansions' ranks go to 375 and 450 and a server may open them; past it no client has shown a
+# colour); MAX_COLOURED spells in "colours" (every profession's recipes of the game: about
+# 2,000). The core checks with these too (foreverwowcraft/vendors.py)
+
+
+def check_colours(colours) -> str | None:
+    """Why a document's "colours" is not what it should be, or None when it is (or there is none)."""
+    if not isinstance(colours, dict):
+        return "colours is not a table"
+    if len(colours) > MAX_COLOURED:
+        return "too many recipe colours"
+    for spell, row in colours.items():
+        if not _id(spell) or not isinstance(row, dict) or not _whole(row.get("t")) or not set(row) - {"t"} or not set(row) <= {*COLOUR_KEYS, "t"}:
+            return f"recipe colour {str(spell)[:20]!r} is not a row"
+        for c in COLOUR_KEYS:
+            pair = row.get(c, [1, 1])
+            if not (isinstance(pair, list) and len(pair) == 2 and _whole(pair[0], 1, COLOUR_MAX_SKILL) and _whole(pair[1], pair[0], COLOUR_MAX_SKILL)):
+                return f"recipe colour {spell}: {c} is not [lowest, highest skill]"
+    return None
+
+
+def drop_bad_colours(doc: dict) -> str | None:
+    """Takes "colours" out of the document when they are not what they should be, and says why;
+    None when they are, or there are none. Colours never stop the sightings beside them."""
+    if "colours" not in doc:
+        return None
+    problem = check_colours(doc["colours"])
+    if problem:
+        del doc["colours"]
+    return problem
 
 
 def _recipe_extras(row: dict) -> bool:
@@ -238,9 +288,12 @@ def _recipe_extras(row: dict) -> bool:
 
 
 def check_vendors(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of a document anyone can send, read top to bottom
-    """Why this is not a fwc-vendors/1 document, or None when it is one."""
+    """Why this is not a fwc-vendors/1 document, or None when it is one. Recipe colours that
+    are not what they should be are taken out of `doc` (drop_bad_colours), never a reason to
+    refuse it; colours alone are no document (the deployed pipe refuses one too)."""
     if not isinstance(doc, dict) or doc.get("format") != VENDORS_FORMAT:
         return f"not a {VENDORS_FORMAT} document"
+    drop_bad_colours(doc)
     trainers = doc.get("trainers", {})
     if not isinstance(trainers, dict):
         return "trainers is not a table"
@@ -291,8 +344,10 @@ def check_vendors(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one gu
 
 
 def mark_vendors(doc: dict) -> str:
-    """What the sightings say, less the helper's version: "already sent" goes by it."""
-    return hashlib.sha256(json.dumps([doc["vendors"], doc.get("trainers", {}), doc.get("recipes", {})], sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+    """What the sightings say, less the helper's version: "already sent" goes by it. The recipe
+    colours count only when there are any, so a document without them marks as it always did."""
+    said = [doc["vendors"], doc.get("trainers", {}), doc.get("recipes", {})] + ([doc["colours"]] if doc.get("colours") else [])
+    return hashlib.sha256(json.dumps(said, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
 
 
 def lists_document(queue: dict[str, list[tuple[int, str]]]) -> dict:

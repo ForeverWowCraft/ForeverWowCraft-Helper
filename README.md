@@ -14,7 +14,7 @@ below, and <https://www.foreverwowcraft.com/privacy>.
 
 | | |
 |---|---|
-| **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code). At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Nothing of yours is sent: only prices and the merchants and trainers you visit ([every field](#what-is-sent)) |
+| **The addon** (`addon/ForeverWowCraftScanner`) | `/fwc`: the cheapest route for each profession from your skill on, with what you have (bags, bank, mail, your own auctions) taken off, across your characters if you like. A **Make** button on the game's profession panel crafts that route a step at a time, and says what to buy or learn when it cannot, with an arrow to the nearest trainer, vendor or anvil: the addon comes with the vanilla world's (`Seed.lua`, data from the VMaNGOS database, GPL-2.0, apart from the addon's MIT code). At the auction house a shopping list buys what the step needs, a click and a confirm an item. And it records the auction house's prices, by itself, whenever you open it and it can (once every 15 minutes): a small button on the auction house frame lights up when there is something to save, and that click is all it asks. Only prices, the merchants and trainers you visit, and how the game rates your recipes are sent. Nothing names you or your characters. ([every field](#what-is-sent)) |
 | **`fwch.py`** | Finds the game, installs the addon, reads what it saved, sends it through the pipe, and writes the lists and the routes it is given into the addon. On Windows and on the Mac |
 
 ```
@@ -295,6 +295,8 @@ Forever's vendors, trainers and recipes. Three requests send something:
     changed; and, when you brought up the scroll's tooltip, each "Requires Level" line on it with
     its place on the tooltip, the item the recipe makes and that item's level. The item-data level is
     also read for the scrolls an auction scan records and a route buys.
+  * Recipe colours: for recipes your characters know, the skill levels at which the game showed
+    each as orange, yellow, green or grey.
 
   For who sells which recipe and reagent on Forever, and at what price; the skill Forever's
   trainers teach each recipe at; and the level a recipe asks for.
@@ -309,7 +311,7 @@ character, those of your game's region when there are few); from GitHub, once a 
 newer helper is out, and its installer when one is.
 
 What is not sent: none of the documents has a place for your character names, your account name,
-your user name on the PC, gold, bags, bank, mail, skills, chat or guild. What your characters have
+your user name on the PC, gold, bags, bank, mail, chat or guild. What your characters have
 is counted in the game, kept in the addon's saved file on your PC (`__chars`), and used there; the
 helper uses it only to know whose routes to fetch (which realms and factions your characters are
 of) and to list your characters in `python fwch.py status`, on your screen. The places the arrow
@@ -348,7 +350,7 @@ the Run entry that starts the app at logon, "Start the helper now" at the end (o
 `LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
 running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
 tag) builds it on a Windows runner, installs it there for
-real (`installer/install_check.py`: the released 1.8.0, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
+real (`installer/install_check.py`: the released 1.8.1, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
 msiexec, a build one version up over that as this updater does, then removed), and puts it on
 the GitHub release beside the zips. The release then stays a draft, with every file on it, until
 the project publishes it by hand (`.github/workflows/publish.yml`, which checks the files first):

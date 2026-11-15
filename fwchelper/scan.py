@@ -11,7 +11,8 @@ Oct 2026); a dataset of it left from before is passed over.
 WHAT IS READ HERE, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the addon
 gathers"): of the addon's saved file, the auction ladders and their history (load_scan), the
 realm names (FWCS_DB.__realms, __groups), the merchants, trainers and recipe scrolls the player
-met (vendors, trainers, recipes). pipe.py says which of it is sent and where. The characters'
+met (vendors, trainers, recipes), and the recipe colours (FWCS_DB.__colours: by spell, the skills
+each learned recipe showed each colour at, no character in it: colours). pipe.py says which of it is sent and where. The characters'
 own table (FWCS_DB.__chars: what each has) is read by plans.py to know which houses' routes to
 fetch, never sent; the addon's settings (__ui) and its places (__places) are not read here.
 """
@@ -304,10 +305,10 @@ def _newest(table: dict) -> int:
     return max((int(rec.get("t") or 0) for iid, rec in table.items() if isinstance(iid, int) and isinstance(rec, dict)), default=0)
 
 
-def vendors(path: Path | None = None) -> dict[int, dict]:
-    """The vendors the addon has seen (FWCS_DB.__vendors, since addon 1.6.5): {creature id:
-    {"name", "map", "x", "y", "t", "faction", "build", "items": {item id: {"price", "stack",
-    "n", "usable", "t", "cost"?}}}}. Empty without the file or the table."""
+def saved_db(path: Path | None = None) -> dict:
+    """FWCS_DB of the saved file (the newest found when `path` is None), parsed once: {} without
+    the file or a readable table. The sightings' readers (vendors, trainers, recipes, colours)
+    take it as `db`, so that one send parses a 6 MB file once, not once a reader."""
     if path is None:
         found = find_saved_variables()
         if not found:
@@ -318,6 +319,14 @@ def vendors(path: Path | None = None) -> dict[int, dict]:
     except (OSError, SyntaxError):
         return {}
     db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    return db if isinstance(db, dict) else {}
+
+
+def vendors(path: Path | None = None, db: dict | None = None) -> dict[int, dict]:
+    """The vendors the addon has seen (FWCS_DB.__vendors, since addon 1.6.5): {creature id:
+    {"name", "map", "x", "y", "t", "faction", "build", "items": {item id: {"price", "stack",
+    "n", "usable", "t", "cost"?}}}}. Empty without the file or the table."""
+    db = saved_db(path) if db is None else db
     held = db.get("__vendors") if isinstance(db, dict) else None
     out: dict[int, dict] = {}
     for vid, v in (held.items() if isinstance(held, dict) else []):
@@ -334,20 +343,11 @@ def vendors(path: Path | None = None) -> dict[int, dict]:
     return out
 
 
-def trainers(path: Path | None = None) -> dict[int, dict]:
+def trainers(path: Path | None = None, db: dict | None = None) -> dict[int, dict]:
     """The trainers the addon has seen (FWCS_DB.__trainers, since addon 1.6.12): {creature id:
     {"name", "map", "x", "y", "t", "faction", "build", "skill", "teaches": {service name: the
     skill it asks for}}}. Empty without the file or the table."""
-    if path is None:
-        found = find_saved_variables()
-        if not found:
-            return {}
-        path = found[0]
-    try:
-        data = luatable.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (OSError, SyntaxError):
-        return {}
-    db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    db = saved_db(path) if db is None else db
     held = db.get("__trainers") if isinstance(db, dict) else None
     out: dict[int, dict] = {}
     for tid, t in (held.items() if isinstance(held, dict) else []):
@@ -359,7 +359,7 @@ def trainers(path: Path | None = None) -> dict[int, dict]:
     return out
 
 
-def recipes(path: Path | None = None) -> dict[int, dict]:
+def recipes(path: Path | None = None, db: dict | None = None) -> dict[int, dict]:
     """The recipe scrolls the addon looked at (FWCS_DB.__recipes, since addon 1.6.22): {item id:
     {"level": the scroll's minimum level from the client's item data, "t", and since addon 1.7.5,
     from a tooltip the player brought up, "tip": [line, level, ...] (each "Requires Level N" line
@@ -367,16 +367,7 @@ def recipes(path: Path | None = None) -> dict[int, dict]:
     item's minimum level from the item data}}. "level" has meant the same in every version, so a
     row of 1.7.4 or before (level alone) reads as it always did. Empty without the file or the
     table."""
-    if path is None:
-        found = find_saved_variables()
-        if not found:
-            return {}
-        path = found[0]
-    try:
-        data = luatable.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (OSError, SyntaxError):
-        return {}
-    db = data.get(SAVED) or data.get(OLD_SAVED) or {}
+    db = saved_db(path) if db is None else db
     held = db.get("__recipes") if isinstance(db, dict) else None
     out: dict[int, dict] = {}
     for iid, row in (held.items() if isinstance(held, dict) else []):
@@ -396,6 +387,33 @@ def recipes(path: Path | None = None) -> dict[int, dict]:
 
 
 MAX_TIP_LINES = 4                 # "Requires Level" lines kept of one scroll's tooltip (one on every scroll seen)
+COLOUR_KEYS = ("o", "y", "g", "x")     # orange, yellow, green, grey, from the lowest skill to the highest
+# the highest skill a colour pair may name: Classic's cap is 300, later expansions' ranks go to 375
+# and 450 and a server may open them; past it no client has shown a colour (the addon's MAX_RANK)
+COLOUR_MAX_SKILL = 450
+MAX_COLOURED = 3000                    # rows at most, as the addon keeps them and pipe.check_colours takes them
+
+
+def colours(path: Path | None = None, db: dict | None = None) -> dict[int, dict]:
+    """The colours the player's own profession window showed each learned recipe in
+    (FWCS_DB.__colours, recorded since 14 Nov 2026):{spell id: {"o": [lo, hi], "y", "g", "x" (each
+    there only when seen), "t"}}, each pair the lowest and highest skill that colour was seen at.
+    By spell alone, for the whole account: no character in it. A pair outside 1 <= lo <= hi <=
+    COLOUR_MAX_SKILL is left out, and a row left without a pair is passed over, so one odd row
+    (a saved file edited by hand) does not cost the rest at pipe.check_colours. Empty without the
+    file or the table."""
+    db = saved_db(path) if db is None else db
+    held = db.get("__colours") if isinstance(db, dict) else None
+    out: dict[int, dict] = {}
+    for spell, row in (held.items() if isinstance(held, dict) else []):
+        if type(spell) is not int or spell <= 0 or not isinstance(row, dict):
+            continue
+        pairs = {k: [int(row[k][0]), int(row[k][1])] for k in COLOUR_KEYS
+                 if isinstance(row.get(k), list) and len(row[k]) == 2 and all(type(n) is int for n in row[k])
+                 and 1 <= row[k][0] <= row[k][1] <= COLOUR_MAX_SKILL}
+        if pairs and len(out) < MAX_COLOURED:
+            out[spell] ={**pairs, "t": int(row.get("t") or 0) if type(row.get("t")) in (int, float) else 0}
+    return out
 
 
 def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:

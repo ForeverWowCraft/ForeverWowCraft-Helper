@@ -159,10 +159,14 @@ local function BuildOptions()
   blurb:SetJustifyH("LEFT")
   blurb:SetWordWrap(true)
   blurb:SetText("The addon records the auction house's prices and sends them, through the helper on this PC, to "
-    .. "foreverwowcraft.com, where every scanner's prices make the routes that /fwc shows. Nothing of yours is sent: "
-    .. "only prices and the merchants and trainers you visit. Most switches here also have a command (type /fwcs for the list).")
+    .. "foreverwowcraft.com, where every scanner's prices make the routes that /fwc shows. Only prices, the merchants "
+    .. "and trainers you visit, and how the game rates your recipes are sent. Nothing names you or your characters. "
+    .. "Most switches here also have a command (type /fwcs for the list).")
   local saved = ns.Settings
-  local y = -92
+  -- the first box under the blurb however many lines it wraps to (a font or a language longer
+  -- than English), 52 at least, as it was laid out for three lines
+  local tall = blurb.GetStringHeight and tonumber(blurb:GetStringHeight()) or 0
+  local y = -40 - math.max(52, math.ceil(tall) + 12)
   local function Next(h) local at = y; y = y - h; return at end
   panel.boxes = {
     CheckBox(page, Next(54), "Scan by itself when the auction house opens",
@@ -249,6 +253,7 @@ local function BuildOptions()
   rnote:SetWidth(540)
   rnote:SetJustifyH("LEFT")
   rnote:SetText("The scanner's bar, the /fwc window and the arrow, after being dragged about.")
+  page:SetHeight(math.max(960, 40 - y))          -- what the page holds, the blurb's wrap included, within the scroll
   panel.refresh = function(self)
     for _, box in ipairs(self.boxes) do box:refresh(box) end
     local now = saved().house

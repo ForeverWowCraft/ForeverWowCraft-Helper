@@ -1,5 +1,5 @@
 """The helper does not parse a file again while it is unchanged: the saved file for the sightings (three parses
-of a 6 MB file every ten minutes before 1.8.0) and Plans.lua for the houses it holds (once for every line of the
+of a 6 MB file every ten minutes before 1.8.0; one a change since the recipe colours, 14 Nov 2026, which made a fourth reader) and Plans.lua for the houses it holds (once for every line of the
 app's log)."""
 import sys
 import tempfile
@@ -30,12 +30,12 @@ def test_an_unchanged_saved_file_is_not_parsed_again_for_the_sightings():
     luatable.parse = counted = Counted()
     try:
         f, p = _saved(), FakePipe()
-        assert cli.send_vendors_once(p, f) is True and counted.calls == 3              # vendors, trainers, recipes
+        assert cli.send_vendors_once(p, f) is True and counted.calls == 1              # vendors, trainers, recipes, colours: one parse
         for _ in range(3):
             assert cli.send_vendors_once(p, f) is False
-        assert counted.calls == 3 and len(p.sent) == 1                                   # unchanged: not parsed, not sent
+        assert counted.calls == 1 and len(p.sent) == 1                                   # unchanged: not parsed, not sent
         f.write_text(SAVED.replace('["n"] = 1,', '["n"] = 0,'), encoding="utf-8")       # the same size, at once: still a change
-        assert cli.send_vendors_once(p, f) is True and counted.calls == 6 and len(p.sent) == 2
+        assert cli.send_vendors_once(p, f) is True and counted.calls == 2 and len(p.sent) == 2
         # a send that fails is tried again at the next look, though the file has not changed
         f.write_text(SAVED.replace('["n"] = 1,', '["n"] = 2,'), encoding="utf-8")
 
@@ -47,8 +47,8 @@ def test_an_unchanged_saved_file_is_not_parsed_again_for_the_sightings():
             raise AssertionError("no error")
         except pipe.PipeError:
             pass
-        assert cli.send_vendors_once(p, f) is True and len(p.sent) == 3 and counted.calls == 12
-        assert cli.send_vendors_once(p, f) is False and counted.calls == 12
+        assert cli.send_vendors_once(p, f) is True and len(p.sent) == 3 and counted.calls == 4
+        assert cli.send_vendors_once(p, f) is False and counted.calls == 4
     finally:
         settings.STATE, luatable.parse = kept
 

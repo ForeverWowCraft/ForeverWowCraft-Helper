@@ -151,6 +151,123 @@ def test_the_sightings_are_sent_when_they_changed():
         settings.STATE = kept
 
 
+# ---- recipe colours (14 Nov 2026): by spell for the account, beside a character's own record, which is never sent ----------------
+COLOURED = SAVED.rstrip().removesuffix("}") + """
+	["__colours"] = {
+		[3377] = { ["o"] = { 120, 131 }, ["y"] = { 132, 140 }, ["t"] = 1790000400 },
+		[2549] = { ["x"] = { 150, 150 }, ["t"] = 1790000401 },
+		[3372] = { ["g"] = { 140, 130 }, ["t"] = 1790000402 },
+		[9001] = { ["o"] = { 0, 5 }, ["y"] = { 6, 9 }, ["t"] = 1790000403 },
+		["bad"] = { ["o"] = { 1, 2 }, ["t"] = 1 },
+	},
+	["__chars"] = {
+		["Stonespine|Thrallson"] = {
+			["name"] = "Thrallson", ["realm"] = "Stonespine", ["house"] = "Stonespine", ["faction"] = "Horde", ["t"] = 1790000000,
+			["items"] = { [2996] = { 5, 12 } },
+			["skills"] = { [185] = 120 },
+			["learned"] = { [185] = { ["skill"] = 120, ["t"] = 1790000000, ["list"] = { { ["spell"] = 3377, ["colour"] = "optimal", ["name"] = "Gooey Spider Cake",
+				["uses"] = { { 2251, 2 } } } } } },
+		},
+	},
+}
+"""
+
+
+def test_recipe_colours_are_read_and_travel_with_the_sightings():
+    f = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
+    f.write_text(COLOURED, encoding="utf-8")
+    got = scan.colours(f)
+    # a pair outside 1 <= lo <= hi <= 450 is left out; a row with none left is passed over, and so is a key that is no spell
+    assert got == {3377: {"o": [120, 131], "y": [132, 140], "t": 1790000400}, 2549: {"x": [150, 150], "t": 1790000401},
+                   9001: {"y": [6, 9], "t": 1790000403}}, got
+    assert scan.colours(_saved()) == {}
+    doc = pipe.vendors_document(scan.vendors(f), scan.trainers(f), scan.recipes(f), got)
+    assert doc["colours"] == {"3377": {"o": [120, 131], "y": [132, 140], "t": 1790000400}, "2549": {"x": [150, 150], "t": 1790000401},
+                              "9001": {"y": [6, 9], "t": 1790000403}}
+    assert pipe.check_vendors(doc) is None and "colours" in doc
+    assert "colours" not in pipe.vendors_document(scan.vendors(f))                       # none: no key, the document as it was
+    sent = json.dumps(doc)
+    for word in ("Thrallson", "Stonespine|", "__chars", "learned", "skills", "2996", "Gooey Spider Cake", "optimal", '"items": {"2996"'):
+        assert word not in sent, word
+    # the mark: colours changed are a change; a document without colours marks as it did before them
+    plain = pipe.vendors_document(scan.vendors(f), scan.trainers(f), scan.recipes(f))
+    assert pipe.mark_vendors(doc) != pipe.mark_vendors(plain)
+    moved = json.loads(json.dumps(doc))
+    moved["colours"]["3377"]["y"] = [132, 141]
+    assert pipe.mark_vendors(moved) != pipe.mark_vendors(doc)
+    assert pipe.mark_vendors(plain) == pipe.hashlib.sha256(json.dumps([plain["vendors"], plain["trainers"], plain["recipes"]], sort_keys=True,
+                                                                      separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+
+
+def test_bad_colours_are_left_out_and_the_rest_is_kept():
+    f = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua"
+    f.write_text(COLOURED, encoding="utf-8")
+    good = json.loads(json.dumps(pipe.vendors_document(scan.vendors(f), scan.trainers(f), scan.recipes(f), scan.colours(f))))   # as sent
+    for spoil, why in ((lambda c: c["3377"].update(o=[131, 120]), "recipe colour 3377: o is not [lowest, highest skill]"),
+                       (lambda c: c["3377"].update(o=[0, 5]), "recipe colour 3377: o is not [lowest, highest skill]"),
+                       (lambda c: c["3377"].update(o=[120, 451]), "recipe colour 3377: o is not [lowest, highest skill]"),
+                       (lambda c: c["3377"].update(o=[120, True]), "recipe colour 3377: o is not [lowest, highest skill]"),
+                       (lambda c: c["3377"].update(o=[120]), "recipe colour 3377: o is not [lowest, highest skill]"),
+                       (lambda c: c["3377"].update(r=[1, 2]), "recipe colour '3377' is not a row"),
+                       (lambda c: c["3377"].update(t=-1), "recipe colour '3377' is not a row"),
+                       (lambda c: c["3377"].pop("t"), "recipe colour '3377' is not a row"),
+                       (lambda c: c.update({"3378": {"t": 5}}), "recipe colour '3378' is not a row"),
+                       (lambda c: c.update({"x1": {"o": [1, 2], "t": 5}}), "recipe colour 'x1' is not a row"),
+                       (lambda c: c.update({str(n): {"o": [1, 2], "t": 5} for n in range(10, 3011)}), "too many recipe colours")):
+        bad = json.loads(json.dumps(good))
+        spoil(bad["colours"])
+        assert pipe.check_colours(bad["colours"]) == why, (why, pipe.check_colours(bad["colours"]))
+        assert pipe.check_vendors(bad) is None and "colours" not in bad                     # dropped, the rest kept
+        assert bad["vendors"] == good["vendors"] and bad["trainers"] == good["trainers"] and bad["recipes"] == good["recipes"]
+    bad = dict(good, colours=[1, 2])
+    assert pipe.drop_bad_colours(bad) == "colours is not a table" and "colours" not in bad
+    assert pipe.drop_bad_colours(dict(good)) is None
+    # colours alone are no document, as the deployed pipe has it
+    assert pipe.check_vendors(pipe.vendors_document({}, {}, {}, scan.colours(f))) == "no vendors"
+
+
+def test_colours_alone_wait_and_bad_ones_are_said_once():
+    import contextlib
+    import io
+    kept = settings.STATE
+    settings.STATE = Path(tempfile.mkdtemp())
+    try:
+        f, p = Path(tempfile.mkdtemp()) / "ForeverWowCraftScanner.lua", FakePipe()
+        lone = 'FWCS_DB = { ["__colours"] = { [3377] = { ["o"] = { 120, 131 }, ["t"] = 1790000400 } } }'
+        f.write_text(lone, encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            assert cli.send_vendors_once(p, f) is False and p.sent == []                     # colours alone: not sent
+        assert out.getvalue() == ""                                                          # and nothing said, no trouble
+        f.write_text(COLOURED, encoding="utf-8")
+        with contextlib.redirect_stdout(out):
+            assert cli.send_vendors_once(p, f) is True and "colours" in p.sent[-1]
+        assert out.getvalue().strip().endswith("; 3 recipe colours"), out.getvalue()
+        assert not any(line.startswith(TROUBLE) for line in out.getvalue().splitlines())
+        f.write_text(COLOURED.replace("{ 132, 140 }", "{ 132, 141 }"), encoding="utf-8")   # a colour moved: sent again
+        assert cli.send_vendors_once(p, f) is True and p.sent[-1]["colours"]["3377"]["y"] == [132, 141]
+        # colours the check refuses (a scan.colours of another make): left out, said once, the sightings sent
+        real = scan.colours
+        scan.colours = lambda path=None, db=None: {3377: {"o": [120, 131], "t": -5}}
+        try:
+            out = io.StringIO()
+            f.write_text(COLOURED.replace('["n"] = 1,', '["n"] = 0,'), encoding="utf-8")
+            with contextlib.redirect_stdout(out):
+                assert cli.send_vendors_once(p, f) is True and "colours" not in p.sent[-1]
+                f.write_text(COLOURED.replace('["n"] = 1,', '["n"] = 0,') + "\n", encoding="utf-8")
+                assert cli.send_vendors_once(p, f) is False                                 # unchanged: neither sent nor said again
+        finally:
+            scan.colours = real
+        said = out.getvalue().splitlines()
+        assert said[0] == "recipe colours left out: recipe colour '3377' is not a row" and len(said) == 2, said
+        assert not any(line.startswith(TROUBLE) for line in said)
+    finally:
+        settings.STATE = kept
+
+
+TROUBLE = __import__("fwchelper.tray", fromlist=["TROUBLE_STARTS"]).TROUBLE_STARTS
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_") and callable(v):

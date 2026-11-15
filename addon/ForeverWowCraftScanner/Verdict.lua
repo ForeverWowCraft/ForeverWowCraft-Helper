@@ -15,8 +15,11 @@
 -- (ns.NoteRecipeLevel, ForeverWowCraftScanner.lua: sent with the vendors met, pooled with other
 -- players' to know the level each recipe is gated at); and the tools the client says the route's
 -- recipes need (an enchanter's rods) with what each tool's recipe takes (ns.LearnTools:
--- FWCS_DB.__tools, kept on this computer for the shopping list, not sent). Nothing of the
--- character. Everything the addon gathers: docs/scanner-addon.md, "What the addon gathers".
+-- FWCS_DB.__tools, kept on this computer for the shopping list, not sent); and the skills at
+-- which the player's own profession window shows each learned recipe orange, yellow, green or
+-- grey (NoteColours: FWCS_DB.__colours, by spell for the whole account, sent with the vendors
+-- met, to check the routes' colour levels). Nothing of the character. Everything the addon
+-- gathers: docs/scanner-addon.md, "What the addon gathers".
 
 local _, ns = ...
 local Char, House, Spelt = ns.inv.Char, ns.inv.House, ns.inv.Spelt
@@ -655,6 +658,157 @@ function api.Colour(spell)
   return nil
 end
 
+-- ================================================================ recipe colours, for the routes
+-- WHAT: for each recipe the character has learned, the skills at which the player's own
+-- profession window showed it in each colour: FWCS_DB.__colours[spell id] = { o = { lo, hi },
+-- y = { lo, hi }, g = { lo, hi }, x = { lo, hi }, t }, o orange, y yellow, g green, x grey, each
+-- pair the lowest and the highest skill that colour was seen at (a colour never seen: no key),
+-- t when the row last changed. Kept for the whole account, by spell alone: no character key, no
+-- name, no realm, nothing of which character saw it.
+-- WHEN: only with the player's own profession window open (never one linked in chat, a guild's,
+-- an inspected or an NPC's: open.linked), on whatever profession it shows, route or not; one
+-- pass over the window's list once per change (ns.HaveGen, Tailor.lua: the skill, a recipe
+-- learned, the bags) and of the skill shown, run with the Make button's verdict, never per frame.
+-- A look that sees no learned recipe is not kept: the window opens before the client has loaded
+-- its list (TRADE_SKILL_SHOW; the list comes with TRADE_SKILL_LIST_UPDATE, which moves neither
+-- the skill nor the bags), so an empty look is tried again at the next refresh. A look where the
+-- client lists no recipe at all costs nothing and is tried at every refresh; one where it lists
+-- recipes but none learned yet costs a call per recipe, so it is tried at most once a second
+-- (GetTime), and one more look is set a little over a second later (C_Timer), once for the
+-- change, window and skill, one waiting at most, in case no refresh comes after the list.
+-- WHY: the planner's yellow, green and grey for each recipe come from client tables that are
+-- wrong for many recipes on Forever (the levels move by hotfix); the game's own colours, pooled
+-- over players, are the check on them. Nothing uses them yet.
+-- NEVER: no character name, realm, level, gold, bags or skill table; only a spell id and skill
+-- numbers.
+-- WHERE: the helper sends the table with the vendors met (fwchelper/pipe.py vendors_document,
+-- "colours") to the project's pipe. Everything gathered is listed in docs/scanner-addon.md,
+-- "What the addon gathers".
+--
+-- The skill: which skill the game colours by on Forever, with or without a racial or item bonus,
+-- is not known. So the rank is the base rank, and only when the client gives the bonus apart:
+-- GetBaseProfessionInfo's skillLevel and skillModifier, C_TradeSkillUI.GetTradeSkillLine's third
+-- and fifth values, or the old GetTradeSkillLine's second and fourth. A bonus other than 0, or a
+-- client that says nothing of one, and the pass records nothing, so no colour is tied to a skill
+-- that may not be the one it was given at.
+-- A hotfix: a colour seen where the stored bounds say it cannot be (orange at or above the lowest
+-- yellow kept, yellow at or below the highest orange) drops the stored pairs it contradicts, the
+-- older word, and keeps the new sighting. Bounded: 8 numbers and t a spell, MAX_COLOURED spells
+-- at most (a new spell past it is not noted), rows changed in place and never added per visit.
+local COLOUR_KEYS = { optimal = "o", medium = "y", easy = "g", trivial = "x" }
+local COLOUR_ORDER = { o = 1, y = 2, g = 3, x = 4 }      -- from the lowest skill to the highest
+local MAX_COLOURED = 3000                                 -- every profession's recipes of the game: about 2,000
+local MAX_RANK = 450                                      -- the helper's bound too (pipe.py COLOUR_MAX_SKILL)
+
+-- the skill the open window's colours are given at, without bonus: nil with a bonus on, with no
+-- word of a bonus, or with no window. The rank from the first call that has one; the bonus from
+-- the first that says it, while it gives the same rank (another call could be another window)
+function api.BaseRank()
+  local rank, mod
+  local function take(r, m)
+    r, m = tonumber(r), tonumber(m)
+    if rank == nil then rank = r end
+    if mod == nil and m ~= nil and r ~= nil and r == rank then mod = m end
+  end
+  if C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo then
+    local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+    if ok and type(info) == "table" then take(info.skillLevel, info.skillModifier) end
+  end
+  if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillLine then
+    local ok, _, _, r, _, m = pcall(C_TradeSkillUI.GetTradeSkillLine)
+    if ok then take(r, m) end
+  end
+  if GetTradeSkillLine then
+    local ok, _, r, _, m = pcall(GetTradeSkillLine)
+    if ok then take(r, m) end
+  end
+  if not rank or mod ~= 0 or rank < 1 or rank > MAX_RANK then return nil end
+  return math.floor(rank)
+end
+
+-- the window's learned recipes and their colour now: { [spell] = "o" | "y" | "g" | "x" } (red,
+-- and a recipe not learned, left out), and how many rows of the list were walked. One call a
+-- recipe of the list
+local function SeenColours()
+  local out, walked = {}, 0
+  if C_TradeSkillUI and C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetRecipeInfo then
+    local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+    for _, id in ipairs(ok and type(ids) == "table" and ids or {}) do
+      walked = walked + 1
+      local ok2, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+      local key = ok2 and type(info) == "table" and info.learned == true and COLOUR_KEYS[COLOURS[info.relativeDifficulty]]
+      if key and type(id) == "number" then out[id] = key end
+    end
+  elseif GetNumTradeSkills and GetTradeSkillInfo and GetTradeSkillRecipeLink then
+    for i = 1, GetNumTradeSkills() or 0 do                -- the old panel lists what the character knows, and headers
+      walked = walked + 1
+      local _, kind = GetTradeSkillInfo(i)
+      local key = COLOUR_KEYS[kind]
+      local link = key and GetTradeSkillRecipeLink(i)
+      local spell = link and tonumber(link:match("enchant:(%d+)"))
+      if spell then out[spell] = key end
+    end
+  end
+  return out, walked
+end
+
+-- a stored pair as it should be, else nil (a saved file edited by hand is not trusted)
+local function Pair(p)
+  if type(p) == "table" and type(p[1]) == "number" and type(p[2]) == "number" and p[1] <= p[2] then return p end
+end
+
+local colourKey                          -- the change, window and skill last recorded
+local emptyKey, emptyAt                  -- the last look that walked a list and saw no learned recipe, and when (GetTime)
+local laterKey, laterPending             -- the key a later look was scheduled for (C_Timer), once a key; one waiting at most
+local EMPTY_AGAIN = 1                    -- seconds before such a look of the same key is tried again
+local function NoteColours(open, later)
+  if not open or open.linked or type(FWCS_DB) ~= "table" then return end
+  local rank = api.BaseRank()
+  if not rank then return end
+  local key = string.format("%s:%s:%d", tostring(ns.HaveGen and ns.HaveGen() or 0), tostring(open.id or open.name), rank)
+  if key == colourKey then return end
+  local clock = GetTime and GetTime() or nil
+  if not later and key == emptyKey and clock and emptyAt and clock - emptyAt < EMPTY_AGAIN then return end
+  local seen, walked = SeenColours()
+  if not next(seen) then                                  -- the list not loaded yet: not kept
+    if walked > 0 then                                    -- a call a recipe spent for nothing: not again within a second
+      emptyKey, emptyAt = key, clock
+      if laterKey ~= key and not laterPending and C_Timer and C_Timer.After then
+        laterKey, laterPending = key, true
+        C_Timer.After(EMPTY_AGAIN + 0.1, function() laterPending = nil; pcall(NoteColours, api.Open(), true) end)
+      end
+    end
+    return
+  end
+  colourKey, emptyKey = key, nil
+  if type(FWCS_DB.__colours) ~= "table" then FWCS_DB.__colours = {} end
+  local all, count = FWCS_DB.__colours, nil
+  local now = time and time() or 0
+  for spell, c in pairs(seen) do
+    local row = all[spell]
+    if type(row) ~= "table" then
+      if not count then count = 0; for _ in pairs(all) do count = count + 1 end end
+      if count < MAX_COLOURED then
+        all[spell] = { [c] = { rank, rank }, t = now }
+        count = count + 1
+      end
+    else
+      local changed, at = false, COLOUR_ORDER[c]
+      for k, n in pairs(COLOUR_ORDER) do
+        local p = Pair(row[k])
+        if k ~= c and row[k] ~= nil and (not p or (n < at and p[2] >= rank) or (n > at and p[1] <= rank)) then
+          row[k] = nil; changed = true                    -- the older word, contradicted (or unreadable): dropped
+        end
+      end
+      local p = Pair(row[c])
+      if not p then row[c] = { rank, rank }; changed = true
+      elseif rank < p[1] then p[1] = rank; changed = true
+      elseif rank > p[2] then p[2] = rank; changed = true end
+      if changed then row.t = now end
+    end
+  end
+end
+
 -- A run of a vouched recipe (ns.StandIns) from `skill`, up to `to`: the crafts it takes (about,
 -- where a craft may give no point) and the skill it stops at, never past one where its chance is
 -- 0. Where the route says nothing of its chance (e.now nil), the client's colour does: orange or
@@ -1001,11 +1155,14 @@ local function BagsBeforeLearning(house, plan, nxt, skill, banked, tip, professi
 end
 
 local function VerdictOf(given)
+  local open = given and given.open or api.Open()
+  -- the window itself open (not the background pass's stand-in): the colours it shows, for any
+  -- profession, with or without routes for the realm (NoteColours)
+  if not given and open then pcall(NoteColours, open) end
   local house = House()
   if not house then
     return { text = "No routes for this realm yet", tip = { "The helper fetches them: see /fwc." } }
   end
-  local open = given and given.open or api.Open()
   if not open then
     return { text = "No profession open", tip = { "Open a profession's recipes." }, idle = true }
   end
