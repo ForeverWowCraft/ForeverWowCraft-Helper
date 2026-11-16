@@ -29,7 +29,10 @@ local Char, House, Spelt = ns.inv.Char, ns.inv.House, ns.inv.Spelt
 -- { [item] = units } in hand: { step, spell, crafts, from, to, uses,
 --   buy = { {item, units}, ... }                what `have` lacks for it, most first,
 --   make = { {item, units, crafts, spell, uses}, ... }   what the step makes on the way (spell
---                                             nil when the document does not say how) };
+--                                             nil when the document does not say how),
+--   convert = { {item, units, times, from, used, made}, ... }   an enchanter's essences got from
+--                                             the other kind (plan.convert, Tailor.lua): `times`
+--                                             conversions of `used` `from` into `made` `item` };
 -- nil when the route is done at `skill`.
 function ns.NextCraft(plan, skill, have, upto)
   local step, left
@@ -50,11 +53,18 @@ function ns.NextCraft(plan, skill, have, upto)
                 uses = step.uses, buy = {}, make = {} }
   for item, units in pairs(walk.buy) do table.insert(out.buy, { item, units }) end
   table.sort(out.buy, function(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end)
+  out.convert = {}
   for item, units in pairs(walk.make) do
     local how = walk.how[item]
-    table.insert(out.make, { item, units, how and math.ceil(units / how[1]) or units, how and how[3] or nil, how and how[2] or {} })
+    local c = how and not how[3] and ns.Conversion(plan, item)
+    if c then                              -- an essence of the other kind, converted: the use of an item, no recipe
+      table.insert(out.convert, { item = item, units = units, times = math.ceil(units / c[3]), from = c[1], used = c[2], made = c[3] })
+    else
+      table.insert(out.make, { item, units, how and math.ceil(units / how[1]) or units, how and how[3] or nil, how and how[2] or {} })
+    end
   end
   table.sort(out.make, function(a, b) return a[1] < b[1] end)
+  table.sort(out.convert, function(a, b) return a.item < b.item end)
   return out
 end
 
@@ -270,6 +280,10 @@ local function Bags(plan)
     Add(item)
     for _, u in ipairs(how[2] or {}) do Add(u[1]) end
   end
+  for item in pairs(plan.convert or {}) do                -- an essence of either kind counts (Tailor.lua, ns.Conversion)
+    local c = ns.Conversion(plan, item)
+    if c then Add(item); Add(c[1]) end
+  end
   local known = ns.ToolsKnown and ns.ToolsKnown()         -- what the tools take, from the bags too
   for _, t in pairs(known and known.made or {}) do
     for _, u in ipairs(t.uses or {}) do Add(u[1]) end
@@ -370,6 +384,59 @@ local RANKUPS = {
 }
 local RANK_EARLY = 25                      -- the next rank is taught from this far below the cap
 
+-- ================================================================ an enchanter's essences
+-- A step's essences got from the other kind (NextCraft's convert, plan.convert): the words of
+-- one, "Split 4 Greater Magic Essence into 12 Lesser Magic Essence" or "Combine 9 Lesser Magic
+-- Essence into 3 Greater Magic Essence", for `times` conversions
+local function ConvertWords(house, cv, times)
+  return string.format("%s %d %s into %d %s", cv.made > cv.used and "Split" or "Combine",
+    times * cv.used, N(house, cv.from), times * cv.made, N(house, cv.item))
+end
+
+-- the conversion bought for, by the item bought: "split" | "combine", nil when it is for none
+local function ConvertedAs(nxt, item)
+  for _, cv in ipairs(nxt.convert or {}) do
+    if cv.from == item then return cv.made > cv.used and "split" or "combine", cv end
+  end
+  return nil
+end
+
+-- The conversion next, once the bags hold what it takes: before the step's own crafts, as an
+-- intermediate is. A conversion is the use of an item, and the client lets an addon use an item
+-- on a click only from a secure action button made for it, outside a fight; the Make button
+-- crafts a recipe by its spell and is no such button. So the words say how (a right-click in the
+-- bags) and the click says them in chat; the arrow says them where it stands. nil when the bags
+-- hold none of what a conversion takes
+local function ConvertVerdict(house, nxt, step, tip, profession)
+  for _, cv in ipairs(nxt.convert or {}) do
+    local times = math.min(cv.times, math.floor((ns.inv.Count(cv.from) or 0) / cv.used))
+    if times > 0 then
+      table.insert(tip, string.format("Then the step: %s, skill %d to %d.", ns.RecipeName(step), nxt.from, nxt.to))
+      table.insert(tip, string.format("Right-click the %s in your bags: one click a conversion, %d into %d.", N(house, cv.from), cv.used, cv.made))
+      return { text = ConvertWords(house, cv, times), tip = tip, show = true, convert = true, profession = profession }
+    end
+  end
+  return nil
+end
+
+-- What a conversion takes that the bank holds (counted when last open, with "Use what I already
+-- have first": Bags): fetched first, "Take 4 Greater Magic Essence from the bank, to split". nil
+-- when the bank holds none of it
+local function ConvertBankVerdict(house, nxt, banked, tip, profession)
+  for _, cv in ipairs(nxt.convert or {}) do
+    local short = cv.times * cv.used - (ns.inv.Count(cv.from) or 0)
+    local take = math.min(short, banked[cv.from] or 0)
+    if take > 0 then
+      local as = cv.made > cv.used and "split" or "combine"
+      table.insert(tip, "In your bank (as counted when it was last open):")
+      table.insert(tip, string.format("  %d %s, to %s into %s", take, N(house, cv.from), as, N(house, cv.item)))
+      return { text = string.format("Take %d %s from the bank, to %s", take, N(house, cv.from), as),
+               note = string.format("%d %s: bank", take, N(house, cv.from)), tip = tip, show = true, bank = true, profession = profession }
+    end
+  end
+  return nil
+end
+
 -- What the button does now: { text, tip = { lines }, spell, crafts, to, line }; spell nil
 -- when the click can make nothing, and text says why. `given` = { open, profession } stands
 -- in for the panel when none is open (the arrow with the window closed, Headless below)
@@ -392,16 +459,21 @@ local function BuyVerdict(house, plan, nxt, step, tip, profession)
     local fish = #catch == 1 and string.format("%d %s", catch[1].units - catch[1].have, N(house, catch[1].item)) or string.format("%d kinds of fish", #catch)
     text = text and (text .. ", and catch " .. fish) or ("Catch " .. fish)
   end
+  -- one item bought to convert (an enchanter's essence of the other kind): what it is for, said
+  local as = #shopping == 1 and ConvertedAs(nxt, shopping[1].item)
+  if as and text then text = text .. ", to " .. as end
   table.insert(tip, "Needs:")
   for _, e in ipairs(shopping) do
+    local verb, cv = ConvertedAs(nxt, e.item)
+    local for_ = verb and string.format(", to %s into %s", verb, N(house, cv.item)) or ""
     if e.source == "catch" then
       local where = ns.CatchSpots(plan, e.item)
       table.insert(tip, string.format("  %d %s (have %d): catch%s", e.units - e.have, N(house, e.item), e.have, where and (", " .. where) or ""))
     else
-      table.insert(tip, string.format("  %d %s (have %d)%s, %s", e.units - e.have, N(house, e.item), e.have,
+      table.insert(tip, string.format("  %d %s (have %d)%s, %s%s", e.units - e.have, N(house, e.item), e.have,
         e.price and (", about " .. ns.Money(e.price * (e.units - e.have))) or "",
         e.source == "vendor" and ("from a vendor" .. (e.cheaper and string.format(" (the auction house had it for %s each)", ns.Money(e.cheaper)) or ""))
-          or "at the auction house"))
+          or "at the auction house", for_))
     end
   end
   if #catch > 0 then table.insert(tip, ns.CATCH_NOTE) end
@@ -475,7 +547,11 @@ local function MailVerdict(house, plan, nxt, step, tip, profession, scroll)
   end
   for _, b in ipairs(nxt.buy) do
     local n = ns.inv.InMail(b[1]) or 0
-    if n > 0 then table.insert(waiting, { item = b[1], units = math.min(n, b[2]) }) else rest = rest + 1 end
+    local c = n == 0 and ns.Conversion(plan, b[1])            -- an essence: the other kind in the mail serves too, converted
+    local other = c and (ns.inv.InMail(c[1]) or 0) or 0
+    if n > 0 then table.insert(waiting, { item = b[1], units = math.min(n, b[2]) })
+    elseif other > 0 then table.insert(waiting, { item = c[1], units = math.min(other, math.ceil(b[2] / c[3]) * c[2]) })
+    else rest = rest + 1 end
   end
   if #waiting == 0 then return nil end
   local function Name(w) return w.recipe and N(house, w.item) or string.format("%d %s", w.units, N(house, w.item)) end
@@ -1067,30 +1143,9 @@ local function Colour(spell)
   return api.Colour(spell)
 end
 
--- What the route still needs that a known recipe off the route must not burn: every item the
--- stretches from the current one on use, and what those are made of where the route makes them
--- (plan.made). Not reserved: what the route buys from a vendor (VendorSells: a vendor's stock is
--- cheap and never runs out, so a cake's Hot Spices are bought again for a later stretch at a
--- vendor's price, where reserving them would keep the cake from the bags for a few coppers'
--- worth of spices). Simple and on the safe side: an item the route uses is skipped whatever the
--- counts, rather than weighed against what a later stretch would buy anyway
-local function Reserved(plan, skill)
-  local out = {}
-  local function Add(item, depth)
-    if out[item] or VendorSells(plan, item) then return end
-    out[item] = true
-    local how = plan.made and plan.made[item]
-    if how and depth < 4 then
-      for _, u in ipairs(how[2] or {}) do Add(u[1], depth + 1) end
-    end
-  end
-  for _, s in ipairs(plan.steps or {}) do
-    if s.to > skill then
-      for _, u in ipairs(s.uses or {}) do Add(u[1], 0) end
-    end
-  end
-  return out
-end
+-- Whether the route is a skill-up one (ns.SkillUp, Tailor.lua): the profit route gets no recipe
+-- in place of the step's, from the bags or with a vendor's goods
+local function SkillUp(house, plan) return ns.SkillUp(plan, house) end
 
 -- The bags first. Nothing of the stretch's chosen recipe (nor of what it makes on the way) can
 -- be made from the bags, or that recipe is not learned yet: before the trainer, a recipe to buy,
@@ -1108,15 +1163,18 @@ end
 -- Then, nothing the route vouches for being in the bags: any recipe of the profession the
 -- character knows that the panel shows (or showed, at this skill: the character's record, so the
 -- answer is the same with the panel closed and after a reload) orange or yellow and the bags hold
--- a craft of (KnownRecipes), none that uses what the route still needs (Reserved). Orange before
+-- a craft of (KnownRecipes), even one that uses what a later stretch planned to use: nothing is
+-- held back since 15 Nov 2026 (what is had is used at once, and bought again later if a stretch
+-- still needs it; until then a reserve kept such recipes out). Orange before
 -- yellow, then the one the bags make the most crafts of, then by name; a run up to the stretch's
 -- end, the verdict asked again after it (a player with the fins and the legs for soups and cakes
 -- in the bags was sent to buy the recipe for Clam Chowder, a route without either, 14 Nov 2026).
 -- Once the bags hold no craft of any, the verdict goes on as before (the last fin in the bank
--- fetched for the soup, once the cakes are made). nil when none is to be made.
+-- fetched for the soup, once the cakes are made). nil when none is to be made, and always on the
+-- profit route (ns.StandIns gives nothing there: the route's own recipes only).
 local function BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
   local list = ns.StandIns and ns.StandIns(plan, skill)
-  if not list then return nil end        -- the box off (the route's own recipes), or a stretch whose product a later one uses
+  if not list then return nil end        -- the box off or the profit route (the route's own recipes), or a stretch whose product a later one uses
   local from = math.max(skill, nxt.from)
   local seen = { [nxt.spell or 0] = true }
   for _, e in ipairs(list) do
@@ -1138,12 +1196,9 @@ local function BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
     return nil
   end
   if #known == 0 then return nil end
-  local reserved = Reserved(plan, skill)
   local offers = {}
   for _, c in ipairs(known) do
-    local free = not seen[c.spell]
-    for _, u in ipairs(c.uses) do if reserved[u[1]] then free = false end end
-    if free then
+    if not seen[c.spell] then
       local can = math.huge
       for _, u in ipairs(c.uses) do can = math.min(can, math.floor((ns.inv.Count(u[1]) or 0) / u[2])) end
       if can > 0 then table.insert(offers, { c = c, can = can }) end
@@ -1164,6 +1219,193 @@ local function BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
   return nil
 end
 
+-- ================================================================ vendor items first
+-- On a skill-up route (SkillUp) with "Use what I already have first" on: before the auction
+-- house, a recipe to buy or a trainer, a recipe the character knows that still gives points and
+-- that what it holds (bags, bank, mail) makes once a vendor's goods are added is made first (a
+-- leatherworker at 97 with 64 Medium Leather in the bags was sent to buy the pattern for
+-- Hillman's Belt at the auction house, 15 Nov 2026). The trips, one verdict at a time: the bank,
+-- the mailbox, the vendor, then the hammer; the route's own verdict after, as the arrow's note
+-- where the chain has one (BagsBeforeLearning). The profit route is never sent here.
+--
+-- A vendor's item: one the route's prices or another route of the house buy from a vendor, or a
+-- merchant met sells (VendorSells, ns.BuyRow); where nothing prices it, one a vendor seen or
+-- seeded is known to sell (ns.NearestPlace): one priced at a vendor, or one the arrow can point
+-- at a seller for. A price at the auction house alone says no, whatever the seed has: Medium
+-- Leather is the seed's for Lhara, a wandering seller of a few, and the house's for the routes.
+-- Worked out once per change (ns.HaveGen) and per place noted, not per frame.
+local vendorOf, vendorGen, vendorPlan, vendorAt = {}, nil, nil, nil
+local function VendorItem(plan, item)
+  local gen = ns.HaveGen and ns.HaveGen() or 0
+  if vendorGen ~= gen or vendorPlan ~= plan or vendorAt ~= ns.notedAt then
+    vendorOf, vendorGen, vendorPlan, vendorAt = {}, gen, plan, ns.notedAt
+  end
+  local v = vendorOf[item]
+  if v == nil then
+    if ns.BuyRow(plan, item) then v = VendorSells(plan, item)
+    else v = ns.NearestPlace ~= nil and ns.NearestPlace("vendor", nil, item) ~= nil end
+    vendorOf[item] = v
+  end
+  return v
+end
+
+-- what the character holds of an item: the bags now, the bank and the mail as last counted (its
+-- own, as the bank and mail verdicts count them; never another character's)
+local function Held(item)
+  local bank = (Char().items[item] or {})[2] or 0
+  local mail = ns.inv.InMail and ns.inv.InMail(item) or 0
+  return ns.inv.Count(item) or 0, bank, mail
+end
+
+-- The candidates: the route's recipes it vouches for (ns.StandIns, the stretch's own and its
+-- next-best first), then every recipe of the profession the character knows (KnownRecipes, the
+-- panel's list or its record). Known (Learned), orange or yellow (the client's word or the
+-- record's; where neither says, the route's colours for it, else a full chance a craft), never a
+-- cooldown (KnownRecipes leaves those out; a route's recipe is not one), of this profession
+-- (api.OfLine), and never a tool lacking. One qualifies when each reagent is held or is a
+-- vendor's item, at least one held reagent is not a vendor's, and what is held of those makes at
+-- least one craft. How many: what the held reagents allow, cut where the stretch ends (Run, as
+-- the bags-first runs are). { c, colour, crafts, stop }, orange first, then the most crafts, then
+-- by name
+local function GapCandidates(plan, nxt, skill, from, list)
+  local out, seen = {}, { [nxt.spell or 0] = true }
+  local function Consider(c, e, colour)
+    if seen[c.spell] or type(c.uses) ~= "table" or #c.uses == 0 then return end
+    if Learned(c.spell) ~= true or api.OfLine(c.spell, plan.skill_line) == false then return end
+    if colour ~= "optimal" and colour ~= "medium" then return end
+    local can, mine = math.huge, false
+    for _, u in ipairs(c.uses) do
+      if not VendorItem(plan, u[1]) then
+        local bags, bank, mail = Held(u[1])
+        can, mine = math.min(can, math.floor((bags + bank + mail) / u[2])), true
+      end
+    end
+    if not mine or can <= 0 then return end
+    for _, r in ipairs(api.Requirements(c.spell)) do
+      if not r.met and not (r.place and not api.ToolRecipe(r.name)) then return end    -- a tool lacking
+    end
+    local crafts, stop = Run(e, colour, from, nxt.to)
+    if crafts <= 0 then return end
+    seen[c.spell] = true                 -- once: a route's recipe passed over may still come from the record, with its colour
+    table.insert(out, { c = c, colour = colour, crafts = math.min(can, crafts), stop = stop })
+  end
+  for _, e in ipairs(list) do
+    local colour = Colour(e.rec.spell)
+    if colour == nil then
+      local at = e.rec.at
+      colour = at and ((from < at[2] and "optimal") or (from < at[3] and "medium")) or (e.now == 1 and "optimal") or nil
+    end
+    Consider(e.rec, e, colour)
+  end
+  for _, c in ipairs(KnownRecipes(plan, plan.skill_line, skill) or {}) do Consider(c, {}, c.colour) end
+  table.sort(out, function(a, b)
+    if a.colour ~= b.colour then return a.colour == "optimal" end
+    if a.crafts ~= b.crafts then return a.crafts > b.crafts end
+    return (a.c.name or ns.RecipeName(a.c)) < (b.c.name or ns.RecipeName(b.c))
+  end)
+  return out
+end
+
+-- What a run of `n` crafts of `c` still needs, after the bags: { bank = {}, mail = {}, buy = {} }
+-- of { item, units }, the bank before the mail, the rest of a vendor's item bought; and what of
+-- the character's (not a vendor's) it uses, most first
+local function GapTrips(plan, c, n)
+  local trips, mine = { bank = {}, mail = {}, buy = {} }, {}
+  for _, u in ipairs(c.uses) do
+    local need = u[2] * n
+    local bags, bank, mail = Held(u[1])
+    local vendor = VendorItem(plan, u[1])
+    if not vendor then table.insert(mine, { u[1], need }) end
+    local short = need - bags
+    if short > 0 and bank > 0 then table.insert(trips.bank, { u[1], math.min(short, bank) }); short = short - math.min(short, bank) end
+    if short > 0 and mail > 0 then table.insert(trips.mail, { u[1], math.min(short, mail) }); short = short - math.min(short, mail) end
+    if short > 0 and vendor then table.insert(trips.buy, { u[1], short }) end
+  end
+  local function Most(a, b) if a[2] ~= b[2] then return a[2] > b[2] end return a[1] < b[1] end
+  for _, list in pairs(trips) do table.sort(list, Most) end
+  table.sort(mine, Most)
+  return trips, mine
+end
+
+-- "10 Fine Thread and 10 Gray Dye", or "3 items" past two
+local function Listed(house, list)
+  if #list > 2 then return string.format("%d items", #list) end
+  local parts = {}
+  for _, e in ipairs(list) do table.insert(parts, string.format("%d %s", e[2], N(house, e[1]))) end
+  return table.concat(parts, " and ")
+end
+
+-- the verdict for the first candidate: the bank, the mailbox, the vendor, or the craft itself
+-- (Offer, as the bags-first runs are made). nil on the profit route, with the box off, or when no
+-- candidate qualifies
+local function VendorGapVerdict(house, plan, nxt, skill, banked, tip, profession)
+  if not HaveFirst() or not SkillUp(house, plan) or not ns.StandIns then return nil end
+  local list = ns.StandIns(plan, skill)
+  if not list then return nil end        -- the box off, or a stretch whose product a later one uses (as BagsVerdict)
+  local from = math.max(skill, nxt.from)
+  local best = GapCandidates(plan, nxt, skill, from, list)[1]
+  if not best then return nil end
+  local c, n = best.c, best.crafts
+  local name = c.name or ns.RecipeName(c)
+  local trips, mine = GapTrips(plan, c, n)
+  usingOf = ns.UsingText({ mine = mine }, function(item) return N(house, item) end)
+  local said = #trips.buy > 0 and string.format("%s: %s gives points with only %s to buy from a vendor.", usingOf, name, Listed(house, trips.buy))
+    or string.format("%s: %s still gives points, made from what you have.", usingOf, name)
+  if #trips.bank == 0 and #trips.mail == 0 and #trips.buy == 0 then          -- all in the bags: the hammer
+    return Offer(house, plan, nxt, c, n, best.stop, from, banked, tip, profession, function() return said end)
+  end
+  table.insert(tip, said)
+  local function Lines(head, list, where)
+    table.insert(tip, head)
+    for _, e in ipairs(list) do table.insert(tip, string.format("  %d %s%s", e[2], N(house, e[1]), where and where(e) or "")) end
+  end
+  local makeLine = string.format("Then make %d %s, stopping at skill %d.", n, name, best.stop)
+  if #trips.bank > 0 then
+    Lines("In your bank (as counted when it was last open):", trips.bank)
+    if #trips.mail > 0 then table.insert(tip, "Then collect " .. Listed(house, trips.mail) .. " from the mailbox.") end
+    if #trips.buy > 0 then table.insert(tip, "Then buy " .. Listed(house, trips.buy) .. " from a vendor.") end
+    table.insert(tip, makeLine)
+    local parts = {}
+    for _, e in ipairs(trips.bank) do table.insert(parts, string.format("%d %s: bank", e[2], N(house, e[1]))) end
+    local text = #trips.bank == 1 and string.format("Take %d %s from the bank", trips.bank[1][2], N(house, trips.bank[1][1]))
+      or string.format("Take from the bank: %d items", #trips.bank)
+    return { text = text, note = table.concat(parts, ", "), tip = tip, show = true, bank = true, profession = profession }
+  end
+  if #trips.mail > 0 then
+    Lines("In the mail (seen in the inbox, or bought at the auction house):", trips.mail)
+    if #trips.buy > 0 then table.insert(tip, "Then buy " .. Listed(house, trips.buy) .. " from a vendor.") end
+    table.insert(tip, makeLine)
+    local text = #trips.mail == 1 and string.format("Collect %d %s from the mailbox", trips.mail[1][2], N(house, trips.mail[1][1]))
+      or string.format("Collect from the mailbox: %d items", #trips.mail)
+    return { text = text, tip = tip, place = { "mailbox", nil, nil, "Mailbox" }, profession = profession }
+  end
+  -- the vendor: the nearest seller of any of the goods (one seen or seeded), else the first's
+  Lines("To buy from a vendor:", trips.buy, function(e)
+    local row = ns.BuyRow(plan, e[1])
+    local each = row and ((type(row[3]) == "number" and row[3]) or (row[2] == "vendor" and row[1])) or nil
+    return each and (", about " .. ns.Money(each * e[2])) or ""
+  end)
+  table.insert(tip, makeLine)
+  local place, bestD, bestHere
+  for _, e in ipairs(trips.buy) do
+    local p, d, here = ns.NearestPlace("vendor", nil, e[1])
+    if p and (not place or (here and not bestHere) or ((here or false) == (bestHere or false) and d and (not bestD or d < bestD))) then
+      place, bestD, bestHere = { "vendor", nil, e[1], "Vendor" }, d, here
+    end
+  end
+  return { text = "Buy " .. Listed(house, trips.buy) .. " from a vendor", tip = tip, place = place or { "vendor", nil, trips.buy[1][1], "Vendor" },
+           profession = profession }
+end
+
+-- whether the route's own next trip goes to the auction house (or to catch fish): something of
+-- the step's to buy that no vendor sells
+local function BuysElsewhere(plan, nxt)
+  for _, b in ipairs(nxt.buy) do
+    if not VendorSells(plan, b[1]) then return true end
+  end
+  return false
+end
+
 -- The stretch's recipe is not learned yet: a vouched recipe the bags hold a craft of is made
 -- first (BagsVerdict), and the trip for the recipe becomes the arrow's note, as the other trip of
 -- a two-trip verdict is (a player was sent to buy the recipe for Clam Chowder with 3 soups and 4
@@ -1175,6 +1417,7 @@ end
 local function BagsBeforeLearning(house, plan, nxt, skill, banked, tip, profession, learn, trainer)
   if learn and (ns.inv.Count(learn[1]) or 0) > 0 then return nil end
   local made = BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
+    or VendorGapVerdict(house, plan, nxt, skill, banked, tip, profession)      -- a skill-up route: a vendor's goods with what is had
   if not made then return nil end
   local recipe = ns.RecipeName(nxt.step)
   local need = learn and ((ns.NoteRecipeLevel and ns.NoteRecipeLevel(learn[1])) or learn[3])
@@ -1193,7 +1436,9 @@ local function BagsBeforeLearning(house, plan, nxt, skill, banked, tip, professi
     asideOf = { text = "Then learn " .. recipe .. " at the trainer", place = trainer }
   end
   if asideOf and not line then line = asideOf.text .. " (the arrow's note)." end
-  table.insert(made.tip, #made.tip, line)                    -- before "Click: ..."
+  if line then                                               -- before "Click: ...", else last
+    table.insert(made.tip, (made.tip[#made.tip] or ""):match("^Click") and #made.tip or #made.tip + 1, line)
+  end
   return made
 end
 
@@ -1358,6 +1603,9 @@ local function VerdictOf(given)
              place = learn and Seller(plan, learn[1]) or trainer, profession = profession }
   end
   Char().tolearn = nil
+  -- an essence of the other kind in the bags: converted first, as an intermediate is made first
+  local converting = ConvertVerdict(house, nxt, step, tip, profession)
+  if converting then return converting end
   -- what the bags allow a craft of, the step's own recipe first (skill now), then what it
   -- makes on the way
   local function Can(c)
@@ -1479,9 +1727,16 @@ local function VerdictOf(given)
   -- already have first"), what waits in the mail, then what to buy, where
   local fromBags = BagsVerdict(house, plan, nxt, skill, banked, tip, profession)
   if fromBags then return fromBags end
-  local fromBank = BankVerdict(house, plan, nxt, banked, tip, profession)
+  local fromBank = BankVerdict(house, plan, nxt, banked, tip, profession) or ConvertBankVerdict(house, nxt, banked, tip, profession)
   if fromBank then return fromBank end
-  if #nxt.buy > 0 then return MailVerdict(house, plan, nxt, step, tip, profession) or BuyVerdict(house, plan, nxt, step, tip, profession) end
+  if #nxt.buy > 0 then
+    local fromMail = MailVerdict(house, plan, nxt, step, tip, profession)
+    if fromMail then return fromMail end
+    -- before the auction house: on a skill-up route, a known recipe that what is had makes with a vendor's goods
+    local gap = BuysElsewhere(plan, nxt) and VendorGapVerdict(house, plan, nxt, skill, banked, tip, profession)
+    if gap then return gap end
+    return BuyVerdict(house, plan, nxt, step, tip, profession)
+  end
   if unsaid then
     table.insert(tip, "Run the helper (fwch.py plans) for a newer route.")
     return { text = string.format("Make %d %s first", unsaid.crafts, unsaid.what), tip = tip, profession = profession }

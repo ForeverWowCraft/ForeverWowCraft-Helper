@@ -26,7 +26,8 @@ local button, running          -- running = { to, line } while a click's craftin
 local pointed                  -- the last { target, title, text } the arrow was set to, for the Keep arrow box
 
 local GLOWS = { Make = { 0.3, 0.95, 1 }, Buy = { 0.3, 1, 0.4 }, Collect = { 0.3, 1, 0.4 }, Learn = { 0.75, 0.55, 1 }, Needs = { 1, 0.55, 0.2 },   -- cyan, green, green, violet, orange
-                Short = { 1, 0.35, 0.35 }, ["Place"] = { 1, 0.55, 0.2 } }                                                   -- red: the gold is short; orange: a camp object to place
+                Short = { 1, 0.35, 0.35 }, ["Place"] = { 1, 0.55, 0.2 },                                                    -- red: the gold is short; orange: a camp object to place
+                Split = { 0.3, 0.95, 1 }, Combine = { 0.3, 0.95, 1 } }   -- cyan as Make: an essence to convert by a right-click in the bags (the button cannot use an item)
 local function ModeOf(v)
   local word = v and v.text and v.text:match("^(%a+)")
   if word == "Make" and not v.spell then word = nil end             -- "Make N X first": nothing to make yet

@@ -860,10 +860,13 @@ local function Guarded(read, id, arg)
 end
 
 -- the client's tooltip data for an item (TooltipDataProcessor): data.id is the item, data.lines
--- what the tooltip shows. Anything looked at before costs the one look-up.
-function ns.ScrollTooltip(_, data)
+-- what the tooltip shows. Anything looked at before costs the one look-up. The item's last known
+-- auction price goes on first, where there is one (Prices.lua; it guards itself).
+function ns.ScrollTooltip(tooltip, data)
   local id = type(data) == "table" and data.id
-  if looked[id] or type(id) ~= "number" or type(FWCS_DB) ~= "table" then return end
+  if type(id) ~= "number" then return end
+  if ns.PriceTooltip then ns.PriceTooltip(tooltip, id) end
+  if looked[id] or type(FWCS_DB) ~= "table" then return end
   Guarded(FromData, id, data)
 end
 
@@ -872,7 +875,9 @@ function ns.ScrollTooltipDrawn(tooltip)
   if type(FWCS_DB) ~= "table" then return end
   local ok, _, link = pcall(tooltip.GetItem, tooltip)
   local id = ok and type(link) == "string" and tonumber(link:match("item:(%d+)"))
-  if not id or looked[id] then return end
+  if not id then return end
+  if ns.PriceTooltip then ns.PriceTooltip(tooltip, id) end
+  if looked[id] then return end
   Guarded(FromDrawn, id, tooltip)
 end
 
@@ -1596,7 +1601,8 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
   elseif cmd == "debug" then
     state.debug = not state.debug
     Print("telemetry echo to chat " .. (state.debug and "on" or "off")
-      .. ((ns.scrollFailures or 0) > 0 and string.format("; %d recipe scroll tooltip(s) could not be read this session", ns.scrollFailures) or ""))
+      .. ((ns.scrollFailures or 0) > 0 and string.format("; %d recipe scroll tooltip(s) could not be read this session", ns.scrollFailures) or "")
+      .. ((ns.priceFailures or 0) > 0 and string.format("; %d price line(s) could not be added to a tooltip this session", ns.priceFailures) or ""))
   else
     local n = 0
     for k in pairs(RealmDB()) do if type(k) == "number" then n = n + 1 end end

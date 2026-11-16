@@ -19,8 +19,10 @@ gathers"): `send` (and the app, which runs `send --watch`) sends a scan after th
 one in game, and the merchants, trainers and recipe scrolls the player met when they changed
 (send_vendors_once), to the project's pipe, pooled with other players' to price the routes and
 to know Forever's vendors, trainers and recipes. pipe.py says what each document holds and what is
-never in one. Besides, the helper only reads: the lists and the freshness from the pipe, the
-routes from the site (asked for by the auction house, nothing else), and new versions of itself.
+never in one. A scan the pipe does not need is not sent or is refused. Besides, the helper
+only reads: the lists from the pipe, and when each auction house was last scanned, which comes
+with the pipe's answer to a sent scan (`fresh` asks for it); the routes from the site (asked for
+by the auction house, nothing else); and new versions of itself.
 """
 from __future__ import annotations
 import argparse
@@ -157,9 +159,11 @@ class Refused(pipemod.PipeError):
 def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = None, faction: str | None = None,  # noqa: C901 - baseline 9 Nov 2026, to be split
               again: bool = False, fresh: dict | None = None) -> bool:
     """Send what the scan file holds and was not sent already: every auction house in it, or
-    the one of `realm` and `faction`. `fresh` is what the pipe last said of the houses
-    (fwchelper/fresh.py): a scan it would refuse as not needed is not sent. Returns whether
-    anything was sent."""
+    the one of `realm` and `faction`. `fresh` is what the helper last learned of the houses
+    (fwchelper/fresh.py: the watch gives fresh.known(), its own Fresh.lua): a scan the pipe would
+    refuse as not needed by that is not sent; without it the scan is sent, and the pipe's 409
+    decides. What the pipe answers a sent scan (taken, or not needed and the newest it holds) is
+    noted in Fresh.lua (fresh.learn). Returns whether anything was sent."""
     if realm is None and faction is None:
         file = path or (scan.find_saved_variables() or [None])[0]
         held = scan.datasets(file) if file and file.suffix == ".lua" else []
@@ -205,11 +209,17 @@ def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = Non
         print(f"{sd.dataset}: not taken yet ({e}). It goes with the next scan.")
         return False
     except pipemod.NotNeeded as e:
-        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(e.newest) if e.newest else 'a moment ago'}; nothing sent, "
+        # the 409 names the house's newest scan and when one is wanted again: noted for the addon's box and the next send
+        newest = e.newest if freshmod.a_time(e.newest) else None
+        survive("freshness", freshmod.learn, doc["realm"], doc.get("faction", ""), newest, freshmod.window(e.newest, e.wanted_from))
+        print(f"not needed: {sd.dataset} was scanned by someone {scan.age_text(newest) if newest else 'a moment ago'}; nothing sent, "
               "and nothing needs doing.")
         noted()
         return False
     noted()
+    answer = answer if isinstance(answer, dict) else {}
+    if isinstance(answer.get("new"), bool):          # the pipe holds this scan (201, or 200 when it had it already): the house's newest is at least it
+        survive("freshness", freshmod.learn, doc["realm"], doc.get("faction", ""), min(doc["scanned_at"], int(time.time())))
     print(f"sent {sd.dataset}: {len(doc['items'])} items, scanned {scan.age_text(doc['scanned_at'])}, "
           f"{len(packed) / 1000:.0f} kB" + ("" if answer.get("new", True) else " (the service had it already)")
           + (f", as {p.name}" if getattr(p, "name", None) else ""))
@@ -353,14 +363,19 @@ def send_vendors_step(p, path: Path | None) -> None:
 def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | None, interval: float = 2.0,  # noqa: C901, PLR0912 - baseline 9 Nov 2026, to be split
           stop: threading.Event | None = None, wake: threading.Event | None = None, asks: dict | None = None,
           tick=None) -> None:
-    """Send after every save in game, fetch the routes and the freshness now and then, until
-    `stop` is set (or, without one, Ctrl+C). `wake` cuts a pause short, and `asks` is what the
-    app's menu wants done at once: {"send": True} sends the scan file as it is, {"plans": True}
-    fetches the routes whether or not the site says they are new. `tick()`, when given, is
-    called every round: the app's own chores (the addon put back when it is missing). The
-    watch's lock is the caller's to take (other_watcher) and release (release_watch)."""
+    """Send after every save in game and fetch the routes now and then, until `stop` is set (or,
+    without one, Ctrl+C). `wake` cuts a pause short, and `asks` is what the app's menu wants done
+    at once: {"send": True} sends the scan file as it is, {"plans": True} fetches the routes
+    whether or not the site says they are new. `tick()`, when given, is called every round: the
+    app's own chores (the addon put back when it is missing). The watch's lock is the caller's to
+    take (other_watcher) and release (release_watch).
+
+    The watch does not ask the pipe when each house was last scanned (GET /v1/fresh, every
+    fresh_every seconds until 1.8.3: most of a helper's requests to the pipe): it learns it from
+    the pipe's answer to each scan it sends (send_once, fresh.learn), and checks a scan against
+    what it learned last (fresh.known) before sending it."""
     asks = asks if asks is not None else {}
-    last, looked, freshened, told, vendored = None, 0.0, 0.0, None, 0.0
+    last, looked, vendored = None, 0.0, 0.0
     try:
         failures = 0                                 # refusals or failures in a row, for retry_wait
         while stop is None or not stop.is_set():
@@ -370,9 +385,6 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
             if wanted or time.time() - looked >= plansmod.plans_every():      # the routes the addon shows: newer ones, now and then
                 looked = time.time()
                 survive("routes", plans, quiet=True, again=wanted)
-            if time.time() - freshened >= plansmod.fresh_every():   # when each house was last scanned, for the addon's box
-                freshened = time.time()
-                told = survive("freshness", freshen, p, quiet=True) or told
             if time.time() - vendored >= settings.VENDORS_EVERY:  # the vendors met, when they changed
                 vendored = time.time()
                 survive("vendors", send_vendors_step, p, path)
@@ -388,7 +400,7 @@ def watch(p: pipemod.Pipe, path: Path | None, realm: str | None, faction: str | 
                 _pause(1.5, stop)                    # let the game finish writing
                 last = stamp
                 try:
-                    send_once(p, path, realm, faction, again=asked, fresh=told)
+                    send_once(p, path, realm, faction, again=asked, fresh=freshmod.known())
                     failures = 0
                 except (SystemExit, Exception) as e:  # noqa: BLE001 - a scan file nobody foresaw is tried again like a refusal
                     failures += 1
@@ -490,10 +502,49 @@ def lists(p: pipemod.Pipe | None = None) -> None:
     print("In game: /reload")
 
 
+def _looked_file() -> Path:
+    return settings.STATE / "looked.json"
+
+
+def fetched_at(what: str) -> float:
+    """When the helper last fetched `what` ("lists"), by the note in the state folder; 0 when never or not readable."""
+    try:
+        t = json.loads(_looked_file().read_text(encoding="utf-8")).get(what)
+    except (OSError, ValueError, AttributeError):
+        return 0.0
+    return float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else 0.0
+
+
+def note_fetched(what: str) -> None:
+    """Note in the state folder that `what` was fetched now."""
+    try:
+        seen = json.loads(_looked_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    seen = seen if isinstance(seen, dict) else {}
+    seen[what] = int(time.time())
+    settings.STATE.mkdir(parents=True, exist_ok=True)
+    _looked_file().write_text(json.dumps(seen), encoding="utf-8")
+
+
+def daily_lists(p: pipemod.Pipe) -> bool:
+    """The app's start: fetch the lists (lists) when they were not fetched in the last
+    LISTS_EVERY seconds, else nothing (the copy kept in the state folder is what the addon has,
+    and what install-addon puts back). Returns whether they were asked for. Until 1.8.4 every
+    start asked, and a start was four requests to the pipe (lists, fresh, me, fresh again)."""
+    since = time.time() - fetched_at("lists")
+    if 0 <= since < settings.LISTS_EVERY:            # a time ahead of the clock (the clock was set back) is no reason to wait
+        return False
+    lists(p)
+    note_fetched("lists")
+    return True
+
+
 def freshen(p: pipemod.Pipe | None = None, quiet: bool = False) -> dict | None:
     """Ask the pipe when each auction house was last scanned by anyone and write that into
-    the addon (Fresh.lua). Returns what the pipe said, or None when it could not be asked or
-    is from before the gate."""
+    the addon (Fresh.lua): `python fwch.py fresh`, which a person runs; the watch does not
+    (it learns the same from the answers to the scans it sends). Returns what the pipe said,
+    or None when it could not be asked or is from before the gate."""
     p = p or pipemod.Pipe()
     try:
         told = p.fresh()
@@ -533,6 +584,8 @@ def plans(quiet: bool = False, again: bool = False) -> bool:
             raise SystemExit(str(e)) from None
         print(f"routes not fetched: {e}")
         return False
+    for why in plansmod.DROPPED:                    # once: a price list left out is not asked for again until the site's data changes
+        print(f"prices for item tooltips left out: {why}")
     if not written:
         if not quiet:
             print(f"nothing new at {plansmod.site_url()}: the addon has the routes of "

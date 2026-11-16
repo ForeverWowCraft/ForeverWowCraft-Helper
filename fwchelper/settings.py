@@ -139,6 +139,10 @@ SITE_URL = "https://foreverwowcraft.com"
 # "Fetch routes now" in the menu still looks at once.
 PLANS_EVERY = 600     # seconds between looks at the site for newer routes, while `send --watch` runs: one small fetch of houses.json; the routes follow only when the site has rebuilt
 FRESH_EVERY = 1800    # seconds between looks at the pipe for when each auction house was last scanned (fwchelper/fresh.py); the addon reads it at /reload
+# FRESH_EVERY, and the site's helper.fresh_every (plans.fresh_every), are still read so that they mean what they did to
+# helpers 1.7.2 to 1.8.3, which look that often; from 1.8.4 the watch does not look by itself at all and learns the same
+# from the pipe's answer to each scan it sends (fresh.learn), so neither changes what a 1.8.4 helper does.
+LISTS_EVERY = 86400   # seconds: the app fetches the lists to scan when it starts, once in this time at most (cli.daily_lists); `python fwch.py lists` fetches them at once
 VENDORS_EVERY = 600   # seconds between looks at the saved file for vendors met (sent when they changed: cli.send_vendors_once)
 RETRY_FIRST = 30      # seconds a watch waits before sending again after the pipe refused or failed; doubled each time it fails again ...
 RETRY_MAX = 900       # ... up to this (15 min): a pipe that is down is not asked twice a minute by every helper (5 Nov 2026)

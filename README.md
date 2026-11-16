@@ -60,7 +60,8 @@ something needs you: the game not found, the addon not installed, prices that co
 sent, a `/reload` or a log-out the addon needs. Everything the helper does is in its log, with the date and time at the start of
 every line: `%LOCALAPPDATA%\ForeverWowCraft\Helper\helper.log`. The same folder holds the
 helper's name and token at the pipe (`identity.json`), what it sent (`sent.json`), and the
-routes, lists and freshness it fetched; an uninstall leaves it, so a reinstall is the same
+routes, lists and freshness it fetched or learned, with when it last fetched the lists
+(`looked.json`); an uninstall leaves it, so a reinstall is the same
 sender. `FWC_STATE` names another folder. One instance runs at a time: starting the helper
 again while it runs only says so.
 
@@ -186,9 +187,10 @@ profession window is open; **Later** puts it off an hour.
 
 One fresh scan of an auction house is all the site needs, however many play there, so the pipe
 takes one and refuses the rest as not needed while it counts that one fresh; the pipe says how
-long that is. The helper sends none it would refuse ("not needed: ... was scanned by someone 4
-min ago"), and now and then, as often as the site says, writes into the addon (`Fresh.lua`) when
-each house was last scanned, so that the addon records nothing while a scan is not needed.
+long that is. A scan the pipe does not need is not sent or is refused ("not needed: ... was
+scanned by someone 4 min ago"). The pipe's answer to each scan the helper sends says when that
+house was last scanned, and the helper writes it into the addon (`Fresh.lua`), so that the addon
+records nothing while a scan is not needed.
 
 Everything the helper writes into the game (the routes, the lists, the freshness) goes into a
 second, tiny addon, **ForeverWowCraft Plans**, which `install-addon` puts beside the scanner and
@@ -304,10 +306,12 @@ Forever's vendors, trainers and recipes. Three requests send something:
 Every request also names the helper and its version (`ForeverWowCraft-helper/<version>`), and,
 as with any request on the internet, the server sees the address it comes from.
 
-What is fetched: from the pipe, the lists of items to scan and when each auction house was last
-scanned; from the site, the list of its auction houses and then the routes of your characters'
+What is fetched: from the pipe, the lists of items to scan, and when an auction house was last
+scanned, which comes with the pipe's answer to a scan the helper sent (`python fwch.py fresh`
+asks for every house); from the site, the list of its auction houses and then the routes of your characters'
 auction houses (so the site learns which auction houses you play on; before the addon has seen a
-character, those of your game's region when there are few); from GitHub, once a day, whether a
+character, those of your game's region when there are few), with each of those houses' lowest
+auction prices, which the addon shows on item tooltips (since 1.8.4); from GitHub, once a day, whether a
 newer helper is out, and its installer when one is.
 
 What is not sent: none of the documents has a place for your character names, your account name,
@@ -350,7 +354,7 @@ the Run entry that starts the app at logon, "Start the helper now" at the end (o
 `LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
 running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
 tag) builds it on a Windows runner, installs it there for
-real (`installer/install_check.py`: the released 1.8.2, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
+real (`installer/install_check.py`: the released 1.8.3, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
 msiexec, a build one version up over that as this updater does, then removed), and puts it on
 the GitHub release beside the zips. The release then stays a draft, with every file on it, until
 the project publishes it by hand (`.github/workflows/publish.yml`, which checks the files first):

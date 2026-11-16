@@ -110,13 +110,13 @@ def test_the_first_run_finds_the_game_installs_the_addon_and_registers():
             p = app.first_run()
         addons = game / "_forever_" / "Interface" / "AddOns"
         assert (addons / "ForeverWowCraftScanner" / "ForeverWowCraftScanner.toc").exists()
-        assert (addons / "ForeverWowCraftPlans" / "Fresh.lua").exists()             # the freshness was fetched and written
+        assert (addons / "ForeverWowCraftPlans" / "Fresh.lua").exists()             # put there with the addon (no fetch at start since 1.8.4)
         assert app.status.game == game and app.status.name == "h-1" and p.name == "h-1"
         assert (settings.STATE / "identity.json").exists()                            # registered, and the token kept
         text = _log()
         assert "started; the state is in" in text and "Installed ForeverWowCraft Scanner" in text
         assert "routes not fetched:" in text                                           # the test pipe serves no site
-        assert "This helper sends as h-1 (public)." in text
+        assert "This helper sends as h-1." in text                                    # from registering; "(public)" by GET /v1/me until 1.8.4
         titles = [t for t, _ in app.tray.balloons]
         assert titles == ["Trouble"], titles                                          # the routes; nothing else needs the player
         assert app.tray.tips[-1].startswith("ForeverWowCraft Helper") and "as h-1" in app.tray.tips[-1]

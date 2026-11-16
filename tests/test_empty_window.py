@@ -22,6 +22,10 @@ BEFORE_THIS = "e46c0ab"             # main as this change found it: the addon wi
 RELEASE_1_7_7 = "3a89aab"          # the commit that made the version 1.7.7, in both addons
 ADDON_DIR = "helper/addon/ForeverWowCraftScanner/"
 STRIP = re.compile(r"\|c[0-9a-fA-F]{8}|\|r")
+# the options page's box of the price on item tooltips (1.8.4), as the window's text has it: not on an addon from before
+PRICE_BOX = ("Show the last known auction price on item tooltips\nHover an item to see the lowest price one was listed for at your auction "
+             "house, and what the stack under the mouse comes to, with how old the price is. No scan needed: the prices come with the routes "
+             "from the site.\n")
 HOUSES = [["uspve", "Alliance"], ["uspve", "Horde"], ["eupvp", "Horde"]]
 REALM = "CAMWOW US2 Realm 1 PvE"          # a character of this realm is of the house "uspve"; Horde, as the stand-in game says
 
@@ -464,7 +468,12 @@ def test_this_addon_given_a_plans_lua_of_1_7_7_shows_routes_as_before_and_with_n
             "Most switches here also have a command (type /fwcs for the list).",
             "Each switch here has a command too (/fwcs); this page is the same settings.").replace(     # and since the recipe colours (14 Nov 2026)
             "Only prices, the merchants and trainers you visit, and how the game rates your recipes are sent. Nothing names you or your characters.",
-            "Nothing of yours is sent: only prices and the merchants and trainers you visit.") \
+            "Nothing of yours is sent: only prices and the merchants and trainers you visit.").replace(     # and since skill-up routes alone use what is had (15 Nov 2026)
+            "On skill-up routes, where a next-best recipe costs you less with what is in your bags, bank and mail, the Make button, the "
+            "shopping list, the arrow and the /fwc window use it, and say so; what you hold is crafted first, with a vendor's goods "
+            "where needed. The profit route keeps its own recipes. /fwcs have is the same switch.",
+            "Where a next-best recipe of a stretch costs you less with what is in your bags, bank and mail, the Make button, the "
+            "shopping list, the arrow and the /fwc window use it, and say so. /fwcs have is the same switch.").replace(PRICE_BOX, "") \
             == _shown(_load(text_1_7_7, release=BEFORE_THIS))  # the same window as before, for a house it has
     state = _shown(_load(plans.plans_text([ELSEWHERE], "test", written=NOW), AT_USPVE))
     assert "Still empty? Check that the helper is running and up to date: its icon is by the clock." in state

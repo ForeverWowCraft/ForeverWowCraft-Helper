@@ -1046,7 +1046,11 @@ local function Fill(house, chosen)
 
   keys = Sorted(mine.make, function(item) return mine.make[item] end)
   if #keys > 0 then Head("Make on the way", "", "", "Units") end
-  for _, item in ipairs(keys) do Line(N(item), "", "", mine.make[item], "", item) end
+  for _, item in ipairs(keys) do
+    local how, c = mine.how[item], ns.Conversion(plan, item)        -- an enchanter's essence from the other kind: said so
+    local as = how and not how[3] and c and string.format("  |cff808080%s from %s|r", c[3] > c[2] and "split" or "combined", N(c[1])) or ""
+    Line(N(item) .. as, "", "", mine.make[item], "", item)
+  end
 
   local worth = plan.sell or {}
   local melt = {}

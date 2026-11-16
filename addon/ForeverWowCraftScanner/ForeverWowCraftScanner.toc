@@ -2,7 +2,7 @@
 ## Title: ForeverWowCraft Scanner
 ## Notes: /fwc: what your professions still need, less what you have. The Make button on the profession window crafts the route a step at a time, an arrow leads to what it needs, and a list buys it at the auction house. Save Prices at the auction house shares its prices.
 ## Author: ForeverWowCraft
-## Version: 1.8.3
+## Version: 1.8.4
 ## SavedVariables: FWCS_DB
 ## IconTexture: Interface\AddOns\ForeverWowCraftScanner\icon
 
@@ -22,3 +22,4 @@ Places.lua
 Shop.lua
 Verdict.lua
 Craft.lua
+Prices.lua

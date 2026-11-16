@@ -54,6 +54,13 @@ The site has, beside each auction house's pages, one document for the addon:
       recipe the route buys before this step. "buy" and "sell" of the plan are what the route
       pays and gets for one, on average: an estimate once fewer are bought or sold.
 
+      "convert" (since 1.8.4; an enchanting plan's, may be absent) is {"<item made>": [item used, units used,
+      units made, spell]}: an essence of one kind made from the other by using the item, both ways for every
+      essence the route uses (three Lesser Magic Essence into one Greater, one Greater into three Lesser). A
+      conversion the route makes is in "made" too, without a spell: it is no recipe of the profession's window.
+      The addon counts what is held of either kind against what a step needs and says when to split or combine.
+      One that is not usable is left out of the document (check_plans), the route kept.
+
 The addon reads Plans.lua, the same data as a Lua table (FWCS_PLANS[<key>]), at the next /reload
 or login, with FWCS_PLANS_WRITTEN = when the helper last wrote or touched it (the addon says,
 quietly, when the helper is not installed or has not run for days). It takes from a
@@ -91,6 +98,23 @@ text, no path). The next look that works (`write` or `touch`) removes it. With n
 look writes a minimal one (the comment lines, the stamp, `FWCS_PLANS = {}` and the problem), and the next look
 fetches all the same.
 
+The house's lowest prices (since 1.8.4). Beside ingame.json each house's folder has
+
+    <site>/data/<key>/prices.json     a fwc-prices/1 document (its entry in houses.json says "prices": true)
+
+    fwc-prices/1   {"format": "fwc-prices/1", "house": "<key>", "at": <time>, "generated": <time>,
+                    "prices": {"<item id>": the lowest unit price listed, ...},
+                    "seen": {"<item id>": when it was scanned, for an item scanned well before "at"}}
+
+the lowest single listing of every item the house's scans saw listed, for the addon's item tooltips. A file of its own, so that
+the routes do not hang on it: one that is not usable (larger than MAX_PRICE_BYTES, more than MAX_PRICE_ITEMS items, an id or a
+price that is not a whole number in bounds, another house's) is left out, said once in the log (`DROPPED`), and the routes
+are written all the same. It is written into Plans.lua as one more global, after FWCS_ROUTES and before FWCS_SITE,
+
+    FWCS_PRICES = {["<key>"] = {at = <time>, prices = {[item] = copper, ...}, seen = {[item] = <time>, ...}}, ...}
+
+which no earlier addon reads; with no price list the text is what it was before.
+
 Times are unix seconds, money is copper.
 """
 from __future__ import annotations
@@ -113,6 +137,12 @@ SITE_GLOBAL = "FWCS_SITE"         # the houses the site lists with routes for th
 PROBLEM_GLOBAL = "FWCS_PLANS_PROBLEM"      # there only while the last look failed (since 1.8.0)
 ROUTES_GLOBAL = "FWCS_ROUTES"     # the routes that are one for a whole faction, beside FWCS_PLANS (since 1.8.0): {"Alliance": a plan, ...}
 FISHING_FILE = "extra/cooking-fishing.ingame.json"      # in a house's folder on the site; its entry in houses.json says "fishing": true
+PRICES_FORMAT = "fwc-prices/1"
+PRICES_GLOBAL = "FWCS_PRICES"     # the houses' lowest prices, for the addon's item tooltips (since 1.8.4)
+PRICES_FILE = "prices.json"       # in a house's folder on the site; its entry in houses.json says "prices": true
+MAX_PRICE_BYTES = 2 * 1024 * 1024          # of a price list, unpacked: a house's is about 22 kB (15 Nov 2026)
+MAX_PRICE_ITEMS = 20000                    # items of a price list: a house lists under 2,000
+MAX_COPPER = 99_999_999_999                # a price: the most gold the game holds, 9,999,999g 99s 99c
 CHARS = "__chars"                 # in the addon's saved variable: what each character has
 UNASKED_HOUSES = 8                # with no character seen yet, every house is fetched when there are at most this many
 
@@ -147,8 +177,26 @@ def _pairs(rows, what: str) -> str | None:
     return None
 
 
+MAX_CONVERT_ROWS = 64             # a plan's "convert": ten essences make ten rows (15 Nov 2026)
+MAX_CONVERT_UNITS = 20            # units used or made by one conversion: a stack of essences is 20; the game's are 1 and 3
+
+
+def _convert_ok(convert, known) -> bool:
+    """Whether a plan's "convert" (since 1.8.4) is {item made: [item used, units used, units made, spell]} with ids the
+    document names, whole counts from 1 to MAX_CONVERT_UNITS, a spell id, and at most MAX_CONVERT_ROWS rows."""
+    if not isinstance(convert, dict) or len(convert) > MAX_CONVERT_ROWS:
+        return False
+    for made, row in convert.items():
+        if not (_digits(made) and known(int(made)) and isinstance(row, list) and len(row) == 4
+                and all(isinstance(x, int) and not isinstance(x, bool) for x in row) and known(row[0]) and row[0] != int(made)
+                and 1 <= row[1] <= MAX_CONVERT_UNITS and 1 <= row[2] <= MAX_CONVERT_UNITS and _digits(row[3])):
+            return False
+    return True
+
+
 def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guard per field of the site's document, which goes into the game as Lua, read top to bottom
-    """Why this is not a fwc-plans/1 document, or None when it is one."""
+    """Why this is not a fwc-plans/1 document, or None when it is one. A plan's "convert" that is not usable is
+    taken out of the document (_convert_ok), the routes kept."""
     if not isinstance(doc, dict) or doc.get("format") != PLANS_FORMAT:
         return f"not a {PLANS_FORMAT} document"
     if not isinstance(doc.get("house"), str) or not doc["house"]:
@@ -200,6 +248,10 @@ def check_plans(doc) -> str | None:  # noqa: C901, PLR0912 - validator: one guar
         for item, each in (plan.get("sell") or {}).items():
             if not (_digits(item) and isinstance(each, (int, float))):
                 return f"plan {key!r}: sell[{item}] is not copper"
+        # an enchanter's essence conversions: one that is not usable is left out, and the route with it, which
+        # stands without (the addon then counts each essence as it is, as before 1.8.4)
+        if "convert" in plan and not _convert_ok(plan["convert"], known):
+            del plan["convert"]
     return None
 
 
@@ -224,6 +276,30 @@ def check_route(plan) -> str | None:
     if not isinstance(notes, list) or any(not (isinstance(n, list) and len(n) in (2, 3) and isinstance(n[0], int) and isinstance(n[1], str)
                                                          and (len(n) == 2 or isinstance(n[2], str))) for n in notes):
         return "notes is not [[skill, text, kind], ...]"
+    return None
+
+
+def _int_in(x, low: int, high: int) -> bool:
+    """Whether x is a whole number (not a bool, not a float) from low to high."""
+    return isinstance(x, int) and not isinstance(x, bool) and low <= x <= high
+
+
+def check_prices(doc, key: str) -> str | None:
+    """Why this is not the fwc-prices/1 document of the house `key`, or None when it is: every id one to ten digits, every price a
+    whole number of copper from 1 to MAX_COPPER, at most MAX_PRICE_ITEMS of them, every time whole and not after "at"."""
+    if not isinstance(doc, dict) or doc.get("format") != PRICES_FORMAT:
+        return f"not a {PRICES_FORMAT} document"
+    if doc.get("house") != key:
+        return "another house's prices"
+    at, prices, seen = doc.get("at"), doc.get("prices"), doc.get("seen", {})
+    if not _int_in(at, 0, 2**32):
+        return "at is not a time"
+    if not isinstance(prices, dict) or len(prices) > MAX_PRICE_ITEMS:
+        return f"prices is not {{item id: copper}} of at most {MAX_PRICE_ITEMS} items"
+    if any(not _digits(k) or not _int_in(v, 1, MAX_COPPER) for k, v in prices.items()):
+        return f"prices is not {{item id: copper from 1 to {MAX_COPPER}}}"
+    if not isinstance(seen, dict) or any(k not in prices or not _int_in(v, 0, at) for k, v in seen.items()):
+        return "seen is not {item id of prices: a time not after at}"
     return None
 
 
@@ -359,9 +435,9 @@ def _no_constant(name: str):
     raise ValueError(f"{name} in the document")
 
 
-def get(url: str) -> dict:
-    """A JSON document from the site, of at most MAX_BYTES; what is read goes into the addon as
-    Lua, so only https is followed and nothing the game would take for code is let through
+def get(url: str, limit: int = MAX_BYTES) -> dict:
+    """A JSON document from the site, of at most `limit` bytes unpacked; what is read goes into the
+    addon as Lua, so only https is followed and nothing the game would take for code is let through
     (see `lua`)."""
     if not url.startswith("https://") and not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
         raise PlansError(f"{url}: only https is read")
@@ -369,15 +445,15 @@ def get(url: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": f"{settings.NAME}-helper/{__version__}", "Accept-Encoding": "gzip"})
     try:
         with urllib.request.urlopen(req, timeout=settings.PIPE_TIMEOUT) as r:
-            data = r.read(MAX_BYTES + 1)
+            data = r.read(limit + 1)
     except urllib.error.HTTPError as e:
         raise PlansError(f"{url}: {e.code}", "reach") from e
     except OSError as e:
         raise PlansError(f"{url} could not be reached ({e})", "reach") from e
     try:
         if data[:2] == b"\x1f\x8b":
-            data = gzip.GzipFile(fileobj=io.BytesIO(data)).read(MAX_BYTES + 1)      # unpacked only this far
-        if len(data) > MAX_BYTES:
+            data = gzip.GzipFile(fileobj=io.BytesIO(data)).read(limit + 1)      # unpacked only this far
+        if len(data) > limit:
             raise PlansError(f"{url} is too large ({len(data) // 1024} kB)", "reach")
         return json.loads(data.decode("utf-8"), parse_constant=_no_constant)
     except (OSError, ValueError, RecursionError) as e:          # RecursionError: JSON nested deeper than Python follows
@@ -408,7 +484,10 @@ def plans_every() -> int:
 
 
 def fresh_every() -> int:
-    """Seconds between the watch's looks at the pipe for when each house was last scanned."""
+    """Seconds between the watch's looks at the pipe for when each house was last scanned, as
+    helpers 1.7.2 to 1.8.3 use it. Still read (the site keeps saying it for them), but from
+    1.8.4 the watch makes no such look: it learns the same from the answer to each scan it
+    sends (fresh.learn)."""
     return INTERVALS.get("fresh_every", settings.FRESH_EVERY)
 
 
@@ -470,6 +549,34 @@ def routes_for(chosen: list[dict], site: str | None = None, have: dict | None = 
     return out
 
 
+DROPPED: list[str] = []            # the price lists the last look left out, and why: said once in the log (cli.plans)
+_refused: set[tuple[str, int]] = set()      # (house, when its data was made) of a price list left out: not asked for again until it changes
+
+
+def fetch_prices(house: dict, site: str | None = None) -> dict:
+    """A house's price list as the addon takes it: {"at", "prices", "seen"}, ids as numbers."""
+    doc = get(f"{site or site_url()}/data/{house['key']}/{PRICES_FILE}", MAX_PRICE_BYTES)
+    problem = check_prices(doc, house["key"])
+    if problem:
+        raise PlansError(f"{house['key']}: the prices are not usable: {problem}")
+    return {"at": doc["at"], "prices": {int(k): v for k, v in doc["prices"].items()},
+            "seen": {int(k): v for k, v in (doc.get("seen") or {}).items()}}
+
+
+def prices_for(chosen: list[dict], site: str | None = None) -> dict:
+    """{house: its price list} for the chosen houses whose entry in houses.json says "prices": true. One that cannot be read or
+    is not usable is left out, and said in DROPPED; the rest, and the routes, are written all the same."""
+    out = {}
+    for h in chosen:
+        if h.get("prices") is True:
+            try:
+                out[h["key"]] = fetch_prices(h, site)
+            except PlansError as e:
+                DROPPED.append(str(e))
+                _refused.add((h["key"], _whole(h.get("generated"))))
+    return out
+
+
 # ---- Plans.lua ------------------------------------------------------------------------------------
 def lua(value, indent: int = 0) -> str:
     """A JSON-like value as a Lua literal, for the game to load: every string is a quoted
@@ -525,15 +632,17 @@ def problem_line(kind: str, at: int | None = None) -> str:
     return f"{PROBLEM_GLOBAL} = {{ at = {int(at if at is not None else time.time())}, kind = {lua(kind)} }}"
 
 
-def plans_text(docs: list[dict], site: str, written: int | None = None, routes: dict | None = None,
-               site_houses: list[list[str]] | None = None) -> str:
+def plans_text(docs: list[dict], site: str, written: int | None = None, routes: dict | None = None,  # noqa: PLR0913 - one argument a global of the file
+               site_houses: list[list[str]] | None = None, prices: dict | None = None) -> str:
     """Plans.lua for these documents: the routes, and when they were written (the addon tells
     from it whether the helper runs). Nothing else: until 1.5.6 a helper run from a checkout
     of the repository added FWCS_DEV = true, which showed the addon's scanner bar, and a copy
     of that file in front of a player showed it to them (6 Nov 2026). The bar is a switch in
     the game now, nothing a file says. `routes` ({faction: the fishing route}) is written as a second global
     after the first, and `site_houses` (`site_list`) as FWCS_SITE after that; with neither the text is what it
-    was before 1.8.0, byte for byte, and with either everything up to the new global is that text."""
+    was before 1.8.0, byte for byte, and with either everything up to the new global is that text. `prices`
+    ({house: its price list}, `prices_for`) is FWCS_PRICES, after FWCS_ROUTES and before FWCS_SITE, and only
+    when there is one: the text before it is unchanged."""
     now = int(written if written is not None else time.time())
     return "\n".join([
         f"-- Written by `python fwch.py plans` from {site}; do not edit by hand.",
@@ -541,6 +650,7 @@ def plans_text(docs: list[dict], site: str, written: int | None = None, routes: 
         f"{PLANS_GLOBAL}_WRITTEN = {now}",
         f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs}),
         *([f"{ROUTES_GLOBAL} = " + lua(routes)] if routes else []),
+        *([f"{PRICES_GLOBAL} = " + lua(prices)] if prices else []),
         *([site_line(site_houses, now)] if site_houses is not None else []), ""])
 
 
@@ -561,21 +671,32 @@ def held(path: Path | None = None) -> tuple[dict[str, int], dict]:
     """({house: when its routes were made}, {faction: the fishing route}) of a Plans.lua (the kept one by default).
     A file is read again only once it has changed: every line of the app's log asks (the tooltip), and a read
     of a large Plans.lua took half a second."""
-    path = path or kept_file()
+    found = _read_held(path or kept_file())
+    return dict(found[0]), dict(found[1])
+
+
+def priced(path: Path | None = None) -> set[str]:
+    """The houses a Plans.lua (the kept one by default) holds a price list of (FWCS_PRICES, since 1.8.4)."""
+    return set(_read_held(path or kept_file())[2])
+
+
+def _read_held(path: Path) -> tuple[dict, dict, set]:
+    """(stamps, fishing routes, houses with a price list) of a Plans.lua, read again only once it has changed."""
     version = scan.file_version(path)
     memo = _held_memo.get(str(path))
     if version is not None and memo and memo[0] == version:
-        return dict(memo[1][0]), dict(memo[1][1])
+        return memo[1]
     try:
         data = luatable.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
-        return {}, {}
-    plans, routes = data.get(PLANS_GLOBAL) or {}, data.get(ROUTES_GLOBAL) or {}
+        return {}, {}, set()
+    plans, routes, prices = data.get(PLANS_GLOBAL) or {}, data.get(ROUTES_GLOBAL) or {}, data.get(PRICES_GLOBAL) or {}
     found = ({str(k): int(v.get("generated") or 0) for k, v in plans.items() if isinstance(v, dict)} if isinstance(plans, dict) else {},
-             {str(k): v for k, v in routes.items() if isinstance(v, dict)} if isinstance(routes, dict) else {})
+             {str(k): v for k, v in routes.items() if isinstance(v, dict)} if isinstance(routes, dict) else {},
+             {str(k) for k, v in prices.items() if isinstance(v, dict)} if isinstance(prices, dict) else set())
     if version is not None:
         _held_memo[str(path)] = (version, found)
-    return dict(found[0]), dict(found[1])
+    return found
 
 
 def stamps(path: Path | None = None) -> dict[str, int]:
@@ -583,9 +704,10 @@ def stamps(path: Path | None = None) -> dict[str, int]:
     return held(path)[0]
 
 
-def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: list[list[str]] | None = None) -> list[Path]:
+def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: list[list[str]] | None = None,
+          prices: dict | None = None) -> list[Path]:
     """Write Plans.lua: the helper's own copy, and the installed addon's when it is installed."""
-    text = plans_text(docs, site, routes=routes, site_houses=site_houses)
+    text = plans_text(docs, site, routes=routes, site_houses=site_houses, prices=prices)
     targets = [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else [])
     for t in targets:
         scan.write_whole(t, text)
@@ -657,8 +779,11 @@ def _refresh(site: str, force: bool) -> tuple[list[dict], list[Path]]:
     current = {h["key"]: _whole(h.get("generated")) for h in chosen}
     missing = installed_file().parent.is_dir() and not installed_file().exists()
     wants = {h.get("faction") for h in chosen if h.get("fishing") is True} & set(FACTIONS)      # a faction's fishing route the kept file lacks (written by an older helper)
+    # a house's price list the kept file lacks (written by an older helper), unless this one left it out of the same data
+    lacks = {h["key"] for h in chosen if h.get("prices") is True and (h["key"], current[h["key"]]) not in _refused} - priced()
     seen = site_list(listed)
-    if not force and not missing and current == have and wants <= set(kept_routes):
+    DROPPED.clear()
+    if not force and not missing and current == have and wants <= set(kept_routes) and not lacks:
         touch(seen)                                     # the addon still sees that the helper runs, and which houses the site lists
         return [], []
     docs = [fetch(h, site) for h in chosen]
@@ -667,7 +792,7 @@ def _refresh(site: str, force: bool) -> tuple[list[dict], list[Path]]:
         mine = by_rule(h, want)                         # a realm of the house by its name: into the list the addon finds its house by
         if mine:
             d["realms"] = sorted({*(d.get("realms") or []), *mine})
-    return docs, write(docs, site, routes_for(chosen, site, kept_routes), seen)
+    return docs, write(docs, site, routes_for(chosen, site, kept_routes), seen, prices_for(chosen, site))
 
 
 def age(doc: dict) -> str:

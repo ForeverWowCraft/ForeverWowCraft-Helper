@@ -43,11 +43,14 @@ SPELL_SOUP, SPELL_CAKE, SPELL_LIZARD, SPELL_KABOB = 3372, 3377, 6500, 2549
 STRIP = re.compile(r"\|c[0-9a-fA-F]{8}|\|r")
 
 
-def cooking_doc() -> dict:
+def cooking_doc(focus="skill") -> dict:
     """The test document with a cooking route 100 to 135: kabobs, then the soup with the cake its next-best, then a lizard tail
     stretch that takes Hot Spices too. Legs are dear at the house (10s), so the soup stays the stretch's choice for its whole run
-    whatever the bags hold (9 cakes' 9 legs to buy cost more than 16 fins)."""
+    whatever the bags hold (9 cakes' 9 legs to buy cost more than 16 fins). A skill-up route ("skill"), where the bags come first;
+    "profit" makes it the profit route, which follows its own recipes (15 Nov 2026)."""
     doc = copy.deepcopy(document())
+    doc["variants"] = [["trainer", "Skill-up" if focus == "skill" else "Profit", "plans", focus]]
+    doc["focus"] = [["profit", "Profit"], ["skill", "Skill-up"]]
     cake = {"recipe": "Gooey Spider Cake", "spell": SPELL_CAKE, "uses": [[LEG, 2], [SPICES, 1]], "makes": [CAKE, 1], "per": [1] * 9,
             "crafts": 9, "at": [110, 130, 150, 170], "cpp": 2020, "buy": [LEG, SPICES], "craft": []}
     steps = [
@@ -420,23 +423,25 @@ def test_only_orange_and_yellow_known_recipes_orange_first_and_none_cooling_down
     assert panel_verdict(lua)["text"] == "Buy the recipe for Clam Chowder first"
     lua.execute(f"colour[{SPELL_SOUP}] = 0; colour[{SPELL_CAKE}] = 0; cooldown[{SPELL_CAKE}] = 3600; ns.HaveChanged()")
     assert panel_verdict(lua)["text"] == "Make 3 Murloc Fin Soup"                   # the cake cooling down: passed over
-    held(lua, bags={FIN: 9}, skill=120)                                                # a transmute, by its name, never (the soup lacks spices)
-    assert panel_verdict(lua)["text"] == "Buy the recipe for Clam Chowder first"
+    held(lua, bags={FIN: 9}, skill=120)                                                # a transmute, by its name, never: the soup's spices from a vendor instead (15 Nov 2026)
+    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor"
     lua.execute(f'names[{SPELL_TRANSMUTE}] = "Fin Thing"; ns.HaveChanged()')        # named otherwise, it would be made
     assert panel_verdict(lua)["text"] == "Make 9 Fin Thing"
     lua.execute(f"GetSpellBaseCooldown = function(id) return id == {SPELL_TRANSMUTE} and 3600000 or 0, 0 end; ns.HaveChanged()")
-    assert panel_verdict(lua)["text"] == "Buy the recipe for Clam Chowder first"   # unless the client says it has a cooldown at all
+    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor"          # unless the client says it has a cooldown at all
 
 
-def test_a_known_recipe_that_burns_what_the_route_needs_is_passed_over():
-    """Clam Meat (the stretch's own, bought at the house) and Raptor Eggs (the omelets', later) are held back; the Hot Spices are not."""
+def test_a_known_recipe_that_takes_what_the_route_needs_is_made_now():
+    """Clam Meat (the stretch's own, bought at the house) and Raptor Eggs (the omelets', later): held back until 15 Nov 2026, used at
+    once since (what is had is used now, and bought again later if a stretch still needs it). Clam Thing and Egg Thing, both orange,
+    10 crafts each: by name, Clam Thing first."""
     if lupa is None:
         return
     lua = panel_game()
     held(lua, bags={CLAM: 10, EGG: 10, SPICES: 10}, skill=120)
-    assert panel_verdict(lua)["text"] == "Buy the recipe for Clam Chowder first"
-    held(lua, bags={CLAM: 10, EGG: 10, SPICES: 10, FIN: 2}, skill=120)
-    assert panel_verdict(lua)["text"] == "Make 1 Murloc Fin Soup"
+    assert panel_verdict(lua)["text"] == "Make 10 Clam Thing"
+    held(lua, bags={EGG: 10, SPICES: 10}, skill=120)
+    assert panel_verdict(lua)["text"] == "Make 10 Egg Thing"
 
 
 def test_the_box_off_keeps_known_recipes_off_the_route_out():

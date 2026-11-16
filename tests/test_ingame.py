@@ -132,9 +132,9 @@ end
 '''
 
 
-def _game(doc=None, saved=None, routes=None):
+def _game(doc=None, saved=None, routes=None, prices=None):
     """A Lua with the stand-in game and the addon loaded as the .toc says, the character logged in.
-    `saved`: Lua run before the files, as the saved file the game reads in."""
+    `saved`: Lua run before the files, as the saved file the game reads in; `prices`: the price lists Plans.lua holds."""
     lua = lupa.LuaRuntime()
     lua.execute(GAME)
     if saved:
@@ -142,11 +142,11 @@ def _game(doc=None, saved=None, routes=None):
     toc = (ADDON / "ForeverWowCraftScanner.toc").read_text(encoding="utf-8")
     files = [line.strip() for line in toc.splitlines() if line.strip().endswith(".lua")]
     assert files == ["Queue.lua", "Plans.lua", "Fresh.lua", "ForeverWowCraftScanner.lua", "Tailor.lua", "Inventory.lua", "Widgets.lua", "Window.lua",
-                     "Background.lua", "Remind.lua", "Panel.lua", "Seed.lua", "Places.lua", "Shop.lua", "Verdict.lua", "Craft.lua"]
+                     "Background.lua", "Remind.lua", "Panel.lua", "Seed.lua", "Places.lua", "Shop.lua", "Verdict.lua", "Craft.lua", "Prices.lua"]
     for name in files:
         if name == "Queue.lua":
             continue                                    # the stand-in has a short one
-        source = plans.plans_text([doc or document()], "test", routes=routes) if name == "Plans.lua" else (ADDON / name).read_text(encoding="utf-8")
+        source = plans.plans_text([doc or document()], "test", routes=routes, prices=prices) if name == "Plans.lua" else (ADDON / name).read_text(encoding="utf-8")
         lua.globals().Load(name, source)
     lua.execute('Fire("PLAYER_LOGIN"); Fire("PLAYER_ENTERING_WORLD", true); RunTimers()')
     return lua
@@ -571,24 +571,26 @@ def test_the_scanner_in_the_background():
     assert not lua.eval("ns.scanner.BarHidden()") and not lua.eval("ns.scanner.AutoScanEnabled()")
     lua.execute("FWCS_DB.__ui.hidden = nil")
     # the options page registered the old way (the stub has no Settings API)
-    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 13
+    assert lua.eval("ns.options.name") == "ForeverWowCraft" and lua.eval("#ns.options.boxes") == 14
     assert lua.eval("registered_panel == ns.options")
     # every setting is on the page: the switches, by their getters and setters
     lua.execute("ns.options:refresh()")
-    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 14)]
+    labels = [lua.eval(f"ns.options.boxes[{i}].label.text") for i in range(1, 15)]
     assert labels[3] == "The telemetry panel under the bar" and labels[5] == "The arrow to what the Make button needs"
     assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level"
     assert labels[10] == "Use what I already have first" and labels[11] == "A reminder to reload, every hour" and labels[12] == "Cooking: Fishing only"
+    assert labels[13] == "Show the last known auction price on item tooltips"
     # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
-    # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), what I have first (10 Nov), reminder
+    # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), what I have first (10 Nov), reminder,
+    # (fishing only off), the price on item tooltips (15 Nov)
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 14)] == [True, True, False, False, False, True, True, True, True, True, True, True, False]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 15)] == [True, True, False, False, False, True, True, True, True, True, True, True, False, True]
     # the Settings window's own hooks: OnRefresh reads the boxes again (OnShow never fired for a frame made at load,
     # and every box showed unticked after an update, 7 Nov 2026); OnDefault puts the shipped defaults back
     lua.execute("FWCS_DB.__ui = { auto = false, alts = false, log = true, remind = false, levelRoutes = false, haveFirst = false }; ns.options:OnRefresh()")
     assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in (1, 4, 9, 10, 11, 12)] == [False, True, False, False, False, False]
     lua.execute("ns.options:OnDefault()")
-    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 14)] == [True, True, False, False, False, True, True, True, True, True, True, True, False]
+    assert [lua.eval(f"ns.options.boxes[{i}].get()") for i in range(1, 15)] == [True, True, False, False, False, True, True, True, True, True, True, True, False, True]
     assert lua.eval("FWCS_DB.__ui.haveFirst") is None
     # "Use what I already have first": the box and /fwcs have are one switch
     lua.execute("local b = ns.options.boxes[11]; b.GetChecked = function() return false end; b.scripts.OnClick(b)")
@@ -2454,9 +2456,10 @@ def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_s
     lua.execute('UnitLevel = function() return 40 end; Fire("PLAYER_LEVEL_UP")')
     assert text() == "Make 7 Linen Belt"
     lua.execute('UnitLevel = function() return 45 end; Fire("PLAYER_LEVEL_UP")')
-    # the bags hold 7 belts' worth, a recipe the planner listed for the stretch: made first, the shirt's scroll the arrow's
-    # note (test_bags_first.py); with the bolts gone, the scroll first, as ever
-    assert text() == "Make 7 Linen Belt" and strip(lua.eval("ForeverWowCraftMake.verdict.aside.text")) == "Then buy the recipe for White Linen Shirt"
+    # the bags hold 7 belts' worth, a recipe the planner listed for the stretch: on this profit route (the document's two-part
+    # variants) the shirt's own scroll first all the same, as the profit route keeps its own recipes (15 Nov 2026; a skill-up
+    # route makes the belts first: test_bags_first.py)
+    assert text() == "Buy the recipe for White Linen Shirt first" and lua.eval("ForeverWowCraftMake.verdict.aside") is None
     lua.execute('bags[0] = { { 2320, 20 } }; Fire("BAG_UPDATE_DELAYED")')
     assert text() == "Buy the recipe for White Linen Shirt first"
     lua.execute('bags[0] = { { 2996, 40 }, { 2320, 20 } }; Fire("BAG_UPDATE_DELAYED")')
@@ -2478,9 +2481,13 @@ def test_a_recipe_the_character_cannot_learn_yet_gives_way_to_the_next_best_or_s
 WOOL, BELT, CAPE = 2592, 4309, 2570
 
 
-def _owned_doc():
-    """The document with a next-best for the shirts and the vests that takes Wool Cloth (40c at the house)."""
+def _owned_doc(focus="skill"):
+    """The document with a next-best for the shirts and the vests that takes Wool Cloth (40c at the house). Its tailoring route is
+    a skill-up one ("skill"), where what the character has chooses among a stretch's recipes; "profit" makes it the profit route,
+    which keeps its own recipes (15 Nov 2026)."""
     doc = document()
+    doc["variants"] = [["trainer", "Skill-up" if focus == "skill" else "Profit", "plans", focus]]
+    doc["focus"] = [["profit", "Profit"], ["skill", "Skill-up"]]
     plan = doc["plans"]["tailoring-trainer"]
     plan["buy"][str(WOOL)] = [40, "ah"]
     plan["steps"][1]["alt"] = [{"recipe": "Linen Belt", "spell": 3915, "uses": [[WOOL, 3], [THREAD, 1]], "makes": [BELT, 1], "per": [1] * 10,
@@ -2584,6 +2591,42 @@ def test_what_the_character_has_chooses_among_the_stretchs_recipes():
     assert route(2) == "Linen Belt" and lua.eval("ns.haveWalks") == walks             # the last answer stands in the fight
     lua.execute('InCombatLockdown = function() return false end; Fire("PLAYER_REGEN_ENABLED")')
     assert route(2) == "White Linen Shirt" and lua.eval("ns.haveWalks") == walks + 1
+
+
+def test_the_profit_route_keeps_its_own_recipes_whatever_is_had():
+    """15 Nov 2026: the profit route is the site's for the most profit, sell-backs counted, and follows its own recipes. The same
+    21 wool that make the belts stand in on the skill-up route change nothing on the profit route: the shirts, in the Make button,
+    the arrow, the shopping list and the /fwc window alike; what the bags hold of the shirts' own reagents is still taken off."""
+    lua = _game(_owned_doc("profit"))
+    lua.execute('''
+      learned = { [2963] = true, [2393] = true, [2385] = true, [3915] = true, [3916] = true }
+      C_TradeSkillUI = {
+        GetBaseProfessionInfo = function() return { professionID = 197, professionName = "Tailoring", skillLevel = skill } end,
+        GetRecipeInfo = function(id) return { recipeID = id, learned = learned[id] or false } end,
+        GetRecipeRequirements = function() return {} end, CraftRecipe = function() end, StopRecipeRepeat = function() end,
+      }
+      ProfessionsFrame = { CraftingPage = { CreateAllButton = CreateFrame("Button") } }
+      UnitLevel = function() return 30 end
+      skill = 44; bags[0] = { { 2320, 20 }, { 2592, 21 } }; money = 100000
+      Fire("TRADE_SKILL_SHOW")
+    ''')
+    strip = lambda s: re.sub(r"\|c[0-9a-fA-F]{8}|\|r", "", s or "")  # noqa: E731
+    plain = 'FWCS_PLANS["stonespine--horde"].plans["tailoring-trainer"]'
+    assert lua.eval(f'ns.RouteFor("tailoring") == {plain}') and lua.eval('ns.RouteFor("tailoring").steps[2].recipe') == "White Linen Shirt"
+    v = lua.eval("ForeverWowCraftMake.verdict")
+    assert strip(v.text) == "Buy from a vendor (1) and the auction house (1)" and v.using is None, strip(v.text)
+    assert not any("Linen Belt" in strip(t) for t in v.tip.values())
+    shopping = lua.eval("ns.craft.Shopping()")
+    assert strip(shopping.title) == "White Linen Shirt, skill 44 to 51, needs"
+    lua.execute("ns.ToggleWindow()")
+    shown = strip(lua.globals().AllText())
+    assert "instead of White Linen Shirt" not in shown and "White Linen Shirt" in shown
+    # the 20 thread in the bags are the shirts' own: off the list (only the bleach and the cloth to buy)
+    assert sorted(shopping[i].item for i in range(1, len(shopping) + 1)) == sorted([CLOTH, DYE])
+    # the same document on the skill-up route: the belts
+    lua = _game(_owned_doc("skill"))
+    lua.execute("UnitLevel = function() return 30 end; skill = 44; bags[0] = { { 2320, 20 }, { 2592, 21 } }; Fire('BAG_UPDATE_DELAYED')")
+    assert lua.eval('ns.RouteFor("tailoring").steps[2].recipe') == "Linen Belt"
 
 
 def test_the_arrow_says_what_to_do_where_it_points_then_what_of_yours_it_uses():

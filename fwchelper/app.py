@@ -6,8 +6,8 @@ nothing to answer.
                                   on the Mac, ForeverWowCraft Helper.app)
 
 At start it finds the game (and asks for the folder, through the icon's menu, when it cannot),
-installs the addon, fetches the lists and the routes, and then sends every scan the addon
-saves, as `send --watch` does. What it prints goes to the log in the state folder
+installs the addon, fetches the lists (once a day at most) and the routes, and then sends
+every scan the addon saves, as `send --watch` does. What it prints goes to the log in the state folder
 (settings.STATE). The icon's tooltip says how things stand; a balloon comes only for what
 needs the player (tray.balloon), each once a day at most. One instance runs at a time.
 
@@ -51,7 +51,7 @@ class App:
         if line.startswith("sent "):
             self.status.last_sent = int(time.time())
         elif line.startswith("This helper sends as "):
-            self.status.name = line.split("as ", 1)[1].split(" ", 1)[0]
+            self.status.name = line.split("as ", 1)[1].split(" ", 1)[0].rstrip(".")      # "h-abc (public)." until 1.8.4, "h-abc." since
         said = tray.balloon(line)
         if said:
             title, text = said
@@ -166,7 +166,13 @@ class App:
         print(f"game: {self.status.game}")
         self.install()
         p = pipemod.Pipe()                               # the one pipe for the run: it registers once, at its first word
-        for what, step in (("lists", lambda: cli.lists(p)), ("routes", lambda: cli.plans(quiet=True)), ("freshness", lambda: cli.freshen(p, quiet=True))):
+        # the name this helper sends as, from identity.json (Pipe() read it); no request to the pipe (GET /v1/me until 1.8.4)
+        named = p.name
+        if named:
+            print(f"This helper sends as {named}.")
+        # the lists once a day at most (cli.daily_lists); no look at when each house was last scanned: the watch learns that
+        # from the answers to the scans it sends (until 1.8.4 a start asked GET /v1/fresh, and the watch at once again)
+        for what, step in (("lists", lambda: cli.daily_lists(p)), ("routes", lambda: cli.plans(quiet=True))):
             if self.stop.is_set():
                 break
             try:
@@ -175,13 +181,8 @@ class App:
                 print(f"{what} not fetched: {e}")
             except Exception as e:  # noqa: BLE001 - a document nobody foresaw: said, and the watch tries again at its interval
                 cli.failed(what, e)
-        try:
-            me = p.me()
-            print(f"This helper sends as {me['name']} ({me['trust']}).")
-        except pipemod.PipeError as e:
-            print(f"the pipe could not be reached: {e}")
-        except Exception as e:  # noqa: BLE001 - an answer nobody foresaw must not keep the watch from starting
-            cli.failed("the look at this helper's name", e)
+        if p.name and p.name != named:                   # registered just now, at the lists' first word
+            print(f"This helper sends as {p.name}.")
         self.refresh()
         return p
 

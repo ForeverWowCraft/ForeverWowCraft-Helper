@@ -207,8 +207,9 @@ local function BuildOptions()
       function() return saved().levelRoutes ~= false end,
       function(v) saved().levelRoutes = v; if ns.RefreshWindow then ns.RefreshWindow() end; if ns.RoutePicked then ns.RoutePicked() end end),
     CheckBox(page, Next(54), "Use what I already have first",
-      "Where a next-best recipe of a stretch costs you less with what is in your bags, bank and mail, the Make button, the "
-      .. "shopping list, the arrow and the /fwc window use it, and say so. /fwcs have is the same switch.",
+      "On skill-up routes, where a next-best recipe costs you less with what is in your bags, bank and mail, the Make button, the "
+      .. "shopping list, the arrow and the /fwc window use it, and say so; what you hold is crafted first, with a vendor's goods "
+      .. "where needed. The profit route keeps its own recipes. /fwcs have is the same switch.",
       function() return saved().haveFirst ~= false end,
       function(v) ns.HaveCommand(v and "on" or "off", true) end),
     CheckBox(page, Next(76), "A reminder to reload, every hour",
@@ -222,6 +223,10 @@ local function BuildOptions()
       .. "Where the fish are caught is the Classic-era world's data. Kept for this character; it needs the route from the site.",
       function() return ns.FishingOn and ns.FishingOn() or false end,
       function(v) if ns.FishingCommand then ns.FishingCommand(v and "on" or "off", true) end end),
+    CheckBox(page, Next(54), "Show the last known auction price on item tooltips",
+      "Hover an item to see the lowest price one was listed for at your auction house, and what the stack under the mouse "
+      .. "comes to, with how old the price is. No scan needed: the prices come with the routes from the site.",
+      function() return saved().tipPrice ~= false end, function(v) saved().tipPrice = v end),
   }
   -- where the prices are kept: told from where the character stands, unless said here
   local where = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -273,7 +278,7 @@ local function BuildOptions()
   panel.OnCommit = function() end
   panel.OnDefault = function(self)                 -- the Settings window's Defaults button: the shipped defaults again
     local s = saved()
-    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "haveFirst", "remind" }) do s[key] = nil end
+    for _, key in ipairs({ "auto", "alert", "hidden", "log", "ding", "arrow", "arrowKeep", "shop", "alts", "levelRoutes", "haveFirst", "remind", "tipPrice" }) do s[key] = nil end
     if ns.FishingCommand then ns.FishingCommand("off", true) end         -- this character's, not the account's: the same shipped default
     self:refresh()
     Scanner().Refresh()

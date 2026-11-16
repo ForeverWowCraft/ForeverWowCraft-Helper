@@ -175,7 +175,8 @@ def test_the_watch_goes_on_after_bad_documents():
     ticks, running, log, kept = _scenario(json.dumps(document()), [_house(faction=["Horde"])])
     _ok(ticks, running, log)
     assert "failed:" not in log and "FWCS_PLANS_WRITTEN" in kept
-    # the pipe's freshness with a time that is not a number
+    # the pipe's freshness with a time that is not a number (the watch asks for it no more since 1.8.4:
+    # test_fresh_answer.py has the answers to a sent scan that are not what they should be)
     ticks, running, log, kept = _scenario(json.dumps(document()), [_house()], pipe_service=_bad_fresh)
     _ok(ticks, running, log)
     assert "failed:" not in log
@@ -191,7 +192,7 @@ def test_any_error_in_a_step_is_said_and_the_watch_goes_on():
     finally:
         plans.refresh, fresh.write, cli.send_vendors_once = kept
     _ok(ticks, running, log)
-    for what in ("routes", "freshness", "vendors"):
+    for what in ("routes", "vendors"):     # and "freshness" until 1.8.4, when the watch asked for it by itself
         assert f"{what} failed: RuntimeError: nobody foresaw this" in log, log
     assert "Traceback" in log
 
@@ -205,8 +206,8 @@ def test_the_first_run_goes_on_after_any_error_in_a_step():
 
     def boom(*a, **k):
         raise RuntimeError("nobody foresaw this")
-    kept = cli.lists, cli.plans, cli.freshen, cli.startup_dir
-    cli.lists, cli.plans, cli.freshen = boom, boom, boom
+    kept = cli.lists, cli.plans, cli.startup_dir
+    cli.lists, cli.plans = boom, boom
     cli.startup_dir = lambda: Path(tempfile.mkdtemp())
     try:
         from test_app import FakeWin, _app
@@ -214,11 +215,13 @@ def test_the_first_run_goes_on_after_any_error_in_a_step():
         with contextlib.redirect_stdout(app.log):
             p = app.first_run()
         text = (settings.STATE / "helper.log").read_text(encoding="utf-8")
-        assert p is not None and "This helper sends as h-1" in text
-        for what in ("lists", "routes", "freshness"):
+        # since 1.8.4 the start asks no name of the pipe (GET /v1/me) and no freshness: with the lists failed before
+        # they registered, no name is known yet and none is said (until 1.8.4: "This helper sends as h-1 (public).")
+        assert p is not None and "This helper sends as" not in text and not Service.seen
+        for what in ("lists", "routes"):
             assert f"{what} failed: RuntimeError: nobody foresaw this" in text
     finally:
-        cli.lists, cli.plans, cli.freshen, cli.startup_dir = kept
+        cli.lists, cli.plans, cli.startup_dir = kept
         back()
         srv.shutdown()
 

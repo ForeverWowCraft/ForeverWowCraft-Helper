@@ -155,6 +155,19 @@ local function In(list, item)
   return false
 end
 
+-- ================================================================ an enchanter's essences
+-- A plan's "convert" (since 1.8.4; plans.py) = { [item made] = { item used, units used, units
+-- made, spell } }: a Lesser Magic Essence and a Greater one are each other, three to one, by
+-- using the item (the client's tables, read by the site). Both ways are there for every essence
+-- the route uses. A conversion the route makes is in "made" too, without a spell: it is no
+-- recipe of the profession's window. The row for `item`, or nil (a document from before, or an
+-- item that does not convert: nothing changes then)
+function ns.Conversion(plan, item)
+  local c = plan and plan.convert and plan.convert[item]
+  if type(c) == "table" and type(c[1]) == "number" and (tonumber(c[2]) or 0) > 0 and (tonumber(c[3]) or 0) > 0 then return c end
+  return nil
+end
+
 -- crafts of a step still to do at `skill`, up to `upto` (the route's end when not given): all
 -- of them when the step lies within, none when it lies outside, else the points in between
 function ns.CraftsLeft(step, skill, upto)
@@ -174,6 +187,26 @@ function ns.Tailor(plan, skill, have, upto)
   local out = { from = skill, to = upto, steps = {}, buy = {}, make = {}, how = {}, used = {}, sell = {}, learn = {}, blocked = {}, tools = {},
                 spent = 0, sold = 0, crafts = 0, unpriced = 0, fish = 0 }
 
+  -- an essence the step needs, from the other kind the character holds (plan.convert), in whole
+  -- items: a Greater one makes three Lesser, three Lesser make one Greater; what one makes beyond
+  -- the need waits for the next step. Before anything is made or bought, on the profit route as on
+  -- skill-up routes: it is the route's own reagent, held in another form, and changes no recipe
+  -- (the pure-profit rule is about not swapping recipes; this is in the class of held reagents
+  -- taken off what a step buys). Returns what is still needed
+  local function FromOtherKind(item, need)
+    local c = ns.Conversion(plan, item)
+    if not c then return need end
+    local times = math.min(math.floor((own[c[1]] or 0) / c[2]), math.ceil(need / c[3]))
+    if times <= 0 then return need end
+    own[c[1]] = own[c[1]] - times * c[2]
+    out.used[c[1]] = (out.used[c[1]] or 0) + times * c[2]
+    local made = times * c[3]
+    out.make[item] = (out.make[item] or 0) + made
+    out.how[item] = { c[3], { { c[1], c[2] } } }        -- no spell: the use of an item, not a recipe
+    if made > need then stock[item] = (stock[item] or 0) + made - need end
+    return math.max(0, need - made)
+  end
+
   local function Get(item, need, step, depth)
     local take = math.min(own[item] or 0, need)
     if take > 0 then
@@ -186,6 +219,7 @@ function ns.Tailor(plan, skill, have, upto)
       stock[item] = stock[item] - take
       need = need - take
     end
+    if need > 0 then need = FromOtherKind(item, need) end
     if need <= 0 then return end
     local how
     if In(step.craft, item) then
@@ -340,8 +374,8 @@ function ns.Effective(plan)
 end
 
 -- ================================================================ the route with what the character has
--- "Use what I already have first" (Interface > AddOns, /fwcs have; on by default). For each
--- stretch of the route still ahead, the route's recipe and its next-best (step.alt, up to two)
+-- "Use what I already have first" (Interface > AddOns, /fwcs have; on by default), on a skill-up
+-- route (ns.SkillUp; the profit route is left as planned). For each stretch of the route still ahead, the route's recipe and its next-best (step.alt, up to two)
 -- are priced for THIS character: what each still has to buy at the route's prices, less what
 -- the route counts its products as worth, a skill point, with what the character owns counted
 -- as free. The cheapest stands in for the route's recipe, which keeps its place on a tie or a
@@ -366,6 +400,23 @@ end
 -- them (the /fwc window still takes them off its list, as before).
 -- Cost: at most three recipes a stretch, a few reagents each, priced twice (with and without
 -- what is owned): some hundreds of table look-ups for a route, once per change, not per frame.
+-- Skill-up routes only (15 Nov 2026): the profit route is the site's for the most profit,
+-- sell-backs counted, and follows its own recipes and stretches exactly; what the character holds
+-- of a step's own reagents is still taken off what the step buys (ns.Tailor, the bank and mail
+-- trips), which changes no recipe. A skill-up route is one whose variant's focus is "skill" (the
+-- document's variants, { key, label, recipes, focus }), or the fishing route, which sells
+-- nothing; a document from before focus existed (two-part variants) has the profit routes alone.
+-- The site writes the four parts on every house since 7 Oct 2026 (houseplan.py)
+function ns.SkillUp(plan, house)
+  if not plan then return false end
+  if plan.kind == "fishing" then return true end
+  house = house or (ns.inv and ns.inv.House and ns.inv.House())
+  for _, v in ipairs(house and house.variants or {}) do
+    if v[1] == plan.variant then return v[4] == "skill" end
+  end
+  return false
+end
+
 local HAVE_TIE_POINT, HAVE_TIE_SHARE = 10, 0.05
 local haveGen = 0                                   -- moved on by every change that could change the answer
 local haveCache = setmetatable({}, { __mode = "k" })
@@ -485,6 +536,7 @@ end
 function ns.UseWhatIHave(plan, skill)
   if not plan or not plan.steps then return plan end
   if ns.Settings and ns.Settings().haveFirst == false then return plan end
+  if not ns.SkillUp(plan) then return plan end           -- the profit route: its own recipes, whatever is had
   skill = skill or plan.start or 1
   local level = UnitLevel and UnitLevel("player") or nil
   local hit = haveCache[plan]
@@ -558,7 +610,8 @@ end
 -- UseWhatIHave). Never one the character's level cannot learn, a next-best of this stretch
 -- learned above its start, or one the planner's numbers say gives no point at `skill`; nothing
 -- at all for a stretch whose product a later one uses (bolts for the bags), nor with "Use what I
--- already have first" off (the route's own recipes, whatever is had).
+-- already have first" off, nor on the profit route (ns.SkillUp: the route's own recipes, whatever
+-- is had).
 --
 -- Each comes as { rec, chance = function(skill) -> 0..1 or nil, here = true for this stretch's }.
 -- The chance a craft gives a point: the planner's own `per` (crafts a point, its skill-up model)
@@ -580,6 +633,7 @@ end
 function ns.StandIns(plan, skill)
   if not plan or not plan.steps then return nil end
   if ns.Settings and ns.Settings().haveFirst == false then return nil end
+  if not ns.SkillUp(plan) then return nil end            -- the profit route: no stand-in, no recipe off the route
   local i, step
   for k, s in ipairs(plan.steps) do               -- the stretch ns.NextCraft serves
     local left = s.blocked and ((s.to > skill) and 1 or 0) or ns.CraftsLeft(s, skill)
@@ -652,7 +706,7 @@ function ns.HaveCommand(arg, quiet)
   if on then s.haveFirst = nil else s.haveFirst = false end
   haveGen = haveGen + 1
   if not quiet and ns.Print then
-    ns.Print(on and "what you already have comes first: a next-best recipe that costs you less with it stands in for the route's (/fwcs have off)"
+    ns.Print(on and "what you already have comes first on skill-up routes: a next-best recipe that costs you less with it stands in for the route's (/fwcs have off)"
       or "the route's own recipes, whatever you have (/fwcs have on)")
   end
   if ns.RefreshWindow then ns.RefreshWindow() end

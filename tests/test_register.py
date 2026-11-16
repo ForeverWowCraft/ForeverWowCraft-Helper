@@ -1,4 +1,5 @@
 """A helper that was given nothing registers itself, and keeps what it was given."""
+import collections
 import contextlib
 import http.server
 import io
@@ -23,6 +24,8 @@ class Service(http.server.BaseHTTPRequestHandler):
     registering = True
     newest = 1789999500        # the newest scan of Stonespine (Horde) the pipe holds
     fresh_for = 0              # seconds a scan stays fresh for the 409: 0 takes every scan
+    counts: collections.Counter = collections.Counter()      # requests by path, the query left out
+    scan_reply = None          # (status, body) to answer POST /v1/scans with instead, for answers no pipe should give
 
     def log_message(self, *a):
         pass
@@ -42,6 +45,7 @@ class Service(http.server.BaseHTTPRequestHandler):
         token = (self.headers.get("Authorization") or "").replace("Bearer ", "")
         name = cls.tokens.get(token)
         cls.seen.append((self.command, self.path, name))
+        cls.counts[self.path.split("?", 1)[0]] += 1
         if self.path == "/v1/fresh":
             return self.answer(200, {"generated": 1790000500, "fresh": 600, "houses": {"Stonespine|Horde": {"newest": cls.newest}}})
         if self.path == "/v1/register":
@@ -54,6 +58,8 @@ class Service(http.server.BaseHTTPRequestHandler):
             return self.answer(401, {"error": "a token is needed"})
         if self.path == "/v1/me":
             return self.answer(200, {"name": name, "trust": "public"})
+        if self.path == "/v1/scans" and cls.scan_reply is not None:
+            return self.answer(*cls.scan_reply)
         if self.path == "/v1/scans" and cls.too_soon:
             return self.answer(429, {"error": "one scan of an auction house every 300 seconds; the next in 240"}, [("Retry-After", "240")])
         if self.path == "/v1/scans" and cls.fresh_for:
@@ -68,6 +74,7 @@ class Service(http.server.BaseHTTPRequestHandler):
 
 def _service():
     Service.tokens, Service.seen, Service.too_soon, Service.registering = {}, [], False, True
+    Service.counts, Service.scan_reply = collections.Counter(), None
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Service)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv, f"http://127.0.0.1:{srv.server_address[1]}"
