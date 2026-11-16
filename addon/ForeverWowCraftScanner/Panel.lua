@@ -104,20 +104,24 @@ local function Paint(row, spell)
     row.fwcText:SetJustifyH("RIGHT")
     row:HookScript("OnEnter", Tip)
     row:HookScript("OnLeave", function() Untip(row) end)
-    -- the number has a mouse of its own where the client lets a frame pass clicks and motion
-    -- on to the row under it (12 Oct 2026: on the newest panel the row's own OnEnter was not
-    -- seen to bring the tooltip; the row still selects and highlights)
-    if type(row.SetPropagateMouseClicks) == "function" then
-      local hit = CreateFrame("Frame", nil, row)
-      hit:SetPoint("TOPLEFT", row.fwcText, "TOPLEFT", -2, 2)
-      hit:SetPoint("BOTTOMRIGHT", row.fwcText, "BOTTOMRIGHT", 2, -2)
-      hit:EnableMouse(true)
-      hit:SetPropagateMouseClicks(true)
-      if hit.SetPropagateMouseMotion then hit:SetPropagateMouseMotion(true) end
-      hit:SetScript("OnEnter", function() Tip(row) end)
-      hit:SetScript("OnLeave", function() Untip(row) end)
-      row.fwcHit = hit
-    end
+  end
+  -- the number has a mouse of its own where the client lets a frame pass clicks and motion
+  -- on to the row under it (12 Oct 2026: on the newest panel the row's own OnEnter was not
+  -- seen to bring the tooltip; the row still selects and highlights). Made out of combat only
+  -- (16 Nov 2026): the client refuses SetPropagateMouseClicks and SetPropagateMouseMotion from an
+  -- addon in combat lockdown, one chat line a row; in a fight the row has its own OnEnter, and
+  -- the frame is made at a later paint (PLAYER_REGEN_ENABLED paints what is shown again)
+  if not rawget(row, "fwcHit") and type(row.SetPropagateMouseClicks) == "function"
+      and not (InCombatLockdown and InCombatLockdown()) then
+    local hit = CreateFrame("Frame", nil, row)
+    hit:SetPoint("TOPLEFT", row.fwcText, "TOPLEFT", -2, 2)
+    hit:SetPoint("BOTTOMRIGHT", row.fwcText, "BOTTOMRIGHT", 2, -2)
+    hit:EnableMouse(true)
+    hit:SetPropagateMouseClicks(true)
+    if hit.SetPropagateMouseMotion then hit:SetPropagateMouseMotion(true) end
+    hit:SetScript("OnEnter", function() Tip(row) end)
+    hit:SetScript("OnLeave", function() Untip(row) end)
+    row.fwcHit = hit
   end
   row.fwcSpell = spell
   row.fwcText:SetText(spell and Text((Margin(spell))) or "")
@@ -196,7 +200,8 @@ local function Hook()
   end
 end
 
-for _, event in ipairs({ "ADDON_LOADED", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE" }) do pcall(panel.RegisterEvent, panel, event) end
+-- PLAYER_REGEN_ENABLED (16 Nov 2026): combat over, the rows painted in it get the frame they were refused
+for _, event in ipairs({ "ADDON_LOADED", "TRADE_SKILL_SHOW", "TRADE_SKILL_LIST_UPDATE", "TRADE_SKILL_UPDATE", "PLAYER_REGEN_ENABLED" }) do pcall(panel.RegisterEvent, panel, event) end
 panel:SetScript("OnEvent", function(_, event, name)
   if event == "ADDON_LOADED" and name ~= "Blizzard_Professions" and name ~= "Blizzard_TradeSkillUI" then return end
   Hook()

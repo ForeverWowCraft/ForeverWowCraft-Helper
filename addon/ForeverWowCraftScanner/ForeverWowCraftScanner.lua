@@ -294,7 +294,7 @@ end
 -- arrived on this client (account-wide, wall-clock, so it holds across characters and logins).
 -- A request nothing came of means a cooldown is running that this client did not see start
 -- (another PC, or before the addon was installed): lastFullRefused holds it, and the button
--- stays off until 15 minutes after it at the latest (no shift-click past it since 1.6.23: the user).
+-- stays off until 15 minutes after it at the latest (no shift-click past it since 1.6.23).
 local function FullCooldownLeft()
   local s = Settings()
   local since = math.max(s.lastFull or 0, s.lastFullRefused or 0)

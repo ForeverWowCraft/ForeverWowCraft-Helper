@@ -580,7 +580,7 @@ def test_the_scanner_in_the_background():
     assert labels[8] == "Count other characters' bags and banks" and labels[9] == "Routes for my level"
     assert labels[10] == "Use what I already have first" and labels[11] == "A reminder to reload, every hour" and labels[12] == "Cooking: Fishing only"
     assert labels[13] == "Show the last known auction price on item tooltips"
-    # the shipped defaults, top to bottom, are the user's page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
+    # the shipped defaults, top to bottom, are the page of 7 Nov 2026: auto scan, save sound, (bar off), (telemetry off),
     # (ready sound off), arrow, arrow kept, shopping list, other characters, routes for my level (8 Nov), what I have first (10 Nov), reminder,
     # (fishing only off), the price on item tooltips (15 Nov)
     lua.execute("FWCS_DB.__ui = {}; ns.options:refresh()")
@@ -2920,6 +2920,49 @@ def test_a_recipe_scroll_in_the_bank_is_taken_from_it():
     assert text() == "Take Pattern: Brown Linen Vest from the bank" and lua.eval("ForeverWowCraftMake.verdict.place") is None
     assert lua.eval("ForeverWowCraftMake.verdict.learn") == 2385 and "In your bank (as counted when it was last open):" in tip()
     assert not any(e["recipe"] for e in lua.eval("ns.craft.Shopping()").values() if lupa.lua_type(e) == "table")
+
+
+def test_the_profession_list_makes_no_mouse_frame_in_combat():
+    """The client refuses SetPropagateMouseClicks and SetPropagateMouseMotion from an addon in combat lockdown (one chat
+    line a row). In a fight a row is painted without its hit frame and neither is called; when combat ends the rows
+    shown are painted again and get it (1.8.5)."""
+    doc = document()
+    doc["recipes"] = {"2963": [60, 70, 90, 0.5, 50]}
+    lua = _game(doc)
+    lua.execute('''
+      calls = 0
+      local made = CreateFrame
+      function CreateFrame(...)
+        local f = made(...)
+        f.SetPropagateMouseClicks = function() calls = calls + 1; if combat then error("ADDON_ACTION_BLOCKED") end end
+        f.SetPropagateMouseMotion = function() calls = calls + 1; if combat then error("ADDON_ACTION_BLOCKED") end end
+        return f
+      end
+      combat = true
+      function InCombatLockdown() return combat end
+      ScrollBoxListViewMixin = { Event = { OnInitializedFrame = "OnInitializedFrame" } }
+      ScrollBoxListMixin = { Event = { OnUpdate = "OnUpdate" } }
+      local box, view = CreateFrame("Frame"), { callbacks = {} }
+      function view:RegisterCallback(event, fn, owner) self.callbacks[event] = fn end
+      box.callbacks = {}
+      function box:GetView() return view end
+      function box:RegisterCallback(event, fn, owner) self.callbacks[event] = fn end
+      row = CreateFrame("Button")
+      box.frames = { { row, { recipeInfo = { recipeID = 2963 } } } }
+      function box:ForEachFrame(fn) for _, f in ipairs(self.frames) do fn(f[1], f[2]) end end
+      ProfessionsFrame = { CraftingPage = { RecipeList = { ScrollBox = box } } }
+      calls = 0
+      Fire("ADDON_LOADED", "Blizzard_Professions")
+      view.callbacks.OnInitializedFrame(nil, row, box.frames[1][2])
+    ''')
+    assert lua.eval("row.fwcText.text") == "|cff40ff40+30c|r"                 # painted all the same
+    assert lua.eval("calls") == 0 and lua.eval("rawget(row, 'fwcHit')") is None
+    lua.execute("combat = false; Fire('PLAYER_REGEN_ENABLED')")
+    assert lua.eval("rawget(row, 'fwcHit') ~= nil") and lua.eval("calls") == 2
+    lua.execute("row.fwcHit.scripts.OnEnter()")
+    assert lua.eval("rawget(GameTooltip, 'fwcFor') == row")
+    lua.execute("Fire('PLAYER_REGEN_ENABLED')")                                    # painted again: not made twice
+    assert lua.eval("calls") == 2
 
 
 if __name__ == "__main__":
