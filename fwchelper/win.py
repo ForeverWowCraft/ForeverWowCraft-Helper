@@ -311,8 +311,9 @@ def quiet_update(installer: Path, log: Path) -> bool:
 def game_running() -> bool:
     """Whether a World of Warcraft client runs (its process is Wow..., whatever the flavour)."""
     try:
-        out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, timeout=20,
+        out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, timeout=20,
                              creationflags=subprocess.CREATE_NO_WINDOW).stdout      # no console window of its own (it showed one before)
+        out = out.decode("utf-8", errors="replace")      # bytes, decoded leniently: a German Windows answers in code page 850 and text=True failed on it
     except (OSError, subprocess.SubprocessError):
         return False
     return any(line.lower().startswith('"wow') for line in out.splitlines())

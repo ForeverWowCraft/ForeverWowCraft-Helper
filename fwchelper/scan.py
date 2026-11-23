@@ -10,7 +10,8 @@ Oct 2026); a dataset of it left from before is passed over.
 
 WHAT IS READ HERE, AND WHY (everything the addon gathers: docs/scanner-addon.md, "What the addon
 gathers"): of the addon's saved file, the auction ladders and their history (load_scan), the
-realm names (FWCS_DB.__realms, __groups), the merchants, trainers and recipe scrolls the player
+realm names (FWCS_DB.__realms, __groups) and the realm ids paired with them (__realmids,
+__realmids_inferred: sent with a scan of that realm), the merchants, trainers and recipe scrolls the player
 met (vendors, trainers, recipes), and the recipe colours (FWCS_DB.__colours: by spell, the skills
 each learned recipe showed each colour at, no character in it: colours). pipe.py says which of it is sent and where. The characters'
 own table (FWCS_DB.__chars: what each has) is read by plans.py to know which houses' routes to
@@ -107,6 +108,12 @@ class ScanData:
     # the realms the account has characters on; connected: the group, when the realm is in one.
     realm_names: dict[str, str] = field(default_factory=dict)
     connected: list[str] = field(default_factory=list)
+    # The realm's id (the number in a character's GUID) as the addon paired it with this realm's
+    # name (FWCS_DB.__realmids, since the game stopped naming realms on 20 Nov 2026), and whether
+    # the pair was worked out from the one realm the account knew (__realmids_inferred) rather
+    # than given by the game. None when the file pairs no id (or two) with the realm.
+    realm_id: int | None = None
+    realm_id_inferred: bool = False
 
     @property
     def dataset(self) -> str:
@@ -246,6 +253,27 @@ def wow_dir() -> Path:
     return configured
 
 
+def game_root(picked: Path) -> Path | None:
+    """The World of Warcraft folder (the one that holds the client folder, _forever_) for a folder the player picked,
+    or None when it is none of these: the game's folder itself, the client folder, or a folder inside the client
+    folder (WTF, Interface, Interface/AddOns, ...), or the folder just above the game's (it holds a World of Warcraft
+    folder that has the client folder). Players picked _forever_ itself, and the helper then looked for
+    _forever_/_forever_ and saw no scans."""
+    wanted = flavor().lower()
+    try:
+        for p in [picked, *picked.parents][:8]:
+            if p.name.lower() == wanted and p.is_dir():
+                return p.parent
+            if (p / flavor()).is_dir():
+                return p
+        for child in sorted(picked.iterdir()):                 # one level down: the folder that holds the game's
+            if child.is_dir() and (child / flavor()).is_dir():
+                return child
+    except OSError:
+        pass
+    return None
+
+
 def flavors_present() -> list[str]:
     """Client folders (_retail_, _classic_era_, ...) that exist under the WoW folder."""
     base = wow_dir()
@@ -304,6 +332,93 @@ def _datasets(db: dict) -> dict[str, dict]:
 
 def _newest(table: dict) -> int:
     return max((int(rec.get("t") or 0) for iid, rec in table.items() if isinstance(iid, int) and isinstance(rec, dict)), default=0)
+
+
+# ---- which realm, while the game names none ------------------------------------------------------
+# Since a hotfix on 20 Nov 2026 Forever's client names no realm, and an addon before 1.8.6 kept
+# what it scanned then as "|<faction>" and the characters with realm "". The addon of 1.8.6 knows
+# the realm again by other means (ForeverWowCraftScanner.lua, RealmName) and files those under it
+# at the next login; until it has, such a dataset is sent only when the file says with certainty
+# whose it is (attributed_realm), never on a guess: a scan under the wrong house is everyone's
+# wrong price.
+def _named(x) -> str | None:
+    return x if isinstance(x, str) and x.strip() and x != "?" else None
+
+
+def _short(name: str) -> str:
+    """A realm's name as the addon's ShortName spells it: without spaces, hyphens or apostrophes."""
+    return re.sub(r"[\s\-']", "", name)
+
+
+def realm_ids(db: dict) -> tuple[dict[int, str], dict[int, str]]:
+    """The realm ids the addon paired with names: ({id: name} the game gave, {id: name} worked out
+    from the one realm the account knew)."""
+    def read(t) -> dict[int, str]:
+        rows = enumerate(t, 1) if isinstance(t, list) else t.items() if isinstance(t, dict) else []
+        return {k: v for k, v in rows if isinstance(k, int) and not isinstance(k, bool) and k > 0 and _named(v)}
+    return read(db.get("__realmids")), read(db.get("__realmids_inferred"))
+
+
+def house_of(db: dict, name: str) -> str:
+    """The key a realm's scans are kept under by what the file saved: its connected group's, else
+    its name without spaces. Two realms of one key are one auction house."""
+    short = _short(name)
+    groups = db.get("__groups") if isinstance(db.get("__groups"), dict) else {}
+    for key, group in groups.items():
+        if isinstance(group, list) and short in group:
+            return str(key)
+    return short
+
+
+def known_realms(db: dict) -> dict[str, str]:
+    """{house key: a name of it as shown} of every realm the saved file names: its characters',
+    __realms, its datasets' keys and the realm ids' names."""
+    found: dict[str, str] = {}
+    names = db.get("__realms") if isinstance(db.get("__realms"), dict) else {}
+    chars = db.get("__chars") if isinstance(db.get("__chars"), dict) else {}
+    real, inferred = realm_ids(db)
+    every = [c.get("realm") for c in chars.values() if isinstance(c, dict)] + list(names.values()) + list(real.values()) + list(inferred.values())
+    every += [names.get(split_key(k)[0], split_key(k)[0]) for k in _datasets(db)]
+    for name in every:
+        if _named(name):
+            found.setdefault(house_of(db, name), name)
+    return found
+
+
+def attributed_realm(db: dict) -> str | None:
+    """The realm a dataset saved with no realm is of, when the file says so with certainty; else
+    None. Certain: the addon has paired realm ids (the file is of addon 1.8.6 or later), every
+    name and id in the file is of one realm, and every character saved with no realm is the
+    namesake (same name and faction) of one saved under that realm, so no character of another
+    realm can have made the scan. As the addon keys it: the connected group's key, else the name."""
+    real, inferred = realm_ids(db)
+    known = known_realms(db)
+    if not (real or inferred) or len(known) != 1 or len(set(real) | set(inferred)) > 1:
+        return None
+    house, name = next(iter(known.items()))
+    chars = [c for c in (db.get("__chars") or {}).values() if isinstance(c, dict)] if isinstance(db.get("__chars"), dict) else []
+    for c in chars:
+        if _named(c.get("realm")):
+            continue
+        if not any(o.get("name") == c.get("name") and o.get("faction") == c.get("faction") and _named(o.get("realm"))
+                   and house_of(db, o["realm"]) == house for o in chars):
+            return None
+    groups = db.get("__groups") if isinstance(db.get("__groups"), dict) else {}
+    return house if house in groups else name
+
+
+def realm_id_of(db: dict, realm: str) -> tuple[int | None, bool]:
+    """The id the addon paired with this realm (a dataset's realm, or its group's key), and
+    whether the pair was inferred: (None, False) when it paired none, or two."""
+    house = house_of(db, realm)
+    real, inferred = realm_ids(db)
+    for table, guessed in ((real, False), (inferred, True)):
+        ids = [i for i, n in table.items() if house_of(db, n) == house]
+        if len(ids) == 1:
+            return ids[0], guessed
+        if ids:
+            return None, False
+    return None, False
 
 
 def saved_db(path: Path | None = None) -> dict:
@@ -431,9 +546,11 @@ def datasets(path: Path | None = None) -> list[tuple[str, str, int, int]]:
     return sorted(out, key=lambda d: (-d[3], -d[2]))
 
 
-def load_scan(path: Path | None = None, realm: str | None = None, faction: str | None = None) -> ScanData:  # noqa: C901 - baseline 9 Nov 2026, to be split
+def load_scan(path: Path | None = None, realm: str | None = None, faction: str | None = None,  # noqa: C901 - baseline 9 Nov 2026, to be split
+              as_realm: str | None = None) -> ScanData:
     """Parse the addon's SavedVariables file (newest one found when `path` is None). Of the
-    datasets it holds, the one of `realm` and `faction`; left open, the most recently scanned."""
+    datasets it holds, the one of `realm` and `faction`; left open, the most recently scanned.
+    `as_realm`: the realm a dataset saved with no realm is of (attributed_realm), for it alone."""
     faction = faction_named(faction)
     if path is None:
         found = find_saved_variables()
@@ -476,10 +593,13 @@ def load_scan(path: Path | None = None, realm: str | None = None, faction: str |
             extra={k: rec[k] for k in ("reason", "attempts", "assumed", "full") if k in rec},
             left=[b for _, _, b in rows] if any(b for _, _, b in rows) else [],
         )
+    if not realm and as_realm:
+        realm = as_realm
     names = {k: v for k, v in (saved.get("__realms") or {}).items() if isinstance(k, str) and isinstance(v, str)}
     group = (saved.get("__groups") or {}).get(realm)
+    realm_id, inferred = realm_id_of(saved, realm) if realm else (None, False)
     return ScanData(items=items, realm=realm, path=path, history=history, faction=faction, realm_names=names,
-                    connected=[str(g) for g in group] if isinstance(group, list) else [])
+                    connected=[str(g) for g in group] if isinstance(group, list) else [], realm_id=realm_id, realm_id_inferred=inferred)
 
 
 def age_text(scanned_at: int) -> str:

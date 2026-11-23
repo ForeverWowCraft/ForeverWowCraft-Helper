@@ -338,6 +338,26 @@ def characters(path: Path | None = None) -> list[dict]:
     return sorted(out, key=lambda c: -c["t"])
 
 
+def no_realm_wanted(path: Path, chars: list[dict]) -> set[tuple[str, str]]:
+    """The realms a character saved with no realm (the game named none, 20 Nov 2026, and an addon
+    before 1.8.6 kept it so) may be on, by what the file still knows: its namesakes' (the same name
+    and faction, saved under a realm), the one realm the file knows when it knows one, and the
+    realms the addon paired with ids. Fetching a house too many costs a fetch; forgetting the
+    player's house left /fwc empty. {(realm, faction)}, the realm both spelt and as shown."""
+    lost = [c for c in chars if not c["realm"] and c["faction"] in ("Alliance", "Horde")]
+    if not lost:
+        return set()
+    db = scan.saved_db(path)
+    real, inferred = scan.realm_ids(db)
+    known = scan.known_realms(db)
+    out = set()
+    for c in lost:
+        realms = {o["realm"] for o in chars if o["realm"] and o["name"] == c["name"] and o["faction"] == c["faction"]}
+        realms |= set(real.values()) | set(inferred.values()) | (set(known.values()) if len(known) == 1 else set())
+        out |= {(r, c["faction"]) for r in realms} | {(spelt(r), c["faction"]) for r in realms}
+    return out
+
+
 _wanted_memo: dict[Path, tuple[tuple, set]] = {}     # path -> ((size, mtime), what it gave): the file is big and read often
 
 
@@ -359,9 +379,11 @@ def wanted(paths: list[Path] | None = None) -> set[tuple[str, str]]:
             out |= held[1]
             continue
         found = set()
-        for c in characters(path):
+        chars = characters(path)
+        for c in chars:
             found |= {(spelt(r), c["faction"]) for r in (c["realm"], c["house"]) if r}
             found |= {(c["realm"], c["faction"])} if c["realm"] else set()
+        found |= no_realm_wanted(path, chars)
         try:
             found |= {(s, f) for r, f, _, _ in scan.datasets(path) for s in (spelt(r), r)}
         except (OSError, SyntaxError):

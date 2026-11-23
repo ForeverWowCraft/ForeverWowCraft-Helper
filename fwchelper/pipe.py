@@ -120,6 +120,13 @@ def scan_document(sd: ScanData) -> dict:
         doc["realm_names"] = dict(sd.realm_names)
     if sd.connected:
         doc["connected"] = list(sd.connected)
+    # the realm's id as the addon paired it with this realm (since 1.8.6): the pipe keeps a
+    # scan's document whole and refuses no field it does not read (worker.js, readScan), and
+    # `mark` leaves it out, so a scan sent before is not sent again for it
+    if sd.realm_id is not None:
+        doc["realm_id"] = int(sd.realm_id)
+        if sd.realm_id_inferred:
+            doc["realm_id_inferred"] = True
     return doc
 
 

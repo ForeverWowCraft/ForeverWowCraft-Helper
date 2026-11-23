@@ -83,6 +83,18 @@ class App:
         """Whether the helper starts at login."""
         return self.win.startup_on()
 
+    def set_game_folder(self, folder: Path) -> None:
+        """Keep the folder the player picked, as the game's folder (the one that holds _forever_), wherever in it they
+        pointed; a folder with no Forever game is kept as picked, and said so."""
+        root = scan.game_root(folder)
+        if root is None:                                # none of them: the first run says "Game not found" next
+            print(f"No Forever game found in {folder}: it has no {scan.flavor()} folder, and is not inside one.")
+            root = folder
+        self.win.set_user_setting("FWC_WOW_DIR", str(root))
+        print(f"game folder set to {root}")
+        self.folder_chosen.set()
+        self.wake.set()
+
     def chosen(self, ident: int) -> None:  # noqa: C901 - menu dispatch: one branch per tray menu row
         """A menu row was picked (on the icon's thread)."""
         if ident == tray.SEND:
@@ -94,10 +106,7 @@ class App:
         elif ident == tray.FOLDER:
             folder = self.win.browse_folder("The World of Warcraft folder: the one that holds the client folder (_forever_)")
             if folder:
-                self.win.set_user_setting("FWC_WOW_DIR", str(folder))
-                print(f"game folder set to {folder}")
-                self.folder_chosen.set()
-                self.wake.set()
+                self.set_game_folder(Path(folder))
         elif ident == tray.LOG:
             self.win.open_path(self.log.path)
         elif ident == tray.STARTUP:

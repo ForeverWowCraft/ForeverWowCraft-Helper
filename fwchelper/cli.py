@@ -26,6 +26,7 @@ by the auction house, nothing else); and new versions of itself.
 """
 from __future__ import annotations
 import argparse
+import csv
 import json
 import os
 import subprocess
@@ -156,29 +157,59 @@ class Refused(pipemod.PipeError):
         self.errors = errors
 
 
+_no_realm_said: set[str] = set()       # the factions whose scans with no realm were said not sent, in this run
+
+
+def _no_realm(faction: str) -> None:
+    """A dataset the addon saved while the game named no realm, that the file cannot say the
+    realm of: not sent (the pipe refuses it, "no realm", and a send of it was tried again for
+    ever), not a failure, and said once a run."""
+    if faction in _no_realm_said:
+        return
+    _no_realm_said.add(faction)
+    print(f"not sent, {faction or 'unknown'} scans saved while the game named no realm: the addon files them under "
+          "the realm at a later login, once it knows it.")
+
+
+def _send_each(p: pipemod.Pipe, file: Path, held: list, again: bool, fresh: dict | None) -> bool:
+    """Each auction house of a file on its own (send_once): one the service refuses does not
+    hold the others back, and is raised after them (Refused). One saved with no realm goes under
+    the realm the file is certain of, or is not sent and is no refusal."""
+    whose = scan.attributed_realm(scan.saved_db(file)) if any(not r for r, _, _, _ in held) else None
+    done, refused = False, []
+    for r, f, _, _ in held:
+        if not r and not whose:
+            _no_realm(f)
+            continue
+        try:
+            done = send_once(p, file, r, f or "unknown", again, fresh, as_realm=None if r else whose) or done
+        except pipemod.PipeError as e:
+            print(f"not sent, {scan.dataset_name(r or whose or '', f)}: {e}")
+            refused.append(e)
+    if refused:
+        raise Refused(refused)
+    return done
+
+
 def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = None, faction: str | None = None,  # noqa: C901 - baseline 9 Nov 2026, to be split
-              again: bool = False, fresh: dict | None = None) -> bool:
+              again: bool = False, fresh: dict | None = None, as_realm: str | None = None) -> bool:
     """Send what the scan file holds and was not sent already: every auction house in it, or
     the one of `realm` and `faction`. `fresh` is what the helper last learned of the houses
     (fwchelper/fresh.py: the watch gives fresh.known(), its own Fresh.lua): a scan the pipe would
     refuse as not needed by that is not sent; without it the scan is sent, and the pipe's 409
     decides. What the pipe answers a sent scan (taken, or not needed and the newest it holds) is
-    noted in Fresh.lua (fresh.learn). Returns whether anything was sent."""
+    noted in Fresh.lua (fresh.learn). Returns whether anything was sent. A dataset saved with no
+    realm (the game named none, 20 Nov 2026) is sent only under the realm the file says with
+    certainty (scan.attributed_realm, `as_realm`), else left for the addon to file."""
     if realm is None and faction is None:
         file = path or (scan.find_saved_variables() or [None])[0]
         held = scan.datasets(file) if file and file.suffix == ".lua" else []
-        if len(held) > 1:               # each on its own: one the service refuses does not hold the others back
-            done, refused = False, []
-            for r, f, _, _ in held:
-                try:
-                    done = send_once(p, file, r, f or "unknown", again, fresh) or done
-                except pipemod.PipeError as e:
-                    print(f"not sent, {scan.dataset_name(r, f)}: {e}")
-                    refused.append(e)
-            if refused:
-                raise Refused(refused)
-            return done
-    sd = scan.load_scan(path, realm, faction)
+        if len(held) > 1 or any(not r for r, _, _, _ in held):
+            return _send_each(p, file, held, again, fresh)
+    if realm == "" and not as_realm:
+        _no_realm(scan.faction_named(faction) or "")
+        return False
+    sd = scan.load_scan(path, realm, faction, as_realm=as_realm)
     doc = pipemod.scan_document(sd)
     if not doc["items"]:
         print("nothing to send: the scan file holds no finished items")
@@ -186,13 +217,15 @@ def send_once(p: pipemod.Pipe, path: Path | None = None, realm: str | None = Non
     packed = pipemod.pack(doc)
     mark = pipemod.mark(doc)
     sent = json.loads(_sent_file().read_text(encoding="utf-8")) if _sent_file().exists() else {}
-    if sent.get(sd.dataset) == mark and not again:
+    # a dataset saved with no realm is noted apart from the realm's own: both are sent once
+    said_as = sd.dataset + (" [saved with no realm]" if realm == "" else "")
+    if sent.get(said_as) == mark and not again:
         print(f"already sent: {sd.dataset}, scanned {scan.age_text(doc['scanned_at'])}")
         return False
 
     def noted() -> None:
         settings.STATE.mkdir(parents=True, exist_ok=True)
-        sent[sd.dataset] = mark
+        sent[said_as] = mark
         _sent_file().write_text(json.dumps(sent), encoding="utf-8")
 
     # the freshness gate: the value of a scan is the auction house's, so one the pipe holds a
@@ -235,9 +268,14 @@ def _running(pid: int) -> bool:
     if os.name == "nt":                                   # os.kill(pid, 0) would end it on Windows
         # CREATE_NO_WINDOW: run from the windowless helper, a console program opens a black window of its own
         # otherwise, seen for a moment at every start
-        out = subprocess.run(["tasklist", "/fi", f"PID eq {pid}", "/nh", "/fo", "csv"], capture_output=True, text=True,
+        # The output is read as bytes and decoded leniently: on a German Windows it is in the OEM code page (850), and
+        # text=True (UTF-8 or the ANSI page) raised UnicodeDecodeError on an umlaut, so the helper did not start. The
+        # answer is read by its CSV field (the image name, then the pid), never by the localized message, so
+        # "INFORMATION: Es werden keine Aufgaben ausgeführt..." is just a line without that pid.
+        out = subprocess.run(["tasklist", "/fi", f"PID eq {pid}", "/nh", "/fo", "csv"], capture_output=True,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
-        return f'"{pid}"' in out
+        return any(len(row) > 1 and row[1].strip() == str(pid)
+                   for row in csv.reader(out.decode("utf-8", errors="replace").splitlines()))
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

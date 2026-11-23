@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fwchelper import app as appmod, cli, settings, tray  # noqa: E402
+from fwchelper import app as appmod, cli, scan, settings, tray  # noqa: E402
 from test_register import _fresh_pc, _service  # noqa: E402
 
 
@@ -533,6 +533,34 @@ def test_a_chore_that_fails_is_said_and_the_watch_goes_on():
     finally:
         update.latest, update.download = kept
         back()
+
+
+def test_the_game_folder_is_found_from_the_folder_the_player_picks():
+    """Players picked _forever_ itself, or a folder in it, and the helper saw no scans: every shape maps to the game's
+    folder (the one that holds _forever_); a folder with no Forever game in it is told so."""
+    game = _game()
+    client = game / "_forever_"
+    shapes = [game, client, client / "WTF", client / "WTF" / "Account", client / "Interface", client / "Interface" / "AddOns",
+              game.parent]
+    kept = os.environ.pop("FWC_WOW_FLAVOR", None)
+    try:
+        for shape in shapes:
+            assert scan.game_root(shape) == game, shape
+        elsewhere = Path(tempfile.mkdtemp()) / "Games"
+        elsewhere.mkdir()
+        assert scan.game_root(elsewhere) is None and scan.game_root(elsewhere / "missing") is None
+        # through the menu, which Windows and the Mac both use: the stored folder is the game's
+        for picked, stored in [(client, game), (client / "Interface" / "AddOns", game), (game, game), (elsewhere, elsewhere)]:
+            win = FakeWin(folder=picked)
+            app = _app(win)
+            with contextlib.redirect_stdout(app.log):
+                app.chosen(tray.FOLDER)
+            assert win.settings == {"FWC_WOW_DIR": str(stored)}, (picked, win.settings)
+            if stored == elsewhere:
+                assert "No Forever game found in" in _log() and "no _forever_ folder" in _log()
+    finally:
+        if kept is not None:
+            os.environ["FWC_WOW_FLAVOR"] = kept
 
 
 if __name__ == "__main__":

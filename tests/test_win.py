@@ -65,7 +65,7 @@ def test_the_console_programs_the_helper_runs_open_no_window():
     calls = []
 
     class Done:
-        stdout = '"Wow.exe","1","Console","1","100 K"' + chr(10)
+        stdout = b'"Wow.exe","1","Console","1","100 K"' + bytes([13, 10])
     kept = subprocess.run
     subprocess.run = lambda args, **kw: calls.append((args, kw)) or Done()
     try:
@@ -75,8 +75,47 @@ def test_the_console_programs_the_helper_runs_open_no_window():
     assert len(calls) == 2 and all(kw["creationflags"] & subprocess.CREATE_NO_WINDOW for _, kw in calls)
 
 
+def test_tasklist_in_german_code_page_850_neither_stops_the_start_nor_misleads():
+    """Players on a German Windows could not start the helper: tasklist answers in the OEM code page 850, and
+    text=True raised UnicodeDecodeError on an umlaut. The bytes are decoded leniently now, and the answer is read by
+    its CSV fields, not by the localized message."""
+    if sys.platform != "win32":
+        return
+    from fwchelper import cli, win
+    umlauts = "Zündung.exe".encode("cp850")                  # 0x81: not valid UTF-8
+    try:
+        umlauts.decode("utf-8")
+        raise AssertionError("the bytes must be invalid UTF-8")
+    except UnicodeDecodeError:
+        pass
+    nothing = "INFORMATION: Es werden keine Aufgaben ausgeführt, die den angegebenen Kriterien entsprechen.".encode("cp850")
+    answers, CRLF = {}, bytes([13, 10])
+
+    class Done:
+        def __init__(self, out):
+            self.stdout = out
+
+    def run(args, **kw):
+        assert "text" not in kw and "universal_newlines" not in kw          # bytes, decoded by us
+        return Done(answers["out"])
+    kept = subprocess.run
+    subprocess.run = run
+    try:
+        answers["out"] = b'"' + umlauts + b'","4242","Console","1","1.000 K"' + CRLF
+        assert cli._running(4242) is True and cli._running(42) is False       # a pid is its own field, not a part of another
+        answers["out"] = nothing + CRLF
+        assert cli._running(4242) is False and win.game_running() is False
+        answers["out"] = b'"' + umlauts + b'","1","Console","1","1 K"' + CRLF + b'"Wow.exe","7","Console","1","9 K"' + CRLF
+        assert win.game_running() is True
+        answers["out"] = b'"' + umlauts + b'","1","Console","1","1 K"' + CRLF
+        assert win.game_running() is False
+    finally:
+        subprocess.run = kept
+
+
 if __name__ == "__main__":
     test_the_quiet_update_is_msiexec_itself_with_no_script_host()
     test_the_installer_starts_the_helper_when_launchapp_is_given()
     test_the_console_programs_the_helper_runs_open_no_window()
+    test_tasklist_in_german_code_page_850_neither_stops_the_start_nor_misleads()
     print("ok")

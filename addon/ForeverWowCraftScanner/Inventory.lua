@@ -32,14 +32,23 @@ local Place
 -- ================================================================ what the character has
 local function Spelt(name) return ((name or ""):lower():gsub("[^a-z0-9]", "")) end
 
-local function CharKey() return ns.RealmKey() .. "|" .. (UnitName("player") or "?") end
+-- While the game does not say which realm this is (ns.RealmName), the character is counted in a
+-- table kept nowhere: nothing is saved under no realm, and nothing saved is written over with none.
+local unsaved
 
 local function Char()
-  FWCS_DB.__chars = FWCS_DB.__chars or {}
-  local key = CharKey()
-  local c = FWCS_DB.__chars[key] or {}
-  FWCS_DB.__chars[key] = c
-  c.name, c.realm, c.house = UnitName("player") or "?", GetRealmName() or "?", ns.RealmKey()
+  local realm, house = ns.RealmName(), ns.RealmKey()
+  local c
+  if realm and house then
+    FWCS_DB.__chars = FWCS_DB.__chars or {}
+    local key = house .. "|" .. (UnitName("player") or "?")
+    c = FWCS_DB.__chars[key] or {}
+    FWCS_DB.__chars[key] = c
+  else
+    unsaved = unsaved or {}
+    c = unsaved
+  end
+  c.name, c.realm, c.house = UnitName("player") or "?", realm, house
   c.faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
   c.items, c.skills, c.from, c.upto, c.also = c.items or {}, c.skills or {}, c.from or {}, c.upto or {}, c.also or {}
   c.budget = c.budget or {}                  -- the gold ceiling: copper (nil: the bags), on (the route cut there)
@@ -77,7 +86,9 @@ end
 
 local function House()
   local faction = (UnitFactionGroup and UnitFactionGroup("player")) or ""
-  local mine, group = Spelt(GetRealmName()), Spelt(ns.RealmKey())
+  local realm = ns.RealmName()
+  if not realm then return nil end                 -- the realm not known: no house is this character's
+  local mine, group = Spelt(realm), Spelt(ns.RealmKey())
   for key, house in pairs(FWCS_PLANS or {}) do
     if house.faction == faction then
       for _, realm in ipairs(house.realms or {}) do
@@ -87,7 +98,7 @@ local function House()
   end
   -- a realm no list has (nobody scanned from it, or the helper fetched the region's houses before it
   -- had seen this character): the house its name says (the blank window players reported, 9 Nov 2026)
-  local ruled = Ruled(GetRealmName())
+  local ruled = Ruled(realm)
   if ruled then
     for key, house in pairs(FWCS_PLANS or {}) do
       if house.faction == faction and Spelt(house.realm or "") == ruled then return Attach(house), key end

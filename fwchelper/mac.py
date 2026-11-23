@@ -174,7 +174,7 @@ def game_running() -> bool:
     """Whether a World of Warcraft client runs (its process is inside World of Warcraft.app,
     whatever the flavour)."""
     try:
-        r = subprocess.run(["pgrep", "-f", "World of Warcraft"], capture_output=True, text=True, timeout=20)
+        r = subprocess.run(["pgrep", "-f", "World of Warcraft"], capture_output=True, text=True, errors="replace", timeout=20)
     except (OSError, subprocess.SubprocessError):
         return False
     return r.returncode == 0 and bool(r.stdout.strip())

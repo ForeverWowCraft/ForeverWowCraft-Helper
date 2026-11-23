@@ -6,7 +6,8 @@
 --     the time-left band, how many, when; the item's name. The auction house's realm and faction,
 --     and the names of the realms this account's characters have logged in on with the addon (as
 --     the client spells them: FWCS_DB.__realms, __groups), sent with a scan so that the site can
---     name the house. And the levels of a recipe scroll (see "recipe scrolls" below).
+--     name the house; and the realm's id from the character's GUID with its name (__realmids),
+--     sent with a scan of that realm, since the game stopped naming realms (20 Nov 2026). And the levels of a recipe scroll (see "recipe scrolls" below).
 --   WHEN: prices only with the auction house open, when the player scans or the house opens with a
 --     scan due (Interface > AddOns turns that off); never in the background. A scroll's levels only
 --     when the player brings up its tooltip.
@@ -53,6 +54,8 @@
 --                    arrowPos, winPos, shop, alts, haveFirst, variant, asideOpen, levelRoutes, fishing } -- settings
 --   FWCS_DB.__realms = { [name without spaces] = name as shown }   -- this account's realms
 --   FWCS_DB.__groups = { [house's realm] = { connected realms, without spaces } }
+--   FWCS_DB.__realmids = { [realm id, from the character's GUID] = name as shown }   -- pairs the game gave
+--   FWCS_DB.__realmids_inferred = { [realm id] = name }   -- pairs worked out from the one realm known (RealmName, e)
 --   FWCS_DB.__chars = { ["<house's realm>|<character>"] = what it has: see Window.lua }
 
 local _, ns = ...
@@ -187,15 +190,151 @@ local function ConnectedRealms()
   return sorted
 end
 
-local function RealmKey()
-  local group = ConnectedRealms()
-  return group and group[1] or GetRealmName() or "?"
+-- ================================================================ which realm this is
+-- The one answer to "which realm is this character on": everything else asks RealmName().
+-- Since a hotfix on 20 Nov 2026 Forever's client names no realm: GetRealmName() answers "",
+-- GetNormalizedRealmName() and GetAutoCompleteRealms() nothing, GetRealmID() 0; and "" is true
+-- in Lua, so scans were kept as "|Alliance", characters with realm "", the helper's sends were
+-- refused ("no realm") and /fwc was empty. The player's GUID still carries the realm's id
+-- ("Player-4321-00A1B2C3"), so the name is the first of:
+--   a. GetRealmName() (all as before, the day the game answers again);
+--   b. UnitFullName("player")'s realm, where it is a name as shown (one with a space, or one
+--      this account knows the shown name of: it may be spelt without spaces, as
+--      GetNormalizedRealmName is, and that is no name for a house);
+--   c. the name kept for this realm id, FWCS_DB.__realmids[id] (from a or b, at an earlier login);
+--   d. FWCS_REALM_IDS[id], a table of id -> name the helper may write into Plans.lua;
+--   c'. the name inferred for this id at an earlier login (FWCS_DB.__realmids_inferred[id]);
+--   e. the one realm this account knew before (__realms, the keys of its scans, its
+--      characters), when it knew exactly one and no id says it is another realm's;
+--   else nil: the realm is not known, and nothing is scanned or kept under a realm.
+-- Returns the name and how it was known: "game", "id", "helper", "inferred" or "one".
+local function Named(s) return type(s) == "string" and s ~= "" and s ~= "?" and s or nil end
+
+local function RealmID()
+  local guid = UnitGUID and UnitGUID("player")
+  local id = type(guid) == "string" and guid:match("^Player%-(%d+)%-")
+  id = id and tonumber(id)
+  return (id and id > 0) and id or nil
 end
 
+local function GameRealmName()
+  local name = Named(GetRealmName and GetRealmName())
+  if name then return name end
+  if not UnitFullName then return nil end
+  local _, realm = UnitFullName("player")
+  realm = Named(realm)
+  if not realm then return nil end
+  local shown = Named(type(FWCS_DB.__realms) == "table" and FWCS_DB.__realms[realm])
+  if shown then return shown end
+  return realm:find(" ", 1, true) and realm or nil
+end
+
+-- The key a realm's scans are kept under, from what was saved: its connected group's (the
+-- first of the group, without spaces), else its name without spaces. Two realms of one key are
+-- one auction house.
+local function SavedGroupOf(name)
+  local short = ShortName(name)
+  for key, group in pairs(type(FWCS_DB.__groups) == "table" and FWCS_DB.__groups or {}) do
+    if type(group) == "table" then
+      for _, member in ipairs(group) do if member == short then return key end end
+    end
+  end
+end
+local function HouseOfName(name) return SavedGroupOf(name) or ShortName(name) end
+
+-- The realms this account knew before by name ({ [house key] = name }, and how many): its
+-- characters', __realms, the keys of its scans.
+local function KnownRealms()
+  local found, n = {}, 0
+  local function add(name)
+    name = Named(name)
+    if not name then return end
+    local house = HouseOfName(name)
+    if found[house] == nil then found[house], n = name, n + 1 end
+  end
+  local realms = type(FWCS_DB.__realms) == "table" and FWCS_DB.__realms or {}
+  for _, c in pairs(type(FWCS_DB.__chars) == "table" and FWCS_DB.__chars or {}) do
+    if type(c) == "table" then add(c.realm) end
+  end
+  for _, shown in pairs(realms) do add(shown) end
+  for key, data in pairs(FWCS_DB) do
+    if type(key) == "string" and key:sub(1, 2) ~= "__" and type(data) == "table" then
+      local realm = key:match("^(.-)|") or key
+      add(realms[realm] or realm)
+    end
+  end
+  return found, n
+end
+
+-- (e) The one realm this account knew before that can be this character's, or nil (none, or
+-- two and more): a realm whose id is known, and is not this character's, is not its realm.
+-- Worked out once a login (nothing it reads changes while the realm is not known) and again at
+-- the next.
+local oneRealm, oneRealmLooked = nil, false
+local function OneKnownRealm()
+  if oneRealmLooked then return oneRealm end
+  oneRealmLooked = true
+  local found, n = KnownRealms()
+  local id = RealmID()
+  if id then
+    for _, which in ipairs({ "__realmids", "__realmids_inferred" }) do     -- by name: either table may be missing
+      local ids = FWCS_DB[which]
+      for other, name in pairs(type(ids) == "table" and ids or {}) do
+        if other ~= id and Named(name) and found[HouseOfName(name)] then found[HouseOfName(name)], n = nil, n - 1 end
+      end
+    end
+  end
+  if n == 1 then oneRealm = select(2, next(found)) end
+  return oneRealm
+end
+
+local function RealmName()
+  local name = GameRealmName()
+  if name then return name, "game" end
+  local id = RealmID()
+  if id then
+    name = Named(type(FWCS_DB.__realmids) == "table" and FWCS_DB.__realmids[id])
+    if name then return name, "id" end
+    name = Named(type(FWCS_REALM_IDS) == "table" and FWCS_REALM_IDS[id])
+    if name then return name, "helper" end
+    name = Named(type(FWCS_DB.__realmids_inferred) == "table" and FWCS_DB.__realmids_inferred[id])
+    if name then return name, "inferred" end
+  end
+  name = OneKnownRealm()
+  if name then return name, "one" end
+  return nil
+end
+
+-- The house's key for scans and characters: the connected group's first realm as the game
+-- names it, else (the game naming no group) the group this realm was saved in, else the name.
+-- nil when the realm is not known.
+local function RealmKey()
+  local group = ConnectedRealms()
+  if group then return group[1] end
+  local name, how = RealmName()
+  if name and how ~= "game" then return SavedGroupOf(name) or name end
+  return name
+end
+
+-- What a player is told while the realm is not known (one line, the same everywhere)
+local REALM_UNKNOWN = "the game is not telling the addon which realm this is, so scans wait for the next update."
+
 local function NoteRealmNames()
-  local name = GetRealmName() or "?"
+  oneRealm, oneRealmLooked = nil, false            -- the saved file is in: (e) is worked out again
+  local name, how = RealmName()
+  if not name then return end
+  local id = RealmID()
+  if id and (how == "game" or how == "id") then       -- a pair the game gave: kept as known
+    FWCS_DB.__realmids = FWCS_DB.__realmids or {}
+    FWCS_DB.__realmids[id] = name
+    if type(FWCS_DB.__realmids_inferred) == "table" then FWCS_DB.__realmids_inferred[id] = nil end
+  elseif id and how == "one" then                       -- inferred: kept apart, so the helper can tell the two
+    FWCS_DB.__realmids_inferred = FWCS_DB.__realmids_inferred or {}
+    FWCS_DB.__realmids_inferred[id] = name
+  end
   FWCS_DB.__realms = FWCS_DB.__realms or {}
-  FWCS_DB.__realms[(GetNormalizedRealmName and GetNormalizedRealmName()) or ShortName(name)] = name
+  local spelt = Named(GetNormalizedRealmName and GetNormalizedRealmName()) or ShortName(name)
+  if spelt ~= "" and (how == "game" or FWCS_DB.__realms[spelt] == nil) then FWCS_DB.__realms[spelt] = name end   -- never [""]
   local group = ConnectedRealms()
   if group then
     FWCS_DB.__groups = FWCS_DB.__groups or {}
@@ -203,12 +342,30 @@ local function NoteRealmNames()
   end
 end
 
+-- One house's scans put into another's: of an item in both, the more recent look stays.
+local function MergeInto(new, data)
+  FWCS_DB[new] = FWCS_DB[new] or {}
+  local into = FWCS_DB[new]
+  for k, v in pairs(data) do
+    if k == "__history" then
+      into.__history = into.__history or {}
+      for item, rows in pairs(v) do
+        into.__history[item] = into.__history[item] or {}
+        for _, row in ipairs(rows) do table.insert(into.__history[item], row) end
+      end
+    elseif type(k) == "number" then
+      if not into[k] or (v.t or 0) > (into[k].t or 0) then into[k] = v end
+    else
+      into[k] = into[k] or v
+    end
+  end
+end
+
 -- Scans kept under this character's own realm name from before connected realms were told
 -- apart go under the group's name; of an item in both, the more recent look stays.
 local function AdoptOldKeys()
-  local key = RealmKey()
-  local own = GetRealmName() or "?"
-  if key == own then return end
+  local key, own = RealmKey(), RealmName()
+  if not key or not own or key == own then return end
   local found = {}      -- gathered first: a table is not changed while it is walked
   for old, data in pairs(FWCS_DB) do
     local realm, faction
@@ -217,41 +374,142 @@ local function AdoptOldKeys()
   end
   for _, f in ipairs(found) do
     local old, faction, data = f[1], f[2], f[3]
-    do
-      local new = key .. "|" .. faction
-      FWCS_DB[new] = FWCS_DB[new] or {}
-      local into = FWCS_DB[new]
-      for k, v in pairs(data) do
-        if k == "__history" then
-          into.__history = into.__history or {}
-          for item, rows in pairs(v) do
-            into.__history[item] = into.__history[item] or {}
-            for _, row in ipairs(rows) do table.insert(into.__history[item], row) end
-          end
-        elseif type(k) == "number" then
-          if not into[k] or (v.t or 0) > (into[k].t or 0) then into[k] = v end
-        else
-          into[k] = into[k] or v
-        end
-      end
-      FWCS_DB[old] = nil
-      Print(string.format("scans kept as %s are now kept as %s: this realm shares its auction house with %s.",
-        own, key, table.concat(ConnectedRealms() or {}, ", ")))
-    end
+    MergeInto(key .. "|" .. faction, data)
+    FWCS_DB[old] = nil
+    Print(string.format("scans kept as %s are now kept as %s: this realm shares its auction house with %s.",
+      own, key, table.concat(ConnectedRealms() or {}, ", ")))
   end
 end
 
+-- Whether this character is the only one of its faction saved with no realm in those days (as
+-- "|<name>"): every character that played then was saved so, so the "|<faction>" scans are its.
+local function OnlyOneWithNoRealm(chars, me, faction)
+  local mine = false
+  for key, c in pairs(chars) do
+    if type(key) == "string" and key:sub(1, 1) == "|" and type(c) == "table" and (not Named(c.faction) or c.faction == faction) then
+      if key ~= "|" .. me then return false end
+      mine = true
+    end
+  end
+  return mine
+end
+
+-- One character's saved entry put into another's (the same character, kept under no realm in the
+-- days the game named none and under its realm before): `lost` is the no-realm one, written after
+-- the hotfix, so for what both have the newer wins and where no time tells, `lost` does. A place
+-- (bank, mail, auctions) is counted from its own last visit (bankSeen, mailSeen, ahSeen), the bags
+-- from the entry's t. Nothing only `into` has is lost, and nothing empty goes over something.
+local SEEN = { false, "bankSeen", "mailSeen", "ahSeen" }     -- items[id][place]: the field timing a place (the bags: the entry's t)
+local function MergeChar(into, lost)
+  local function lostNewer(a, b) return a == nil or b == nil or a >= b end
+  local mine = lostNewer(lost.t, into.t)
+  local function filled(v) return v ~= nil and (type(v) ~= "table" or next(v) ~= nil) end
+  -- the counts first, while the times are still each entry's own
+  local items
+  if type(lost.items) == "table" then
+    items = {}
+    local ids = {}
+    for id in pairs(into.items or {}) do ids[id] = true end
+    for id in pairs(lost.items) do ids[id] = true end
+    for id in pairs(ids) do
+      local a, b, row = lost.items[id] or {}, (into.items or {})[id] or {}, {}
+      for place = 1, 4 do
+        local seen = SEEN[place]
+        if not seen then
+          row[place] = (mine and a or b)[place] or 0
+        elseif lost[seen] ~= nil or into[seen] ~= nil then          -- the later visit's count, nothing where it saw none
+          row[place] = ((lost[seen] ~= nil and (into[seen] == nil or lost[seen] >= into[seen])) and a or b)[place] or 0
+        else                                                         -- no visit timed: what the no-realm entry counted, else the old
+          row[place] = (a[place] or 0) ~= 0 and a[place] or b[place] or 0
+        end
+      end
+      items[id] = row
+    end
+  end
+  for _, k in ipairs({ "bankSeen", "mailSeen", "ahSeen", "t" }) do   -- the later of the two times
+    if lost[k] ~= nil and (into[k] == nil or lost[k] > into[k]) then into[k] = lost[k] end
+  end
+  if lost.mailed ~= nil and (into.mailed == nil or lostNewer(lost.mailedAt, into.mailedAt)) then
+    into.mailed, into.mailedAt = lost.mailed, lost.mailedAt
+  end
+  local DONE = { items = 1, learned = 1, realm = 1, house = 1, bankSeen = 1, mailSeen = 1, ahSeen = 1, t = 1, mailed = 1, mailedAt = 1 }
+  for k, v in pairs(lost) do
+    if DONE[k] then
+      -- done above, or the caller's
+    elseif type(v) == "table" and type(into[k]) == "table" and k ~= "arrow" then
+      for kk, vv in pairs(v) do                              -- skills, from, upto, also, budget: per entry
+        if into[k][kk] == nil or mine then into[k][kk] = vv end
+      end
+    elseif into[k] == nil or (mine and filled(v)) then
+      into[k] = v
+    end
+  end
+  if type(lost.learned) == "table" then
+    into.learned = into.learned or {}
+    for line, row in pairs(lost.learned) do
+      local other = into.learned[line]
+      if type(other) ~= "table" or type(row) ~= "table" or lostNewer(row.t, other.t) then into.learned[line] = row end
+    end
+  end
+  if items then into.items = items end
+end
+
+-- The characters kept as "|<name>" with no realm go under their realm's key: this character's
+-- (when it is of this faction), and another's only when the realm is the account's one realm
+-- (`sole`): another character could have played on another realm, so it is not guessed.
+local function MoveNoRealmChars(chars, key, name, me, faction, sole)
+  local found = {}                                            -- gathered first: a table is not changed while it is walked
+  for old, lost in pairs(chars) do
+    if type(old) == "string" and old:sub(1, 1) == "|" and type(lost) == "table" then
+      local who = old:sub(2)
+      if who ~= "" and (sole or (who == me and (not Named(lost.faction) or lost.faction == faction))) then table.insert(found, { old, who, lost }) end
+    end
+  end
+  for _, f in ipairs(found) do
+    local old, who, lost = f[1], f[2], f[3]
+    local into = chars[key .. "|" .. who]
+    if type(into) ~= "table" then into = lost else MergeChar(into, lost) end
+    into.realm, into.house = name, key
+    chars[key .. "|" .. who], chars[old] = into, nil
+  end
+end
+
+-- What the days the game named no realm left (20 Nov 2026 on, before this addon knew the
+-- realm another way): this character's faction's scans kept as "|<faction>", and the
+-- character kept as "|<name>" with no realm. Put where they belong once the realm is known;
+-- only this character's faction and this character, never another realm's on a guess: the
+-- scans only when they can be no other realm's (the account knew this one realm alone, or this
+-- character is the only one of the faction that played with no realm named).
+local function RepairNoRealmDays()
+  local key, name = RealmKey(), RealmName()
+  local faction = UnitFactionGroup and UnitFactionGroup("player")
+  local chars, me = type(FWCS_DB.__chars) == "table" and FWCS_DB.__chars or {}, UnitName and UnitName("player")
+  if not key or not name then return end
+  local known, n = KnownRealms()
+  local broken = (faction == "Alliance" or faction == "Horde") and me and FWCS_DB["|" .. faction]
+  if type(broken) == "table" and ((n == 1 and known[HouseOfName(name)]) or OnlyOneWithNoRealm(chars, me, faction)) then
+    MergeInto(key .. "|" .. faction, broken)
+    FWCS_DB["|" .. faction] = nil
+    Print(string.format("scans saved while the game named no realm are now kept as %s (%s).", key, faction))
+  end
+  MoveNoRealmChars(chars, key, name, me, faction, n == 1 and known[HouseOfName(name)] ~= nil)
+  if type(FWCS_DB.__realms) == "table" then FWCS_DB.__realms[""] = nil end     -- a junk pair of the broken days
+end
+
 local function DatasetKey()
-  return RealmKey() .. "|" .. Faction()
+  local realm = RealmKey()
+  return realm and (realm .. "|" .. Faction()) or nil
 end
 
 local function DatasetName()
   local faction = Faction()
-  return RealmKey() .. (faction ~= "" and (" (" .. faction .. ")") or "")
+  return (RealmKey() or "an unknown realm") .. (faction ~= "" and (" (" .. faction .. ")") or "")
 end
 
+-- this house's scans; while the realm is not known, a table kept nowhere (nothing is scanned then)
 local function RealmDB()
   local key = DatasetKey()
+  if not key then return {} end
   FWCS_DB[key] = FWCS_DB[key] or {}
   return FWCS_DB[key]
 end
@@ -1179,6 +1437,7 @@ StartScan = function(listName)
     return
   end
   if not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then Print("open the auction house first"); return end
+  if not RealmKey() then Print(REALM_UNKNOWN); return end
   if SharedHouse() then Print(SHARED_NOT_SCANNED); return end
   if state.running then Print("a scan is already running; /fwcs stop first"); return end
   Begin("scan", 0)
@@ -1253,6 +1512,7 @@ local snapshotFrame = CreateFrame("Frame")
 
 StartSnapshot = function(force)
   if not (AuctionHouseFrame and AuctionHouseFrame:IsShown()) then Print("open the auction house first"); return end
+  if not RealmKey() then Print(REALM_UNKNOWN); return end
   if SharedHouse() then Print(SHARED_NOT_SCANNED); return end
   if state.running then Print("a scan is already running; /fwcs stop first"); return end
   local wanted = QueuedItems()
@@ -1439,7 +1699,9 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
       -- saved; after the shopping list's buying when it has some (Shop.lua: the buying first,
       -- so that a player is not held at the list while the house answers the scan), up to
       -- AUTO_WAIT seconds of it
-      if AutoScanEnabled() and not SharedHouse() and not state.running and not dirty and FullCooldownLeft() <= 0 and next(QueuedItems()) and Offered() then
+      if not RealmKey() then                               -- said once a session; nothing is scanned
+        if not state.toldRealm then state.toldRealm = true; Print(REALM_UNKNOWN) end
+      elseif AutoScanEnabled() and not SharedHouse() and not state.running and not dirty and FullCooldownLeft() <= 0 and next(QueuedItems()) and Offered() then
         local since = GetTime()
         local function soon()
           if not (state.ahOpen and not state.running and not dirty and FullCooldownLeft() <= 0) then return end
@@ -1461,6 +1723,7 @@ loader:SetScript("OnEvent", function(_, event, isInitialLogin)
   end
   RestorePosition()
   NoteRealmNames()
+  RepairNoRealmDays()
   AdoptOldKeys()
   ArmReadyAlert()
   local n = #QueueNames()
@@ -1481,6 +1744,7 @@ end)
 
 -- what Window.lua and Background.lua use of this file
 ns.Print, ns.Settings, ns.RealmKey, ns.QueuedItems = Print, Settings, RealmKey, QueuedItems
+ns.RealmName, ns.RealmID, ns.REALM_UNKNOWN = RealmName, RealmID, REALM_UNKNOWN
 ns.Debug = function(line) if state.debug then Print(line); return true end end       -- a line in chat while /fwcs debug is on; true when it was printed
 ns.scanner = {
   Dirty = function() return dirty end,
@@ -1536,7 +1800,7 @@ SlashCmdList.FOREVERWOWCRAFTSCANNER = function(msg)
     DoReload()
     Print("if nothing happens, /reload does it: the game lets no addon reload for you on this client")
   elseif cmd == "clear" then
-    FWCS_DB[DatasetKey()] = {}
+    if DatasetKey() then FWCS_DB[DatasetKey()] = {} end
     Print("cleared the scan data of " .. DatasetName() .. " (takes effect on /reload)")
   elseif cmd == "house" then
     HouseCommand(arg)

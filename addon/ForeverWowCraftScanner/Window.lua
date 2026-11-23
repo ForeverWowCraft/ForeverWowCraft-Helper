@@ -435,6 +435,10 @@ local PROBLEMS = { reach = true, update = true, unusable = true }
 -- switches the Plans addon on (state A with a client that can), debug = what the letter means and its inputs }
 local function EmptyState()
   local summary = "No routes for this character's auction house yet."
+  if not ns.RealmName() then                       -- the game names no realm (20 Nov 2026), and nothing remembered says which
+    return { letter = "R", summary = "The game is not telling the addon which realm this is, so routes wait for the next update.",
+             text = {}, debug = "the realm is not known" }
+  end
   if not FWCS_PLANS_WRITTEN then
     local state, reason = PlansAddOnState()
     if state == "off" then
@@ -467,7 +471,7 @@ local function EmptyState()
     return { letter = "C", summary = "The helper could not fetch the routes.", reload = problem.kind == "reach", text = texts[problem.kind],
              debug = "helper could not fetch (" .. problem.kind .. ", " .. when .. ")" }
   end
-  local realm, faction = GetRealmName() or "?", (UnitFactionGroup and UnitFactionGroup("player")) or ""
+  local realm, faction = ns.RealmName() or "?", (UnitFactionGroup and UnitFactionGroup("player")) or ""
   local ruled = ns.inv.Ruled(realm)
   local site = type(FWCS_SITE) == "table" and type(FWCS_SITE.houses) == "table" and FWCS_SITE or nil
   local again = { "Click " .. RELOAD .. " below, or type /reload. The helper sees a new character at its",
