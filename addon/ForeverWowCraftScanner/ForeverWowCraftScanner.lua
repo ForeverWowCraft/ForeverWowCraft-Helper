@@ -206,8 +206,10 @@ end
 --   c'. the name inferred for this id at an earlier login (FWCS_DB.__realmids_inferred[id]);
 --   e. the one realm this account knew before (__realms, the keys of its scans, its
 --      characters), when it knew exactly one and no id says it is another realm's;
+--   f. the kind of realm the player said this is (/fwc realm pve, 1.8.8; ChosenRealm below):
+--      not a realm's name but its auction house's, which is all a realm's name is used for;
 --   else nil: the realm is not known, and nothing is scanned or kept under a realm.
--- Returns the name and how it was known: "game", "id", "helper", "inferred" or "one".
+-- Returns the name and how it was known: "game", "id", "helper", "inferred", "one" or "said".
 local function Named(s) return type(s) == "string" and s ~= "" and s ~= "?" and s or nil end
 
 local function RealmID()
@@ -215,6 +217,43 @@ local function RealmID()
   local id = type(guid) == "string" and guid:match("^Player%-(%d+)%-")
   id = id and tonumber(id)
   return (id and id > 0) and id or nil
+end
+
+-- (f) On Forever every realm of one kind in a region shares one auction house ("US PvE": every US
+-- and AU PvE realm), so a player who says the kind has said the house, whatever the realm is
+-- called. The kind is kept by the realm's id (FWCS_DB.__realmkinds = { [id] = "PvE" }; 0 where the
+-- GUID gives none), and the name given is the house's as the site and the core keep it, spelt
+-- without spaces: "USPvE", "EURPPvP". The region is the client's own (the portal it logs in to,
+-- which the helper reads too), else the game's region number, else the one region the routes
+-- the helper wrote are of.
+local KINDS = { pve = "PvE", pvp = "PvP", rp = "RP", rppvp = "RP PvP" }
+local KIND_SAID = { ["PvE"] = true, ["PvP"] = true, ["RP"] = true, ["RP PvP"] = true }
+local REGION_NUMBERS = { [1] = "US", [2] = "KR", [3] = "EU", [4] = "TW" }
+local REGIONS = { US = true, EU = true, KR = true, TW = true }
+local HOUSE_NAMES = {}                                  -- every name ChosenRealm can give: never a realm the account "knew"
+for region in pairs(REGIONS) do
+  for kind in pairs(KIND_SAID) do HOUSE_NAMES[region .. kind:gsub(" ", "")] = true end
+end
+
+local function Region()
+  local portal = GetCVar and GetCVar("portal")
+  portal = type(portal) == "string" and portal:upper() or nil
+  if REGIONS[portal] then return portal end
+  local number = GetCurrentRegion and GetCurrentRegion()
+  if REGION_NUMBERS[number] then return REGION_NUMBERS[number] end
+  local found, n = nil, 0                               -- the routes the helper wrote: "US PvE", "US PvP" are one region
+  for _, doc in pairs(type(FWCS_PLANS) == "table" and FWCS_PLANS or {}) do
+    local region = type(doc) == "table" and type(doc.realm) == "string" and doc.realm:match("^(%u%u) ")
+    if REGIONS[region] and region ~= found then found, n = region, n + 1 end
+  end
+  return n == 1 and found or nil
+end
+
+local function ChosenRealm()
+  local kinds = FWCS_DB.__realmkinds
+  local kind = type(kinds) == "table" and kinds[RealmID() or 0]
+  local region = KIND_SAID[kind] and Region()
+  return region and (region .. kind:gsub(" ", "")) or nil
 end
 
 local function GameRealmName()
@@ -248,7 +287,7 @@ local function KnownRealms()
   local found, n = {}, 0
   local function add(name)
     name = Named(name)
-    if not name then return end
+    if not name or HOUSE_NAMES[name] then return end    -- "USPvE" is what a player said (f), no realm to infer another character's from
     local house = HouseOfName(name)
     if found[house] == nil then found[house], n = name, n + 1 end
   end
@@ -302,6 +341,8 @@ local function RealmName()
   end
   name = OneKnownRealm()
   if name then return name, "one" end
+  name = ChosenRealm()
+  if name then return name, "said" end
   return nil
 end
 
@@ -317,7 +358,7 @@ local function RealmKey()
 end
 
 -- What a player is told while the realm is not known (one line, the same everywhere)
-local REALM_UNKNOWN = "the game is not telling the addon which realm this is, so scans wait for the next update."
+local REALM_UNKNOWN = "the game is not telling the addon which realm this is. Type /fwc realm pve, /fwc realm pvp, /fwc realm rp or /fwc realm rppvp to say which kind you play on."
 
 local function NoteRealmNames()
   oneRealm, oneRealmLooked = nil, false            -- the saved file is in: (e) is worked out again
@@ -332,6 +373,7 @@ local function NoteRealmNames()
     FWCS_DB.__realmids_inferred = FWCS_DB.__realmids_inferred or {}
     FWCS_DB.__realmids_inferred[id] = name
   end
+  if how == "said" then return end                    -- a house's name, said by the player: no realm's name to keep
   FWCS_DB.__realms = FWCS_DB.__realms or {}
   local spelt = Named(GetNormalizedRealmName and GetNormalizedRealmName()) or ShortName(name)
   if spelt ~= "" and (how == "game" or FWCS_DB.__realms[spelt] == nil) then FWCS_DB.__realms[spelt] = name end   -- never [""]
@@ -1745,6 +1787,33 @@ end)
 -- what Window.lua and Background.lua use of this file
 ns.Print, ns.Settings, ns.RealmKey, ns.QueuedItems = Print, Settings, RealmKey, QueuedItems
 ns.RealmName, ns.RealmID, ns.REALM_UNKNOWN = RealmName, RealmID, REALM_UNKNOWN
+
+-- /fwc realm <kind>: the player says which kind of realm this character is on (f, above), where
+-- nothing else tells. Returns the line to print. `arg` as typed, any case, "rp pvp" or "rp-pvp"
+-- alike; "clear" takes back what was said; nothing typed says what is known.
+function ns.SayRealmKind(arg)
+  local word = tostring(arg or ""):lower():gsub("[^a-z]", "")
+  local name, how = RealmName()
+  local usage = "/fwc realm pve | pvp | rp | rppvp"
+  if word == "" then
+    if not name then return "the realm is not known. Say which kind you play on: " .. usage end
+    return how == "said" and ("you said this is a realm of " .. name .. ". Change it with " .. usage .. ", or /fwc realm clear")
+      or ("this realm is " .. name .. ".")
+  end
+  local id = RealmID() or 0
+  if word == "clear" then
+    if type(FWCS_DB.__realmkinds) == "table" then FWCS_DB.__realmkinds[id] = nil end
+    oneRealm, oneRealmLooked = nil, false
+    return "forgotten. Type /reload."
+  end
+  if not KINDS[word] then return "no such kind of realm: " .. usage end
+  if name and how ~= "said" then return "this realm is already known (" .. name .. "): nothing to say." end
+  if not Region() then return "the addon cannot tell your region yet. Start the ForeverWowCraft helper, type /reload, then say it again." end
+  FWCS_DB.__realmkinds = type(FWCS_DB.__realmkinds) == "table" and FWCS_DB.__realmkinds or {}
+  FWCS_DB.__realmkinds[id] = KINDS[word]
+  oneRealm, oneRealmLooked = nil, false
+  return "this is a " .. Region() .. " " .. KINDS[word] .. " realm, you said. Type /reload, and your routes and scans are that auction house's."
+end
 ns.Debug = function(line) if state.debug then Print(line); return true end end       -- a line in chat while /fwcs debug is on; true when it was printed
 ns.scanner = {
   Dirty = function() return dirty end,

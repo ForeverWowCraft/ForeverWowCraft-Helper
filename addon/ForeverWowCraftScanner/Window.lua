@@ -436,8 +436,13 @@ local PROBLEMS = { reach = true, update = true, unusable = true }
 local function EmptyState()
   local summary = "No routes for this character's auction house yet."
   if not ns.RealmName() then                       -- the game names no realm (20 Nov 2026), and nothing remembered says which
-    return { letter = "R", summary = "The game is not telling the addon which realm this is, so routes wait for the next update.",
-             text = {}, debug = "the realm is not known" }
+    return { letter = "R", summary = "The game is not telling the addon which realm this is.",
+             text = { "Say which kind of realm you play on, and you get its auction house's routes. Type one of:", "",
+                      "/fwc realm pve        /fwc realm pvp",
+                      "/fwc realm rp         /fwc realm rppvp", "",
+                      "The realm list at character select names the kind beside each realm.",
+                      "Then type /reload." },
+             debug = "the realm is not known" }
   end
   if not FWCS_PLANS_WRITTEN then
     local state, reason = PlansAddOnState()
@@ -1512,13 +1517,16 @@ SlashCmdList.FOREVERWOWCRAFT = function(msg)
     chosen = Chosen(house)
     ns.Print(chosen.also and string.format("%s is planned with %s%s.", Title(plan.profession), Title(chosen.also),
       chosen.applied and "" or " (which changes nothing in it)") or (Title(plan.profession) .. " is planned on its own."))
+  elseif cmd == "realm" then                -- which kind of realm this is, where the game does not say (1.8.8)
+    ns.Print(ns.SayRealmKind(arg))
+    Refresh()
   elseif cmd == "alts" then
     ns.Settings().alts = ns.Settings().alts == false
     ns.Print(ns.Settings().alts ~= false and "your other characters' bags and banks are counted too" or "only this character's bags and bank are counted")
     Refresh()
   elseif cmd == "help" or cmd == "?" then
     ns.Print("/fwc shows what your professions still need, less what you have. /fwc from <skill> | from auto"
-      .. (RANGE and " | to <skill> | to auto" or "") .. " | also <profession> | also none | also auto | alts. /fwcs is the scanner.")
+      .. (RANGE and " | to <skill> | to auto" or "") .. " | also <profession> | also none | also auto | alts | realm <kind>. /fwcs is the scanner.")
   else
     ns.ToggleWindow()
   end

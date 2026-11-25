@@ -34,7 +34,8 @@ BROKEN = '''
   function UnitFullName(unit) return "Thrallson", fullRealm end
 '''
 ROUTES = document(house="uspve--horde", realm="US PvE", faction="Horde")     # the house a US PvE realm's Horde is of
-UNKNOWN = "the game is not telling the addon which realm this is, so scans wait for the next update."
+UNKNOWN = ("the game is not telling the addon which realm this is. Type /fwc realm pve, /fwc realm pvp, /fwc realm rp or "
+           "/fwc realm rppvp to say which kind you play on.")
 
 
 def _saved(realms=(US,), ids=None, inferred=None, broken=True, extra=""):
@@ -158,7 +159,7 @@ def test_a_broken_client_with_two_realms_and_no_id_scans_nothing_and_says_why():
     assert lua.eval("FWCS_DB.__realmids") is None and lua.eval("FWCS_DB.__realmids_inferred") is None
     # /fwc says so, in one line, instead of being empty
     lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("plan")')
-    assert "The game is not telling the addon which realm this is, so routes wait for the next update." in lua.eval("AllText()")
+    assert "The game is not telling the addon which realm this is." in lua.eval("AllText()")
 
 
 def test_a_broken_client_finds_its_realm_by_the_id_among_two():

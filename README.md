@@ -354,7 +354,7 @@ the Run entry that starts the app at logon, "Start the helper now" at the end (o
 `LAUNCHAPP=1`, the helper's own quiet update, the helper started when it is done), and the
 running app closed before an upgrade or a removal; no script runs. A release (a `v<version>`
 tag) builds it on a Windows runner, installs it there for
-real (`installer/install_check.py`: the released 1.8.6, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
+real (`installer/install_check.py`: the released 1.8.7, this one over it quietly with no LAUNCHAPP, as 1.7.6's updater ran
 msiexec, a build one version up over that as this updater does, then removed), and puts it on
 the GitHub release beside the zips. The release then stays a draft, with every file on it, until
 the project publishes it by hand (`.github/workflows/publish.yml`, which checks the files first):
