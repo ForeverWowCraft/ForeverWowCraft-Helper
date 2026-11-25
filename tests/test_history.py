@@ -12,13 +12,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_ingame import PLACES_GAME, _game, lupa  # noqa: E402
 
 # a history at the old cap: 200 points, one every half hour for 2589 (the newest 48 all within the 48 hours) and one
-# every two hours for 2996 (of the newest 48, only those of the last 48 hours stay); 2320 has nothing recent at all
+# every two hours for 2996 (of the newest 48, only those of the last 48 hours stay); 2320 has nothing recent at all.
+# The two-hourly points stand a minute inside each hour mark: the 25th was at the 48 hours to the second, and the trim,
+# which reads the clock again once the addon has loaded, dropped it whenever a second had passed (a slow runner, 25 Nov 2026)
 SAVED = '''
 local now = time()
 local half, two = {}, {}
 for k = 1, 200 do
   half[k] = { now - (200 - k) * 1800, k, k }
-  two[k] = { now - (200 - k) * 7200, k, k }
+  two[k] = { now - (200 - k) * 7200 + 60, k, k }
 end
 FWCS_DB = { ["Stonespine|Horde"] = { __history = { [2589] = half, [2996] = two, [2320] = { { now - 72 * 3600, 5, 5 } } } } }
 '''
