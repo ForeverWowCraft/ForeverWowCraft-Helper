@@ -86,6 +86,49 @@ def test_a_house_said_for_one_realm_is_never_worked_out_as_another_characters_re
     assert "USPvE|Horde" in _keys(lua) and not any(k.startswith("|") for k in _keys(lua))
 
 
+HOUSE_ID = 7777         # a second realm's id, which nothing names
+
+
+def test_a_house_name_in_the_helpers_table_is_the_realm_and_never_a_realms_name():
+    if _no_lua():
+        return
+    table = f'FWCS_REALM_IDS = {{ [{US_ID}] = "USPvE" }}'
+    lua = _broken(realms=(US, EU), extra=table)                              # two realms known: only the table can tell
+    assert tuple(lua.eval("{ ns.RealmName() }").values()) == ("USPvE", "helper") and lua.eval("ns.RealmKey()") == "USPvE"
+    # kept as nothing: no name as shown, no pair of an id and a name (the account's own word), no realm worked out from it
+    assert lua.eval('FWCS_DB.__realms["USPvE"]') is None and lua.eval("FWCS_DB.__realmids") is None
+    assert lua.eval("FWCS_DB.__realmids_inferred") is None
+    # another character, on an id nothing names, does not take the house as its realm
+    saved = ('FWCS_DB = { __chars = { ["USPvE|Garosh"] = { name = "Garosh", realm = "USPvE", '
+             'house = "USPvE", faction = "Horde", t = 1000 } }, ["USPvE|Horde"] = { [2589] = { t = 1000, complete = true, l = { { 5, 1, 2 } } } } }')
+    from test_ingame import _game
+    from test_no_realm import BROKEN
+    lua = _game(ROUTES, saved=BROKEN % HOUSE_ID + saved + "\n" + table)
+    assert lua.eval("ns.RealmName()") is None and lua.eval("FWCS_DB.__realmids_inferred") is None
+    # a player who said a kind the table later contradicts follows the table
+    lua = _broken(realms=(US, EU), extra=f'FWCS_DB.__realmkinds = {{ [{US_ID}] = "PvP" }}; {table}')
+    assert tuple(lua.eval("{ ns.RealmName() }").values()) == ("USPvE", "helper")
+    assert lua.eval("ns.RealmKey()") == "USPvE" and lua.eval('FWCS_DB.__realms["USPvE"]') is None
+
+
+def test_a_realm_the_helpers_table_gives_to_another_id_is_not_this_characters_one_known_realm():
+    if _no_lua():
+        return
+    # the account knows one realm, and only because the table names it for another id: a character on an id nothing names
+    # may be on any realm, so it is not told it is on that one (and no pair is kept for it)
+    lua = _broken(guid_id=HOUSE_ID, realms=(US,), extra=f'FWCS_REALM_IDS = {{ [{US_ID}] = "{US}" }}')
+    assert lua.eval("ns.RealmName()") is None and lua.eval("FWCS_DB.__realmids_inferred") is None
+    # without the table's word it is worked out, as before
+    lua = _broken(guid_id=HOUSE_ID, realms=(US,))
+    assert tuple(lua.eval("{ ns.RealmName() }").values()) == (US, "inferred") and lua.eval(f"FWCS_DB.__realmids_inferred[{HOUSE_ID}]") == US
+    # the table giving the same id as this character's its realm is the table's word, not a guess
+    lua = _broken(realms=(US,), extra=f'FWCS_REALM_IDS = {{ [{US_ID}] = "{US}" }}')
+    assert tuple(lua.eval("{ ns.RealmName() }").values()) == (US, "helper")
+    # a house's name in the table is no realm: it takes none from the one known
+    lua = _broken(guid_id=HOUSE_ID, realms=(US,), extra=f'FWCS_REALM_IDS = {{ [{US_ID}] = "USPvE" }}')
+    assert tuple(lua.eval("{ ns.RealmName() }").values()) == (US, "inferred")
+
+
 def test_the_region_is_the_clients_portal_then_its_number_then_the_routes():
     if _no_lua():
         return
@@ -124,7 +167,49 @@ def test_the_helper_fetches_that_houses_routes_and_sends_its_scans_as_the_house(
     assert found == [("USPvE", "Horde")]
     sd = scan.load_scan(p, "USPvE", "Horde")
     doc = pipe.scan_document(sd)
-    assert doc["realm"] == "USPvE" and doc["faction"] == "Horde" and "realm_id" not in doc and pipe.check_scan(doc) is None
+    assert doc["realm"] == "USPvE" and doc["faction"] == "Horde" and doc["realm_id"] == 4321 and doc["realm_id_said"] is True and pipe.check_scan(doc) is None
+
+
+def _said_file(kinds: str) -> Path:
+    return _file('FWCS_DB = { __realmkinds = { ' + kinds + ' }, __chars = { ["USPvE|Thrallson"] = { name = "Thrallson", realm = "USPvE", '
+                 'house = "USPvE", faction = "Horde", t = 2 } }, ["USPvE|Horde"] = { [2589] = { t = 1700000000, complete = true, l = { { 5, 1, 2 } } } } }')
+
+
+def test_a_scan_of_a_said_kind_carries_the_one_id_of_that_kind_and_none_when_it_could_be_two():
+    one = pipe.scan_document(scan.load_scan(_said_file('[4321] = "PvE", [5555] = "PvP"'), "USPvE", "Horde"))
+    assert one["realm"] == "USPvE" and one["realm_id"] == 4321 and one["realm_id_said"] is True
+    assert "realm_id_inferred" not in one and pipe.check_scan(one) is None
+    two = pipe.scan_document(scan.load_scan(_said_file('[4321] = "PvE", [6666] = "PvE"'), "USPvE", "Horde"))     # either realm: no guess
+    assert "realm_id" not in two and "realm_id_said" not in two
+    none = pipe.scan_document(scan.load_scan(_said_file('[5555] = "PvP"'), "USPvE", "Horde"))
+    assert "realm_id" not in none and "realm_id_said" not in none
+    zero = pipe.scan_document(scan.load_scan(_said_file('[0] = "PvE"'), "USPvE", "Horde"))                    # said where the GUID gave no id
+    assert "realm_id" not in zero
+    assert scan.said_realm_id({"__realmkinds": {1: "RP PvP"}}, "EURPPvP") == 1 and scan.said_realm_id({"__realmkinds": {1: "RP PvP"}}, "USPvE") is None
+    assert scan.said_realm_id({"__realmkinds": {1: "PvE"}}, "Stonespine") is None
+    # a pair the file holds for a realm by name is that realm's, not a said one
+    named = pipe.scan_document(scan.load_scan(_lua_file_named(), "CAMWOW US2 Realm 1 PvE", "Horde"))
+    assert named["realm_id"] == 4321 and "realm_id_said" not in named
+
+
+def _lua_file_named() -> Path:
+    from test_no_realm import _lua_file
+    return _lua_file(realms=("CAMWOW US2 Realm 1 PvE",), ids={4321: "CAMWOW US2 Realm 1 PvE"}, broken=False)
+
+
+def test_the_pipes_check_takes_the_said_mark_and_an_older_helper_drops_a_house_name_from_the_site():
+    doc = pipe.scan_document(scan.load_scan(_said_file('[4321] = "PvE"'), "USPvE", "Horde"))
+    assert doc["realm_id_said"] is True and pipe.check_scan(doc) is None and pipe.check_scan(dict(doc, something_new=1)) is None
+    rules = [[r"^CAMWOW (?:US|AU)\d+ Realm \d+ (PvE|PvP|RP PvP|RP)$", r"US \1"],
+             [r"^CAMWOW (EU|TW|KR)\d+ Realm \d+ (PvE|PvP|RP PvP|RP)$", r"\1 \2"]]
+    site = {"realm_ids": {"4321": "USPvE", "5555": "EURPPvP", "6666": "CAMWOW US2 Realm 1 PvE"}, "rules": rules,
+            "houses": [{"key": "uspve--horde", "realm": "US PvE", "faction": "Horde"}, {"key": "eurppvp--horde", "realm": "EU RP PvP", "faction": "Horde"}]}
+    assert plans.realm_ids(site) == {4321: "USPvE", 5555: "EURPPvP", 6666: "CAMWOW US2 Realm 1 PvE"}
+    assert plans.realm_ids(dict(site, houses=[site["houses"][0]])) == {4321: "USPvE", 6666: "CAMWOW US2 Realm 1 PvE"}   # a house the site lists
+    assert plans.realm_ids(dict(site, houses=[])) == {6666: "CAMWOW US2 Realm 1 PvE"}
+    assert plans.realm_ids(dict(site, realm_ids={"1": "uspve", "2": "US PvE", "3": "AUPvE"})) == {}
+    # a helper before this took only what the site's rules name: its check (`ruled`) fails on a house's own name
+    assert plans.ruled("USPvE", rules) is None and plans.ruled("EURPPvP", rules) is None
 
 
 if __name__ == "__main__":

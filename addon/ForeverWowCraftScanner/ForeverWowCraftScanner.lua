@@ -56,6 +56,7 @@
 --   FWCS_DB.__groups = { [house's realm] = { connected realms, without spaces } }
 --   FWCS_DB.__realmids = { [realm id, from the character's GUID] = name as shown }   -- pairs the game gave
 --   FWCS_DB.__realmids_inferred = { [realm id] = name }   -- pairs worked out from the one realm known (RealmName, e)
+--   FWCS_DB.__realmrules = { [realm id] = "PvE" }   -- the kind the game's rules said (RulesKind), for the helper; never a realm's name
 --   FWCS_DB.__chars = { ["<house's realm>|<character>"] = what it has: see Window.lua }
 
 local _, ns = ...
@@ -206,10 +207,17 @@ end
 --   c'. the name inferred for this id at an earlier login (FWCS_DB.__realmids_inferred[id]);
 --   e. the one realm this account knew before (__realms, the keys of its scans, its
 --      characters), when it knew exactly one and no id says it is another realm's;
+--   then (1.8.9) the kind the game itself says: the realm's rules (RulesKind below; Auctionator
+--      and Questie read the same rules), as the house's own name, how "rules";
 --   f. the kind of realm the player said this is (/fwc realm pve, 1.8.8; ChosenRealm below):
 --      not a realm's name but its auction house's, which is all a realm's name is used for;
 --   else nil: the realm is not known, and nothing is scanned or kept under a realm.
--- Returns the name and how it was known: "game", "id", "helper", "inferred", "one" or "said".
+-- Where the rules say a kind, a name of c, d, c' or e whose kind can be read from it (" PvE", " PvP",
+-- " RP", " RP PvP" at its end, or a house's own name) and is another kind is passed over, so a
+-- character on a PvP realm is not taken for the one PvE realm the account knew; and what the player
+-- said (f) is used only when it agrees (the rules source comes first, so they win).
+-- A "rules" name is never kept as a realm's name, like a "said" one; only the kind, by id (__realmrules).
+-- Returns the name and how it was known: "game", "id", "helper", "inferred", "one", "rules" or "said".
 local function Named(s) return type(s) == "string" and s ~= "" and s ~= "?" and s or nil end
 
 local function RealmID()
@@ -231,8 +239,24 @@ local KIND_SAID = { ["PvE"] = true, ["PvP"] = true, ["RP"] = true, ["RP PvP"] = 
 local REGION_NUMBERS = { [1] = "US", [2] = "KR", [3] = "EU", [4] = "TW" }
 local REGIONS = { US = true, EU = true, KR = true, TW = true }
 local HOUSE_NAMES = {}                                  -- every name ChosenRealm can give: never a realm the account "knew"
+local HOUSE_KIND = {}                                   -- a house's own name -> its kind
 for region in pairs(REGIONS) do
-  for kind in pairs(KIND_SAID) do HOUSE_NAMES[region .. kind:gsub(" ", "")] = true end
+  for kind in pairs(KIND_SAID) do
+    HOUSE_NAMES[region .. kind:gsub(" ", "")] = true
+    HOUSE_KIND[region .. kind:gsub(" ", "")] = kind
+  end
+end
+
+-- The kind a realm's name tells, or nil when it tells none: a house's own name, or a name ending in
+-- " PvE", " PvP", " RP PvP" or " RP".
+local function KindOfName(name)
+  if type(name) ~= "string" then return nil end
+  if HOUSE_KIND[name] then return HOUSE_KIND[name] end
+  if name:sub(-7) == " RP PvP" then return "RP PvP" end
+  local tail = name:sub(-4)
+  if tail == " PvE" or tail == " PvP" then return tail:sub(2) end
+  if name:sub(-3) == " RP" then return "RP" end
+  return nil
 end
 
 local function Region()
@@ -247,6 +271,45 @@ local function Region()
     if REGIONS[region] and region ~= found then found, n = region, n + 1 end
   end
   return n == 1 and found or nil
+end
+
+-- The kind of realm the game says this is (the realm's rules, as Auctionator and Questie read them):
+-- "PvE", "PvP", "RP" or "RP PvP"; nil unless the game can be trusted to say. PvE is "no rule is on",
+-- which a call made too early, or a client without these rules, answers alike, so it is trusted only
+-- where RegionalUniqueNamesEnabled() is true and every answer is a boolean. Hardcore (a house the
+-- project does not serve) is nil. Asked live each time: nothing from an early call is kept.
+local function RulesKind()
+  if type(RegionalUniqueNamesEnabled) ~= "function" then return nil end
+  local ok, enabled = pcall(RegionalUniqueNamesEnabled)
+  if not ok or enabled ~= true then return nil end
+  if type(C_GameRules) ~= "table" or type(C_GameRules.IsGameRuleActive) ~= "function" then return nil end
+  local rules = type(Enum) == "table" and Enum.GameRule
+  if type(rules) ~= "table" or type(rules.PvPRuleset) ~= "number" or type(rules.RPRuleset) ~= "number" then return nil end
+  local function active(rule)
+    local called, on = pcall(C_GameRules.IsGameRuleActive, rule)
+    if not called or type(on) ~= "boolean" then return nil end
+    return on
+  end
+  local pvp, rp = active(rules.PvPRuleset), active(rules.RPRuleset)
+  if pvp == nil or rp == nil then return nil end
+  if type(rules.HardcoreRuleset) == "number" and active(rules.HardcoreRuleset) ~= false then return nil end   -- on, or not answered: no house of ours
+  if pvp and rp then return "RP PvP" end
+  return (pvp and "PvP") or (rp and "RP") or "PvE"
+end
+
+local function RulesRealm()
+  local kind = RulesKind()
+  local region = kind and Region()
+  return region and (region .. kind:gsub(" ", "")) or nil
+end
+
+-- What the game said of this realm's kind, kept by the realm's id for the helper (never a realm's
+-- name): FWCS_DB.__realmrules = { [id] = "PvE" }, ids above 0 only.
+local function NoteRules()
+  local id, kind = RealmID(), RulesKind()
+  if not (id and kind and type(FWCS_DB) == "table") then return end
+  if type(FWCS_DB.__realmrules) ~= "table" then FWCS_DB.__realmrules = {} end
+  FWCS_DB.__realmrules[id] = kind
 end
 
 local function ChosenRealm()
@@ -306,7 +369,8 @@ local function KnownRealms()
 end
 
 -- (e) The one realm this account knew before that can be this character's, or nil (none, or
--- two and more): a realm whose id is known, and is not this character's, is not its realm.
+-- two and more): a realm whose id is known (saved, inferred, or in the helper's table), and is
+-- not this character's, is not its realm.
 -- Worked out once a login (nothing it reads changes while the realm is not known) and again at
 -- the next.
 local oneRealm, oneRealmLooked = nil, false
@@ -316,10 +380,11 @@ local function OneKnownRealm()
   local found, n = KnownRealms()
   local id = RealmID()
   if id then
-    for _, which in ipairs({ "__realmids", "__realmids_inferred" }) do     -- by name: either table may be missing
-      local ids = FWCS_DB[which]
+    for _, which in ipairs({ "__realmids", "__realmids_inferred", false }) do     -- by name: either table may be missing; false: the helper's table
+      local ids
+      if which then ids = FWCS_DB[which] else ids = FWCS_REALM_IDS end
       for other, name in pairs(type(ids) == "table" and ids or {}) do
-        if other ~= id and Named(name) and found[HouseOfName(name)] then found[HouseOfName(name)], n = nil, n - 1 end
+        if other ~= id and Named(name) and not HOUSE_NAMES[name] and found[HouseOfName(name)] then found[HouseOfName(name)], n = nil, n - 1 end
       end
     end
   end
@@ -330,19 +395,26 @@ end
 local function RealmName()
   local name = GameRealmName()
   if name then return name, "game" end
+  local rules = RulesKind()
+  local function fits(candidate)          -- of the kind the rules say, or of no kind that can be read from it
+    local kind = KindOfName(candidate)
+    return not (rules and kind and kind ~= rules)
+  end
   local id = RealmID()
   if id then
     name = Named(type(FWCS_DB.__realmids) == "table" and FWCS_DB.__realmids[id])
-    if name then return name, "id" end
+    if name and fits(name) then return name, "id" end
     name = Named(type(FWCS_REALM_IDS) == "table" and FWCS_REALM_IDS[id])
-    if name then return name, "helper" end
+    if name and fits(name) then return name, "helper" end
     name = Named(type(FWCS_DB.__realmids_inferred) == "table" and FWCS_DB.__realmids_inferred[id])
-    if name then return name, "inferred" end
+    if name and fits(name) then return name, "inferred" end
   end
   name = OneKnownRealm()
-  if name then return name, "one" end
+  if name and fits(name) then return name, "one" end
+  name = RulesRealm()
+  if name then return name, "rules" end
   name = ChosenRealm()
-  if name then return name, "said" end
+  if name and fits(name) then return name, "said" end
   return nil
 end
 
@@ -362,6 +434,7 @@ local REALM_UNKNOWN = "the game is not telling the addon which realm this is. Ty
 
 local function NoteRealmNames()
   oneRealm, oneRealmLooked = nil, false            -- the saved file is in: (e) is worked out again
+  NoteRules()
   local name, how = RealmName()
   if not name then return end
   local id = RealmID()
@@ -373,7 +446,7 @@ local function NoteRealmNames()
     FWCS_DB.__realmids_inferred = FWCS_DB.__realmids_inferred or {}
     FWCS_DB.__realmids_inferred[id] = name
   end
-  if how == "said" then return end                    -- a house's name, said by the player: no realm's name to keep
+  if how == "said" or how == "rules" or HOUSE_NAMES[name] then return end    -- a house's name (said, the game's rules, or the helper's table's): no realm's name to keep
   FWCS_DB.__realms = FWCS_DB.__realms or {}
   local spelt = Named(GetNormalizedRealmName and GetNormalizedRealmName()) or ShortName(name)
   if spelt ~= "" and (how == "game" or FWCS_DB.__realms[spelt] == nil) then FWCS_DB.__realms[spelt] = name end   -- never [""]
@@ -1698,7 +1771,11 @@ loader:RegisterEvent("PLAYER_ENTERING_WORLD")
 loader:RegisterEvent("AUCTION_HOUSE_SHOW")
 loader:RegisterEvent("AUCTION_HOUSE_CLOSED")
 loader:RegisterEvent("REPLICATE_ITEM_LIST_UPDATE")
+pcall(loader.RegisterEvent, loader, "GAME_RULES_CHANGED")      -- a client without it refuses the name
 loader:SetScript("OnEvent", function(_, event, isInitialLogin)
+  -- the rules asked once the character is in the world, and when they change: what an early login call said is replaced
+  if event == "GAME_RULES_CHANGED" then NoteRules(); return end
+  if event == "PLAYER_ENTERING_WORLD" then NoteRules() end
   if event == "PLAYER_ENTERING_WORLD" then
     if isInitialLogin and not FWCS_PLANS_WRITTEN then      -- an install without a helper (CurseForge): the helper stamps FWCS_PLANS_WRITTEN when it writes
       Print("the helper is not on this PC: /fwc says what it does and where to get it. What the addon records stays here until then.")
@@ -1797,6 +1874,7 @@ function ns.SayRealmKind(arg)
   local usage = "/fwc realm pve | pvp | rp | rppvp"
   if word == "" then
     if not name then return "the realm is not known. Say which kind you play on: " .. usage end
+    if how == "rules" then return "this is a " .. tostring(Region()) .. " " .. tostring(RulesKind()) .. " realm (the game says so)." end
     return how == "said" and ("you said this is a realm of " .. name .. ". Change it with " .. usage .. ", or /fwc realm clear")
       or ("this realm is " .. name .. ".")
   end
@@ -1807,6 +1885,10 @@ function ns.SayRealmKind(arg)
     return "forgotten. Type /reload."
   end
   if not KINDS[word] then return "no such kind of realm: " .. usage end
+  local ruled = RulesKind()
+  if ruled and ruled ~= KINDS[word] then
+    return "the game says this is a " .. tostring(Region()) .. " " .. ruled .. " realm, not " .. KINDS[word] .. ": nothing kept."
+  end
   if name and how ~= "said" then return "this realm is already known (" .. name .. "): nothing to say." end
   if not Region() then return "the addon cannot tell your region yet. Start the ForeverWowCraft helper, type /reload, then say it again." end
   FWCS_DB.__realmkinds = type(FWCS_DB.__realmkinds) == "table" and FWCS_DB.__realmkinds or {}

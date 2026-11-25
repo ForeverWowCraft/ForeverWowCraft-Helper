@@ -118,7 +118,8 @@ which no earlier addon reads; with no price list the text is what it was before.
 Since 1.8.7 houses.json may say which realm a realm id is (`realm_ids`: {"<id>": "<realm name>"}, the id being the number
 in a character's GUID), for an addon the game names no realm to (a hotfix of 20 Nov 2026) and that cannot work it out from
 what the account knew. Only an id of one to ten digits with a name the site's own `rules` name an auction house for is
-taken (`realm_ids`). They are written into Plans.lua as one line, before FWCS_SITE,
+taken (`realm_ids`), or, since 1.8.9, an auction house's own name spelt without spaces ("USPvE") of a house the document
+lists: for a realm only its kind is known of, which the addon takes as the realm, never as a realm's name. They are written into Plans.lua as one line, before FWCS_SITE,
 
     FWCS_REALM_IDS = { [<id>]="<realm name>", ... }
 
@@ -542,10 +543,14 @@ def realm_ids(doc) -> dict[int, str]:
     rules = doc.get("rules") if isinstance(doc, dict) and isinstance(doc.get("rules"), list) else []
     if not isinstance(given, dict) or len(given) > MAX_REALM_IDS:
         return {}
+    # or a house's own name spelt without spaces ("USPvE"), of a house the document lists ("US PvE"):
+    # the kind of realm players there said, which names no realm (an addon of 1.8.8 and later)
+    listed = doc.get("houses") if isinstance(doc.get("houses"), list) else []
+    own = {re.sub(r"\s+", "", h["realm"]) for h in listed if isinstance(h, dict) and isinstance(h.get("realm"), str)}
     out = {}
     for key, name in given.items():
         if (isinstance(key, str) and _digits(key) and 1 <= int(key) <= MAX_REALM_ID and isinstance(name, str)
-                and 0 < len(name) <= 80 and ruled(name, rules)):       # noqa: PLR2004
+                and 0 < len(name) <= 80 and (ruled(name, rules) or name in own)):       # noqa: PLR2004
             out[int(key)] = name
     return dict(sorted(out.items()))
 

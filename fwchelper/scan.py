@@ -114,6 +114,12 @@ class ScanData:
     # than given by the game. None when the file pairs no id (or two) with the realm.
     realm_id: int | None = None
     realm_id_inferred: bool = False
+    # True when the realm is a house's own name ("USPvE", what a player said the kind of their realm
+    # was) and the id is the one realm of that kind the file knows (said_realm_id).
+    realm_id_said: bool = False
+    # True when the realm is a house's own name and the id is the one the game's own rules gave for
+    # that kind (the addon's __realmrules, 1.8.9).
+    realm_id_rules: bool = False
 
     @property
     def dataset(self) -> str:
@@ -421,6 +427,43 @@ def realm_id_of(db: dict, realm: str) -> tuple[int | None, bool]:
     return None, False
 
 
+HOUSE_OWN_NAME = re.compile(r"(?:US|EU|KR|TW)(?:PvE|PvP|RPPvP|RP)")
+KIND_OF_NAME = {"PvE": "PvE", "PvP": "PvP", "RP": "RP", "RPPvP": "RP PvP"}
+
+
+def _ids_of_kind(table, kind: str) -> set[int]:
+    """The ids (above 0) a saved table of { id = kind } names for `kind`."""
+    rows = enumerate(table, 1) if isinstance(table, list) else table.items() if isinstance(table, dict) else []
+    return {i for i, k in rows if isinstance(i, int) and not isinstance(i, bool) and i > 0 and k == kind}
+
+
+def said_realm_id(db: dict, realm: str) -> int | None:
+    """The id of the realm a player said the kind of, when `realm` is a house's own name ("USPvE")
+    and the saved file's __realmkinds names exactly one id for that kind; None with two or more,
+    with none, or when `realm` is any other name. The scan could be from either of two realms of
+    one kind, and a guess would put a realm's id under the wrong house."""
+    if not isinstance(realm, str) or not HOUSE_OWN_NAME.fullmatch(realm):
+        return None
+    ids = _ids_of_kind(db.get("__realmkinds"), KIND_OF_NAME[realm[2:]])
+    return next(iter(ids)) if len(ids) == 1 else None
+
+
+def kind_realm_id(db: dict, realm: str) -> tuple[int | None, bool]:
+    """The id a scan under a house's own name carries as evidence, and whether the game said the
+    kind (__realmrules, addon 1.8.9) and not the player (__realmkinds): the one id the two tables
+    name for that kind together, marked as the game's when __realmrules names it. (None, False)
+    with two or more ids, with none, or when `realm` is any other name."""
+    if not isinstance(realm, str) or not HOUSE_OWN_NAME.fullmatch(realm):
+        return None, False
+    kind = KIND_OF_NAME[realm[2:]]
+    by_rules, by_player = _ids_of_kind(db.get("__realmrules"), kind), _ids_of_kind(db.get("__realmkinds"), kind)
+    ids = by_rules | by_player
+    if len(ids) != 1:
+        return None, False
+    only = next(iter(ids))
+    return only, only in by_rules
+
+
 def saved_db(path: Path | None = None) -> dict:
     """FWCS_DB of the saved file (the newest found when `path` is None), parsed once: {} without
     the file or a readable table. The sightings' readers (vendors, trainers, recipes, colours)
@@ -598,8 +641,12 @@ def load_scan(path: Path | None = None, realm: str | None = None, faction: str |
     names = {k: v for k, v in (saved.get("__realms") or {}).items() if isinstance(k, str) and isinstance(v, str)}
     group = (saved.get("__groups") or {}).get(realm)
     realm_id, inferred = realm_id_of(saved, realm) if realm else (None, False)
+    said = rules = False
+    if realm_id is None and realm:
+        realm_id, rules = kind_realm_id(saved, realm)
+        said = realm_id is not None and not rules
     return ScanData(items=items, realm=realm, path=path, history=history, faction=faction, realm_names=names,
-                    connected=[str(g) for g in group] if isinstance(group, list) else [], realm_id=realm_id, realm_id_inferred=inferred)
+                    connected=[str(g) for g in group] if isinstance(group, list) else [], realm_id=realm_id, realm_id_inferred=inferred, realm_id_said=said, realm_id_rules=rules)
 
 
 def age_text(scanned_at: int) -> str:

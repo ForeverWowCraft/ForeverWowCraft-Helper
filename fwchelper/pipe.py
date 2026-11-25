@@ -125,8 +125,11 @@ def scan_document(sd: ScanData) -> dict:
     # `mark` leaves it out, so a scan sent before is not sent again for it
     if sd.realm_id is not None:
         doc["realm_id"] = int(sd.realm_id)
-        if sd.realm_id_inferred:
-            doc["realm_id_inferred"] = True
+        # the marks: worked out from the one realm known; the realm is a house's own name and the id the one
+        # realm of the kind the player said; the same, where the game's own rules gave the kind
+        for mark in ("realm_id_inferred", "realm_id_said", "realm_id_rules"):
+            if getattr(sd, mark):
+                doc[mark] = True
     return doc
 
 
