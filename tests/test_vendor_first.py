@@ -128,8 +128,8 @@ def test_the_hillmans_belt_case_the_vendor_then_the_hammer_then_the_route():
     assert lua.eval('ns.RouteFor("leatherworking").variant') == "trainer-skill"
     held(lua, bags={LEATHER: 64})
     v = verdict(lua)
-    assert v["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor" and v["place"] == "vendor", v
-    assert v["arrow"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor; using your 60 Medium Leather", v
+    assert v["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic" and v["place"] == "vendor", v
+    assert v["arrow"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic;\nusing your 60 Medium Leather", v
     assert v["note"] == "Using your 60 Medium Leather"
     assert v["aside"] == "Then buy the recipe for Hillman's Belt" and v["aside_place"] == "auction", v
     tip = v["tip"]
@@ -162,7 +162,7 @@ def test_the_bank_then_the_vendor_then_the_hammer():
     assert "In your bank (as counted when it was last open):" in v["tip"] and "Then buy 10 Fine Thread and 10 Gray Dye from a vendor." in v["tip"], v["tip"]
     assert v["aside"] == "Then buy the recipe for Hillman's Belt", v
     held(lua, bags={LEATHER: 60}, bank={LEATHER: 4})
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"
     held(lua, bags={LEATHER: 60, THREAD: 10, DYE: 10}, bank={LEATHER: 4})
     assert verdict(lua)["text"] == "Make 10 Dark Leather Tunic"
 
@@ -174,10 +174,10 @@ def test_the_mailbox_before_the_vendor():
     held(lua, mail={LEATHER: 64, DYE: 3})
     v = verdict(lua)
     assert v["text"] == "Collect from the mailbox: 2 items" and v["place"] == "mailbox", v
-    assert v["arrow"] == "Collect from the mailbox: 2 items; using your 60 Medium Leather", v
+    assert v["arrow"] == "Collect from the mailbox: 2 items;\nusing your 60 Medium Leather", v
     assert "  60 Medium Leather" in v["tip"] and "  3 Gray Dye" in v["tip"] and "Then buy 10 Fine Thread and 7 Gray Dye from a vendor." in v["tip"], v["tip"]
     held(lua, bags={LEATHER: 64, DYE: 3})
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 7 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 7 Gray Dye from a vendor, for 10 Dark Leather Tunic"
 
 
 def test_only_orange_and_yellow_known_recipes_of_this_profession_and_never_a_vendors_goods_alone():
@@ -187,9 +187,9 @@ def test_only_orange_and_yellow_known_recipes_of_this_profession_and_never_a_ven
         return
     lua = game()
     held(lua, bags={LEATHER: 64})
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"
     lua.execute(f"colour[{SPELL_TUNIC}] = 1; ns.HaveChanged()")
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"
     for change in (f"colour[{SPELL_TUNIC}] = 2", f"colour[{SPELL_TUNIC}] = 3", f"colour[{SPELL_TUNIC}] = 0; cooldown[{SPELL_TUNIC}] = 3600",
                    f"cooldown[{SPELL_TUNIC}] = nil; C_TradeSkillUI.GetTradeSkillLineForRecipe = function(id) return 2939, 'Cooking', 185 end"):
         lua.execute(change + "; ns.HaveChanged()")
@@ -200,7 +200,7 @@ def test_only_orange_and_yellow_known_recipes_of_this_profession_and_never_a_ven
     lua.execute("C_TradeSkillUI.GetTradeSkillLineForRecipe = nil; ns.HaveChanged()")
     lua.execute(f"colour[{SPELL_TUNIC}] = 3")
     held(lua, bags={LEATHER: 64, SCALE: 12})
-    assert verdict(lua)["text"] == "Buy 2 Fine Thread from a vendor"
+    assert verdict(lua)["text"] == "Buy 2 Fine Thread from a vendor, for 2 Red Whelp Gloves"
 
 
 def test_what_a_later_stretch_planned_to_use_is_used_now():
@@ -224,7 +224,7 @@ def test_the_route_learned_the_vendor_comes_before_the_auction_house():
     lua.execute(f"learned[{SPELL_BELT}] = true; names[{SPELL_BELT}] = \"Hillman's Belt\"; colour[{SPELL_BELT}] = 0")
     held(lua, bags={LEATHER: 64})
     v = verdict(lua)
-    assert v["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor" and v["aside"] is None, v
+    assert v["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic" and v["aside"] is None, v
     held(lua, bags={LEATHER: 64, THREAD: 10, DYE: 10})
     assert verdict(lua)["text"] == "Make 10 Dark Leather Tunic"
     held(lua, bags={LEATHER: 4, THREAD: 0}, skill=107)
@@ -236,12 +236,12 @@ def test_the_box_off_and_the_profit_route_are_as_before():
         return
     lua = game()
     held(lua, bags={LEATHER: 64})
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"
     lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have off")')
     v = verdict(lua)
     assert v["text"] == "Buy the recipe for Hillman's Belt first" and v["aside"] is None, v
     lua.execute('SlashCmdList.FOREVERWOWCRAFTSCANNER("have on")')
-    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor"
+    assert verdict(lua)["text"] == "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"
     lua = game("profit")
     held(lua, bags={LEATHER: 64})
     v = verdict(lua)
@@ -274,7 +274,7 @@ def test_the_profit_route_follows_its_own_recipes_with_the_box_on():
         v = bags_first.panel_verdict(lua)
         assert v["text"] == expect and (focus == "skill" or v["aside"] is None), (focus, v)
     # 3. a vendor trip: the tunics on the skill-up route; the pattern on the profit route
-    for focus, expect in (("skill", "Buy 10 Fine Thread and 10 Gray Dye from a vendor"), ("profit", "Buy the recipe for Hillman's Belt first")):
+    for focus, expect in (("skill", "Buy 10 Fine Thread and 10 Gray Dye from a vendor, for 10 Dark Leather Tunic"), ("profit", "Buy the recipe for Hillman's Belt first")):
         lua = game(focus)
         held(lua, bags={LEATHER: 64})
         assert verdict(lua)["text"] == expect, (focus, verdict(lua))

@@ -644,6 +644,7 @@ function ns.StandIns(plan, skill)
   local raws = (plan.source and plan.source.steps) or plan.steps
   local ats = {}                                  -- a recipe's colours, from wherever the route lists it as a next-best
   for _, s in ipairs(raws) do
+    if s.spell and s.at then ats[s.spell] = ats[s.spell] or s.at end        -- a stretch's own colours (newer documents)
     for _, a in ipairs(s.alt or {}) do if a.spell and a.at then ats[a.spell] = ats[a.spell] or a.at end end
   end
   local from = math.max(skill, step.from)

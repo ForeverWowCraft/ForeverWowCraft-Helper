@@ -424,11 +424,11 @@ def test_only_orange_and_yellow_known_recipes_orange_first_and_none_cooling_down
     lua.execute(f"colour[{SPELL_SOUP}] = 0; colour[{SPELL_CAKE}] = 0; cooldown[{SPELL_CAKE}] = 3600; ns.HaveChanged()")
     assert panel_verdict(lua)["text"] == "Make 3 Murloc Fin Soup"                   # the cake cooling down: passed over
     held(lua, bags={FIN: 9}, skill=120)                                                # a transmute, by its name, never: the soup's spices from a vendor instead (15 Nov 2026)
-    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor"
+    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor, for 4 Murloc Fin Soup"
     lua.execute(f'names[{SPELL_TRANSMUTE}] = "Fin Thing"; ns.HaveChanged()')        # named otherwise, it would be made
     assert panel_verdict(lua)["text"] == "Make 9 Fin Thing"
     lua.execute(f"GetSpellBaseCooldown = function(id) return id == {SPELL_TRANSMUTE} and 3600000 or 0, 0 end; ns.HaveChanged()")
-    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor"          # unless the client says it has a cooldown at all
+    assert panel_verdict(lua)["text"] == "Buy 4 Hot Spices from a vendor, for 4 Murloc Fin Soup"          # unless the client says it has a cooldown at all
 
 
 def test_a_known_recipe_that_takes_what_the_route_needs_is_made_now():

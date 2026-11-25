@@ -231,6 +231,7 @@ function Standing(profession)
   api.Learned = learned
   if ok and type(v) == "table" then return v end
 end
+ns.craft.Standing = Standing                -- the list reads the verdict's own decision (Verdict.lua, Shopping)
 
 -- in a fight the verdict waits (a bag change, a skill-up or the 5 s ticker would each run a
 -- whole route walk there): it is owed, and run once the fight is over (PLAYER_REGEN_ENABLED)

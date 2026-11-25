@@ -2017,9 +2017,9 @@ def test_the_shopping_list_buys_from_a_vendor_a_stack_a_click():
     click()
     assert len(lua.eval("bought")) == 1
     lua.execute('bags[0] = { { 2589, 14 }, { 2320, 5 } }; Fire("BAG_UPDATE_DELAYED")')
-    assert shop("rows[1].name.text") == "Bleach"                                        # the one with more missing comes first now
-    assert shop("rows[2].need.text") == "need 7, have 5" and shop("rows[2].buy.text") == "Buy 2" and shop("rows[2].buy.enabled") is True and plain("rows[2].status.text") == "20c"
-    click(2)
+    assert shop("rows[2].name.text") == "Bleach"                                        # the merchant's own ware stays first, whatever is missing of the rest
+    assert shop("rows[1].need.text") == "need 7, have 5" and shop("rows[1].buy.text") == "Buy 2" and shop("rows[1].buy.enabled") is True and plain("rows[1].status.text") == "20c"
+    click(1)
     assert [list(r.values()) for r in lua.eval("bought").values()] == [[1, 5], [1, 2]]
     lua.execute('bags[0] = { { 2589, 14 }, { 2320, 7 } }; Fire("BAG_UPDATE_DELAYED")')
     assert shop("rows[1].name.text") == "Bleach" and shop("rows[1].status.text") == "not here"

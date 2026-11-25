@@ -115,6 +115,16 @@ are written all the same. It is written into Plans.lua as one more global, after
 
 which no earlier addon reads; with no price list the text is what it was before.
 
+Since 1.8.7 houses.json may say which realm a realm id is (`realm_ids`: {"<id>": "<realm name>"}, the id being the number
+in a character's GUID), for an addon the game names no realm to (a hotfix of 20 Nov 2026) and that cannot work it out from
+what the account knew. Only an id of one to ten digits with a name the site's own `rules` name an auction house for is
+taken (`realm_ids`). They are written into Plans.lua as one line, before FWCS_SITE,
+
+    FWCS_REALM_IDS = { [<id>]="<realm name>", ... }
+
+which the addon reads since 1.8.6 (ns.RealmName); a look that finds no newer routes still sets the line (`touch`), and with
+no pairs the text is what it was before.
+
 Times are unix seconds, money is copper.
 """
 from __future__ import annotations
@@ -140,6 +150,9 @@ FISHING_FILE = "extra/cooking-fishing.ingame.json"      # in a house's folder on
 PRICES_FORMAT = "fwc-prices/1"
 PRICES_GLOBAL = "FWCS_PRICES"     # the houses' lowest prices, for the addon's item tooltips (since 1.8.4)
 PRICES_FILE = "prices.json"       # in a house's folder on the site; its entry in houses.json says "prices": true
+REALM_IDS_GLOBAL = "FWCS_REALM_IDS"      # {realm id: realm name}, for an addon the game names no realm to (since 1.8.7; the addon reads it since 1.8.6)
+MAX_REALM_IDS = 2000              # pairs taken from the site: Forever has under a hundred realms
+MAX_REALM_ID = 9_999_999_999      # ten digits, as the pipe holds an id to
 MAX_PRICE_BYTES = 2 * 1024 * 1024          # of a price list, unpacked: a house's is about 22 kB (15 Nov 2026)
 MAX_PRICE_ITEMS = 20000                    # items of a price list: a house lists under 2,000
 MAX_COPPER = 99_999_999_999                # a price: the most gold the game holds, 9,999,999g 99s 99c
@@ -513,14 +526,41 @@ def fresh_every() -> int:
     return INTERVALS.get("fresh_every", settings.FRESH_EVERY)
 
 
+# The realms' ids the site last said (houses.json, `realm_ids`), as realm_ids read them: what the
+# addon is handed as FWCS_REALM_IDS. Empty until houses.json has been fetched, or when it says none.
+REALM_IDS: dict[int, str] = {}
+
+
+def realm_ids(doc) -> dict[int, str]:
+    """{realm id: realm name} from a houses.json document (`realm_ids`, since 25 Nov 2026): the
+    game names no realm to an addon since 20 Nov 2026, the character's GUID still carries the
+    realm's id, and the site says which realm an id is once enough scanners agree. Only what the
+    addon can use and the game can load is taken: an id of one to ten digits, a name of at most 80
+    characters that the site's own rules (`rules`) name an auction house for. Anything else is
+    passed over, and more than MAX_REALM_IDS pairs are none: that is no list of realms."""
+    given = doc.get("realm_ids") if isinstance(doc, dict) else None
+    rules = doc.get("rules") if isinstance(doc, dict) and isinstance(doc.get("rules"), list) else []
+    if not isinstance(given, dict) or len(given) > MAX_REALM_IDS:
+        return {}
+    out = {}
+    for key, name in given.items():
+        if (isinstance(key, str) and _digits(key) and 1 <= int(key) <= MAX_REALM_ID and isinstance(name, str)
+                and 0 < len(name) <= 80 and ruled(name, rules)):       # noqa: PLR2004
+            out[int(key)] = name
+    return dict(sorted(out.items()))
+
+
 def houses(site: str | None = None) -> list[dict]:
-    """What the site has: its auction houses. What it says of how often to look is kept (INTERVALS)."""
+    """What the site has: its auction houses. What it says of how often to look is kept (INTERVALS),
+    and what it says of the realms' ids (REALM_IDS)."""
     doc = get((site or site_url()) + "/data/houses.json")
     listed = doc.get("houses") if isinstance(doc, dict) else None
     if not isinstance(listed, list):
         raise PlansError("the site lists no auction houses")
     INTERVALS.clear()
     INTERVALS.update(hints(doc))
+    REALM_IDS.clear()
+    REALM_IDS.update(realm_ids(doc))
     rules = doc.get("rules") if isinstance(doc.get("rules"), list) else []      # the name rules, on every house for by_rule
     return [dict(h, rules=rules) for h in listed if isinstance(h, dict) and isinstance(h.get("key"), str) and re.fullmatch(r"[a-z0-9\-]+", h["key"])
             and isinstance(h.get("faction", ""), str)]
@@ -649,13 +689,18 @@ def site_line(houses: list[list[str]], at: int | None = None) -> str:
     return f"{SITE_GLOBAL} = {{ at = {int(at if at is not None else time.time())}, houses = {lua(houses)} }}"
 
 
+def realm_ids_line(ids: dict[int, str]) -> str:
+    """The FWCS_REALM_IDS line (one line: `touch` replaces it as a line): { [id]="name", ... }."""
+    return f"{REALM_IDS_GLOBAL} = {{ " + ", ".join(f"[{int(i)}]={lua(str(n))}" for i, n in sorted(ids.items())) + " }"
+
+
 def problem_line(kind: str, at: int | None = None) -> str:
     """The FWCS_PLANS_PROBLEM line: when, and which of "reach", "update", "unusable"; nothing else of the error."""
     return f"{PROBLEM_GLOBAL} = {{ at = {int(at if at is not None else time.time())}, kind = {lua(kind)} }}"
 
 
 def plans_text(docs: list[dict], site: str, written: int | None = None, routes: dict | None = None,  # noqa: PLR0913 - one argument a global of the file
-               site_houses: list[list[str]] | None = None, prices: dict | None = None) -> str:
+               site_houses: list[list[str]] | None = None, prices: dict | None = None, realm_ids: dict[int, str] | None = None) -> str:
     """Plans.lua for these documents: the routes, and when they were written (the addon tells
     from it whether the helper runs). Nothing else: until 1.5.6 a helper run from a checkout
     of the repository added FWCS_DEV = true, which showed the addon's scanner bar, and a copy
@@ -664,7 +709,8 @@ def plans_text(docs: list[dict], site: str, written: int | None = None, routes: 
     after the first, and `site_houses` (`site_list`) as FWCS_SITE after that; with neither the text is what it
     was before 1.8.0, byte for byte, and with either everything up to the new global is that text. `prices`
     ({house: its price list}, `prices_for`) is FWCS_PRICES, after FWCS_ROUTES and before FWCS_SITE, and only
-    when there is one: the text before it is unchanged."""
+    when there is one: the text before it is unchanged. `realm_ids` ({realm id: realm name}, the site's) is
+    FWCS_REALM_IDS, one line before FWCS_SITE, and only when there are some."""
     now = int(written if written is not None else time.time())
     return "\n".join([
         f"-- Written by `python fwch.py plans` from {site}; do not edit by hand.",
@@ -673,6 +719,7 @@ def plans_text(docs: list[dict], site: str, written: int | None = None, routes: 
         f"{PLANS_GLOBAL} = " + lua({d["house"]: for_addon(d) for d in docs}),
         *([f"{ROUTES_GLOBAL} = " + lua(routes)] if routes else []),
         *([f"{PRICES_GLOBAL} = " + lua(prices)] if prices else []),
+        *([realm_ids_line(realm_ids)] if realm_ids else []),
         *([site_line(site_houses, now)] if site_houses is not None else []), ""])
 
 
@@ -726,10 +773,10 @@ def stamps(path: Path | None = None) -> dict[str, int]:
     return held(path)[0]
 
 
-def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: list[list[str]] | None = None,
-          prices: dict | None = None) -> list[Path]:
+def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: list[list[str]] | None = None,  # noqa: PLR0913 - one argument a global of the file
+          prices: dict | None = None, realm_ids: dict[int, str] | None = None) -> list[Path]:
     """Write Plans.lua: the helper's own copy, and the installed addon's when it is installed."""
-    text = plans_text(docs, site, routes=routes, site_houses=site_houses, prices=prices)
+    text = plans_text(docs, site, routes=routes, site_houses=site_houses, prices=prices, realm_ids=realm_ids)
     targets = [kept_file()] + ([installed_file()] if installed_file().parent.is_dir() else [])
     for t in targets:
         scan.write_whole(t, text)
@@ -739,29 +786,34 @@ def write(docs: list[dict], site: str, routes: dict | None = None, site_houses: 
 _STAMP = re.compile(rf"^{PLANS_GLOBAL}_WRITTEN = \d+$", re.M)
 _SITE_LINE = re.compile(rf"^{SITE_GLOBAL} = .*\n?", re.M)
 _PROBLEM_LINE = re.compile(rf"^{PROBLEM_GLOBAL} = .*\n?", re.M)
+_REALM_IDS_LINE = re.compile(rf"^{REALM_IDS_GLOBAL} = .*\n?", re.M)
 
 
-def _retouch(text: str, site_houses: list[list[str]] | None, kind: str | None) -> str:
-    """The text with the stamp at now, the problem line as `kind` says (None: none) and FWCS_SITE as `site_houses` says (None:
-    as it is, or none). Both one-line globals come last, the site's first; the routes are left as they are."""
+def _retouch(text: str, site_houses: list[list[str]] | None, kind: str | None, realm_ids: dict[int, str] | None = None) -> str:
+    """The text with the stamp at now, the problem line as `kind` says (None: none), FWCS_SITE as `site_houses` says (None:
+    as it is, or none) and FWCS_REALM_IDS as `realm_ids` says (None: as it is, or none; empty: none). The one-line globals
+    come last, the realms' ids, then the site's, then the problem; the routes are left as they are."""
     now = int(time.time())
-    kept = _SITE_LINE.search(text)
-    body = _PROBLEM_LINE.sub("", _SITE_LINE.sub("", _STAMP.sub(f"{PLANS_GLOBAL}_WRITTEN = {now}", text, count=1)))
+    kept, kept_ids = _SITE_LINE.search(text), _REALM_IDS_LINE.search(text)
+    body = _STAMP.sub(f"{PLANS_GLOBAL}_WRITTEN = {now}", text, count=1)
+    body = _PROBLEM_LINE.sub("", _SITE_LINE.sub("", _REALM_IDS_LINE.sub("", body)))
     body = body if body.endswith("\n") else body + "\n"
+    ids = ([realm_ids_line(realm_ids)] if realm_ids else []) if realm_ids is not None else [kept_ids.group(0).rstrip("\n")] if kept_ids else []
     tail = [site_line(site_houses, now)] if site_houses is not None else [kept.group(0).rstrip("\n")] if kept else []
-    return body + "".join(line + "\n" for line in tail + ([problem_line(kind, now)] if kind else []))
+    return body + "".join(line + "\n" for line in ids + tail + ([problem_line(kind, now)] if kind else []))
 
 
-def touch(site_houses: list[list[str]] | None = None) -> None:
+def touch(site_houses: list[list[str]] | None = None, realm_ids: dict[int, str] | None = None) -> None:
     """Move the written-at stamp of the Plans.lua files to now, leaving the routes as they are:
     the addon tells from it that the helper is running. A look that worked also clears the problem line, and
-    `site_houses` (`site_list`) sets FWCS_SITE, added when the file (an earlier helper's) has none. A file without
-    the stamp (from an older helper) is left alone."""
+    `site_houses` (`site_list`) sets FWCS_SITE, added when the file (an earlier helper's) has none; `realm_ids`
+    (the site's, REALM_IDS) sets FWCS_REALM_IDS the same way, so that a realm the site learnt the id of since
+    reaches the addon without new routes. A file without the stamp (from an older helper) is left alone."""
     for t in [kept_file()] + ([installed_file()] if installed_file().is_file() else []):
         try:
             text = t.read_text(encoding="utf-8")
             if _STAMP.search(text):
-                scan.write_whole(t, _retouch(text, site_houses, None))
+                scan.write_whole(t, _retouch(text, site_houses, None, realm_ids))
         except OSError:
             pass
 
@@ -804,9 +856,10 @@ def _refresh(site: str, force: bool) -> tuple[list[dict], list[Path]]:
     # a house's price list the kept file lacks (written by an older helper), unless this one left it out of the same data
     lacks = {h["key"] for h in chosen if h.get("prices") is True and (h["key"], current[h["key"]]) not in _refused} - priced()
     seen = site_list(listed)
+    ids = dict(REALM_IDS)                               # as houses.json said them just now
     DROPPED.clear()
     if not force and not missing and current == have and wants <= set(kept_routes) and not lacks:
-        touch(seen)                                     # the addon still sees that the helper runs, and which houses the site lists
+        touch(seen, ids)                                # the addon still sees that the helper runs, which houses the site lists, and the realms' ids
         return [], []
     docs = [fetch(h, site) for h in chosen]
     for d, h in zip(docs, chosen):                      # as houses.json has it, so that "nothing new" is told from it alone
@@ -814,7 +867,7 @@ def _refresh(site: str, force: bool) -> tuple[list[dict], list[Path]]:
         mine = by_rule(h, want)                         # a realm of the house by its name: into the list the addon finds its house by
         if mine:
             d["realms"] = sorted({*(d.get("realms") or []), *mine})
-    return docs, write(docs, site, routes_for(chosen, site, kept_routes), seen, prices_for(chosen, site))
+    return docs, write(docs, site, routes_for(chosen, site, kept_routes), seen, prices_for(chosen, site), ids)
 
 
 def age(doc: dict) -> str:

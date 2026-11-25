@@ -15,7 +15,9 @@
 -- stack-split box asks it (players got odd amounts when it was given bundles, 10 Nov 2026).
 --
 -- The list is the Make button's (Craft.lua, ns.craft.Shopping): the route's next step at the
--- character's skill, less the bags. It opens by itself when the auction house opens with
+-- character's skill, less the bags, or what the arrow names now when that is a recipe the
+-- character knows that stands in for it (Verdict.lua, Shopping): that one's goods, then a heading
+-- row ("Then: ...") and the step's needs; at a merchant, the rows it sells first. It opens by itself when the auction house opens with
 -- something to buy, and from a click on the Make button when it says "Buy".
 
 local _, ns = ...
@@ -207,7 +209,7 @@ function Prime()
   end
   for _, row in ipairs(panel.rows) do
     local e = rawget(row, "entry")
-    if e and e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not known[e.item] and not bought[e.item] then
+    if e and e.item and e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not known[e.item] and not bought[e.item] then
       Search(e.item, row)
       return
     end
@@ -238,7 +240,7 @@ end
 -- on the next click; an item not yet searched is searched first, and the button then says how many
 local function Click(row)
   local e = rawget(row, "entry")
-  if not e then return end
+  if not e or e.heading then return end
   if merchant and merchant[e.item] then BuyAtVendor(row, e); return end
   if not AhOpen() then return end
   -- the house's calls come first in a click, before anything is done to the button or the
@@ -462,16 +464,44 @@ local function Place()
   end
 end
 
+-- The rows as shown: the merchant open sells some of them, those first (a stable order, within
+-- each part: a heading row ({ heading = text }, the "then" part of the list, Verdict.lua Shopping)
+-- ends a part)
+local function Ordered()
+  if not merchant then return list end
+  local out, part = {}, {}
+  local function Flush()
+    for _, here in ipairs({ true, false }) do
+      for _, e in ipairs(part) do if (merchant[e.item] ~= nil) == here then table.insert(out, e) end end
+    end
+    part = {}
+  end
+  for _, e in ipairs(list) do
+    if e.heading then Flush(); table.insert(out, e) else table.insert(part, e) end
+  end
+  Flush()
+  return out
+end
+
+local NAME_WIDTH = 160
 function ns.RefreshShopping()
   if not panel then return end
   local house = ns.inv.House()
   local names = house and house.items or {}
   local atAh = AhOpen()
   local shown = 0
+  local rows = Ordered()
   for i, row in ipairs(panel.rows) do
-    local e = list[i]
+    local e = rows[i]
     row.entry = e
-    if e then
+    row.name:SetWidth(NAME_WIDTH)
+    if e and e.heading then                                      -- a line of its own: what comes after what is due now
+      shown = shown + 1
+      row.name:SetWidth(392)
+      row.name:SetText("|cffaaaaaa" .. e.heading .. "|r")
+      row.need:SetText(""); row.status:SetText(""); row.buy:Hide()
+      row:Show()
+    elseif e then
       shown = shown + 1
       e.have = ns.inv.Count(e.item) or e.have or 0
       row.name:SetText((ns.ItemName(e.item, names[e.item])) .. (e.recipe and " (recipe)" or ""))
@@ -532,8 +562,8 @@ function ns.ShoppingBusy()
   if not (panel and panel:IsShown() and AhOpen()) then return false end
   if pending then return true end
   for _, e in ipairs(list) do
-    local k = known[e.item]
-    if e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not bought[e.item] and not (k and k.none) then return true end
+    local k = e.item and known[e.item]
+    if e.item and e.source ~= "vendor" and e.source ~= "catch" and (e.have or 0) < e.units and not bought[e.item] and not (k and k.none) then return true end
   end
   return false
 end
@@ -545,7 +575,7 @@ function ns.OpenShopping()
   local entries = ns.craft and ns.craft.Shopping and ns.craft.Shopping()
   local any = false
   for _, e in ipairs(entries or {}) do
-    if (e.have or 0) < e.units and (merchant and merchant[e.item] or (not merchant and e.source ~= "vendor" and e.source ~= "catch")) then any = true end
+    if e.item and (e.have or 0) < e.units and (merchant and merchant[e.item] or (not merchant and e.source ~= "vendor" and e.source ~= "catch")) then any = true end
   end
   if any then offered = true; ns.ShowShopping(entries) end
 end
